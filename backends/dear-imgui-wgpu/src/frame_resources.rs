@@ -99,11 +99,14 @@ impl FrameResources {
         required_indices: usize,
     ) -> RendererResult<()> {
         if self.index_buffer.is_none() || self.index_buffer_size < required_indices {
-            // Add some extra capacity to avoid frequent reallocations
-            let new_size = (required_indices + 10000).max(self.index_buffer_size * 2);
-
-            // Create new GPU buffer with proper alignment
-            let buffer_size = align_size(new_size * std::mem::size_of::<DrawIdx>(), 4);
+            // Add some extra capacity to avoid frequent reallocations.
+            let new_size = required_indices
+                .saturating_add(10_000)
+                .max(self.index_buffer_size.saturating_mul(2));
+            let buffer_size = new_size
+                .checked_mul(std::mem::size_of::<DrawIdx>())
+                .and_then(|size| size.checked_next_multiple_of(COPY_BUFFER_ALIGNMENT as usize))
+                .ok_or(RendererError::DrawBufferTooLarge { buffer: "index" })?;
             let buffer = device.create_buffer(&BufferDescriptor {
                 label: Some("Dear ImGui Index Buffer"),
                 size: buffer_size as u64,
@@ -111,8 +114,7 @@ impl FrameResources {
                 mapped_at_creation: false,
             });
 
-            // Create new host buffer
-            let host_buffer = vec![0u8; new_size * std::mem::size_of::<DrawIdx>()];
+            let host_buffer = vec![0u8; buffer_size];
 
             self.index_buffer = Some(buffer);
             self.index_buffer_host = Some(host_buffer);
@@ -168,8 +170,10 @@ impl FrameResources {
             RendererError::InvalidRenderState("Index buffer not initialized".to_string())
         })?;
 
-        let required_bytes = std::mem::size_of_val(indices);
-        let aligned_size = align_size(required_bytes, 4);
+        let index_bytes: &[u8] = bytemuck::cast_slice(indices);
+        let aligned_size = index_bytes
+            .len()
+            .next_multiple_of(COPY_BUFFER_ALIGNMENT as usize);
 
         let host_buffer = self.index_buffer_host.as_mut().ok_or_else(|| {
             RendererError::InvalidRenderState("Index host buffer not initialized".to_string())
@@ -180,12 +184,9 @@ impl FrameResources {
             ));
         }
 
-        host_buffer[..aligned_size].fill(0);
-        for (i, &idx) in indices.iter().enumerate() {
-            let bytes = idx.to_ne_bytes();
-            let base = i * std::mem::size_of::<DrawIdx>();
-            host_buffer[base..base + 2].copy_from_slice(&bytes);
-        }
+        let (payload, padding) = host_buffer[..aligned_size].split_at_mut(index_bytes.len());
+        payload.copy_from_slice(index_bytes);
+        padding.fill(0);
 
         // Upload to GPU with proper alignment
         queue.write_buffer(index_buffer, 0, &host_buffer[..aligned_size]);
@@ -245,8 +246,35 @@ impl FrameResourceArena {
 }
 
 #[cfg(test)]
-mod arena_tests {
-    use super::FrameResourceArena;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn index_upload_fills_odd_capacity_with_zeroed_padding() -> RendererResult<()> {
+        let Some((device, queue)) = crate::texture::request_test_device() else {
+            return Ok(());
+        };
+        let mut frame = FrameResources::new();
+        frame.ensure_index_buffer_capacity(&device, 1)?;
+        assert_eq!(frame.index_buffer_size % 2, 1);
+        let mut indices = vec![DrawIdx::MAX; frame.index_buffer_size];
+        indices[1] = 1;
+        frame.index_buffer_host.as_mut().unwrap().fill(0x5a);
+
+        frame.upload_index_data(&queue, &indices)?;
+
+        let host = frame.index_buffer_host.as_deref().unwrap();
+        let expected: &[u8] = bytemuck::cast_slice(&indices);
+        assert_eq!(
+            host.len(),
+            expected
+                .len()
+                .next_multiple_of(COPY_BUFFER_ALIGNMENT as usize)
+        );
+        assert_eq!(&host[..expected.len()], expected);
+        assert!(host[expected.len()..].iter().all(|&byte| byte == 0));
+        Ok(())
+    }
 
     #[test]
     fn frame_arena_never_reuses_upload_resources_across_epochs() {

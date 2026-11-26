@@ -1,21 +1,16 @@
 //! Text and scalar inputs
 //!
-//! Single-line and multi-line text inputs backed by `String` or `ImString`
-//! (zero-copy), plus number input helpers. Builders provide flags and
-//! callback hooks for validation and behavior tweaks.
+//! Single-line and multiline text inputs backed by `String`, plus numeric
+//! inputs. Text input builders provide flags and callback hooks.
 //!
 //! Quick examples:
 //! ```no_run
 //! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
-//! // Text (String)
+//! // Text
 //! let mut s = String::from("hello");
 //! ui.input_text("Name", &mut s).build();
-//!
-//! // Text (ImString, zero-copy)
-//! let mut im = ImString::with_capacity(64);
-//! ui.input_text_imstr("ImString", &mut im).build();
 //!
 //! // Numbers
 //! let mut i = 0i32;
@@ -45,6 +40,6 @@ mod tests;
 mod validation;
 
 pub use callbacks::*;
-pub use multiline::{InputTextMultiline, InputTextMultilineImStr, InputTextMultilineWithCb};
+pub use multiline::{InputTextMultiline, InputTextMultilineWithCb};
 pub use numeric::*;
-pub use single_line::{InputText, InputTextImStr};
+pub use single_line::InputText;

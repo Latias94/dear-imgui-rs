@@ -408,6 +408,7 @@ mod tests {
             clip_origin: super::super::core::GlowClipOrigin::default(),
             has_separate_polygon_modes: false,
             has_sampler_object_support: true,
+            bind_program_pipeline: None,
             gl_context: None,
             context_binding: None,
             backend_user_data: Box::default(),

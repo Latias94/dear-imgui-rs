@@ -653,7 +653,7 @@ pub struct AddOns<'a> {
     #[cfg(feature = "implot")]
     pub(crate) implot: Option<&'a implot::PlotContext>,
     #[cfg(feature = "imnodes")]
-    pub(crate) imnodes: Option<&'a imnodes::Context>,
+    pub(crate) imnodes: Option<&'a imnodes::ImNodesContext>,
     #[cfg(feature = "implot3d")]
     pub(crate) implot3d: Option<&'a implot3d::Plot3DContext>,
     pub(crate) docking: DockingApi<'a>,
@@ -668,7 +668,7 @@ impl<'a> AddOns<'a> {
 
     #[cfg(feature = "imnodes")]
     #[must_use]
-    pub fn imnodes(&self) -> Option<&'a imnodes::Context> {
+    pub fn imnodes(&self) -> Option<&'a imnodes::ImNodesContext> {
         self.imnodes
     }
 

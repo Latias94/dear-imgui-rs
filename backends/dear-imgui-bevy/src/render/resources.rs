@@ -243,7 +243,7 @@ mod prepared_frame_reuse_tests {
 
     #[test]
     fn beginning_preparation_clears_contents_without_discarding_capacity() {
-        let context_id = imgui::SuspendedContext::create().id();
+        let context_id = imgui::Context::create().id();
         let mut prepared = ImguiPreparedRenderFrame::default();
         prepared.data.contexts.reserve(4);
         prepared.data.uniforms_by_context_view.reserve(4);

@@ -3,7 +3,9 @@ use std::rc::Rc;
 
 use crate::sys;
 
-use super::state::{current_context_font_atlas, font_atlas_contains_font, font_atlas_state};
+use super::state::{
+    context_font_atlas, font_atlas_contains_font, font_atlas_state, try_font_atlas_state,
+};
 
 /// A persistent, atlas-validated font handle.
 ///
@@ -52,7 +54,15 @@ impl FontId {
 }
 
 pub(crate) fn validate_font_id_for_current_context(id: FontId, caller: &str) -> *mut sys::ImFont {
-    let atlas = current_context_font_atlas(caller);
+    validate_font_id_for_context(id, unsafe { sys::igGetCurrentContext() }, caller)
+}
+
+pub(crate) fn validate_font_id_for_context(
+    id: FontId,
+    context: *mut sys::ImGuiContext,
+    caller: &str,
+) -> *mut sys::ImFont {
+    let atlas = context_font_atlas(context, caller);
     validate_font_id_for_atlas(id, atlas, caller)
 }
 
@@ -70,11 +80,11 @@ pub(crate) fn validate_font_id_for_atlas(
         std::ptr::addr_eq(id.atlas.cast_const(), atlas.cast_const()),
         "{caller} received a FontId from a different font atlas"
     );
-    let state = font_atlas_state(atlas);
-    assert!(
-        state.stamp == id.atlas_stamp,
-        "{caller} received a FontId from a destroyed or reused font atlas"
-    );
+    let state = try_font_atlas_state(atlas)
+        .filter(|state| state.stamp == id.atlas_stamp)
+        .unwrap_or_else(|| {
+            panic!("{caller} received a FontId from a destroyed or reused font atlas")
+        });
     assert!(
         state.generation == id.generation,
         "{caller} received a stale FontId invalidated by font atlas mutation"

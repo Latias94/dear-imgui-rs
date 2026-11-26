@@ -41,7 +41,19 @@ impl Ui {
         self.run_with_bound_context(|| unsafe {
             match id {
                 Id::Int(i) => sys::igPushID_Int(i),
-                Id::Str(s) => sys::igPushID_Str(self.scratch_txt(s)),
+                Id::Str(s) => {
+                    // Keep the C-string ID sanitization for strings containing NULs.
+                    if s.as_bytes().contains(&0) {
+                        self.with_scratch_buffer(|buf| sys::igPushID_Str(buf.scratch_txt(s)));
+                    } else {
+                        let start = if s.is_empty() {
+                            c"".as_ptr()
+                        } else {
+                            s.as_ptr().cast()
+                        };
+                        sys::igPushID_StrStr(start, start.add(s.len()));
+                    }
+                }
                 Id::Ptr(p) => sys::igPushID_Ptr(p),
             }
         });

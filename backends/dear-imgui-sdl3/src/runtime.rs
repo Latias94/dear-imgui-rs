@@ -582,7 +582,7 @@ mod drop_events;
 mod native_leases;
 mod windows;
 use native_leases::NativeWindowAllocation;
-pub use native_leases::Sdl3NativeWindowLease;
+pub use native_leases::{Sdl3NativeWindowLease, Sdl3SurfaceWindowLease};
 
 pub use windows::{Sdl3WindowRef, Sdl3WindowSnapshot};
 pub(crate) mod window_policy;

@@ -1399,7 +1399,7 @@ impl OwningViewportRuntime {
         let frame = self.control.with_renderer_mut(|renderer| {
             let frame = frame
                 .try_render(renderer.renderer_consumer()?)
-                .map_err(RendererError::from)?;
+                .map_err(|(_frame, error)| RendererError::from(error))?;
             renderer
                 .reconcile_frame(frame)
                 .map_err(WgpuViewportError::from)
@@ -1738,7 +1738,7 @@ impl OwningViewportRuntime {
             .with_renderer_mut(|renderer| {
                 let pending = frame
                     .try_render(renderer.renderer_consumer()?)
-                    .map_err(RendererError::from)?;
+                    .map_err(|(_frame, error)| RendererError::from(error))?;
                 renderer.reconcile_frame(pending).map_err(Into::into)
             })
             .expect("the test's real WGPU renderer must reconcile its managed frame");

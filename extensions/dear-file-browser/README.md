@@ -75,12 +75,14 @@ Use Rust 1.95 or newer and keep all `dear-*` dependencies on the `0.23` release 
 ## Features (Cargo)
 
 - `imgui` (default): enable the in-UI file browser
-- `native-rfd` (default): enable native dialogs via `rfd`
+- `native-rfd` (optional): enable desktop native dialogs via `rfd`
 - `tracing` (default): enable internal tracing spans
 - `thumbnails-image` (optional): enable the PNG/JPEG thumbnail decoder and `imgui`
 
-Default enables both backends; at runtime `Backend::Auto` prefers native and
-falls back to ImGui if not available.
+The default features are `imgui` and `tracing`, including on `wasm32`.
+`Backend::Auto` uses the native backend for standalone `open_*` calls when it is
+enabled. An explicit `Backend::ImGui` returns `ImGuiBackendRequiresUi` from those
+calls. Draw a `FileDialogState` in an ImGui frame to embed the dialog.
 
 ## Quick Start
 
@@ -92,7 +94,8 @@ frame through that renderer. For a complete application, run:
 cargo run -p dear-imgui-examples --bin file_browser_imgui --features file-browser
 ```
 
-Native async dialog (desktop only; add `pollster = "0.4"` to dependencies):
+Native async dialog (desktop only, with `native-rfd` enabled and `pollster = "0.4"`
+in dependencies):
 
 ```rust,no_run
 use dear_file_browser::{Backend, DialogMode, FileDialog};
@@ -213,6 +216,25 @@ let state = FileDialogState::with_blocking_filesystem(
 `BackgroundScanUnsupported` on `wasm32`. Custom `visit_dir` implementations must
 stop when their visitor returns `ScanVisit::Stop`; cancellation is cooperative,
 while generation filtering is the final stale-result guard.
+
+The list and grid clip off-screen rows. Completed projections have a row index,
+and selection resolves native paths by ID without scanning the listing for each
+selected entry. While scanning, the browser traverses the partial ordered index
+to reach the clipped slice without rebuilding a complete row index for each batch.
+Filter setters return an error for malformed regular expressions and leave the
+previous filters intact. A glob `?` matches one Unicode scalar.
+
+With the native background filesystem, Paste and Delete each run on a worker,
+with at most one active transfer or deletion per dialog. Paste conflicts are
+resolved in the UI before continuing. Non-`Send` and browser filesystems keep
+these operations on the caller's thread. Cancellation is cooperative. Closing or
+dropping a dialog does not join workers, but an already-started file operation
+may still finish its current filesystem call or cleanup. On Windows, mounted
+drive letters appear after a background probe and do not imply reachability.
+
+The address bar, bookmarks, and file actions use original paths while displaying
+Unicode labels. Windows drive and UNC labels omit their verbatim prefix without
+modifying the path passed to the filesystem.
 
 ### Reopen Semantics (IGFD-style Open/Display/Close)
 
@@ -522,9 +544,12 @@ state
 
 `dear-file-browser` provides a renderer-agnostic thumbnail request queue and LRU cache. There are two integration styles:
 
-1) Manual: decode/upload in your app, then call `fulfill_request()` and queue evicted IDs for retirement. Preserve their renderer mappings until the current frame is consumed/recorded; release GPU resources only when the relevant draws permit it.
-2) Backend-driven: implement `ThumbnailProvider` + `ThumbnailRenderer`, pass a `ThumbnailBackend` to the UI, and the UI
-   will call `maintain()` each frame.
+1) Manual: decode in your app, upload completed images, then call `fulfill_request()`.
+   Preserve evicted texture mappings until the current frame is consumed/recorded and
+   release GPU resources only when the relevant draws permit it.
+2) Backend-driven (native): start a `ThumbnailDecoder` once and pass it with a
+   `ThumbnailRenderer` to the UI each frame. Decode runs on two workers, and
+   uploads and retirement requests stay on the drawing thread.
 
 ```rust
 use dear_imgui_rs::texture::TextureId;
@@ -537,7 +562,7 @@ state.ui.config.thumbnail_size = [48.0, 48.0];
 // Manual integration (per-frame, after drawing the dialog):
 let requests: Vec<ThumbnailRequest> = state.ui.thumbnails.take_requests();
 for req in &requests {
-    // 1) decode req.path into pixels (RGBA8), 2) upload to GPU, 3) get a TextureId
+    // In a real host, complete this request when your decoder and renderer have a result.
     let tex: TextureId = TextureId::new(0); // placeholder
     state.ui.thumbnails.fulfill_request(req, Ok(tex));
 }
@@ -557,10 +582,14 @@ then unregister them only after the renderer consumes/records the current frame.
 Retaining a GPU allocation while removing its ID mapping earlier is insufficient.
 
 ```rust
-use dear_file_browser::{ThumbnailBackend, ThumbnailProvider, ThumbnailRenderer};
+use dear_file_browser::{ImageThumbnailProvider, ThumbnailBackend, ThumbnailDecoder};
 
+// Once at startup, with the thumbnails-image feature:
+let decoder = ThumbnailDecoder::spawn(ImageThumbnailProvider::default)?;
+
+// Each frame:
 let mut backend = ThumbnailBackend {
-    provider: &mut my_provider,
+    decoder: &decoder,
     renderer: &mut my_renderer,
 };
 
@@ -572,27 +601,28 @@ let _ = ui
 
 Optional decoder (`thumbnails-image` feature):
 
-```rust
-// Cargo.toml:
-// dear-file-browser = { version = "0.23", features = ["thumbnails-image"] }
+The built-in provider accepts `.png`, `.jpg`, and `.jpeg` extensions regardless of case.
+It rejects input files larger than 32 MiB by default and limits decoded dimensions
+and pixel bytes separately. Set `ImageThumbnailProvider::max_bytes` to change the
+encoded file size limit.
 
-use dear_file_browser::ImageThumbnailProvider;
-
-let mut provider = ImageThumbnailProvider::default();
-// Still required: a `ThumbnailRenderer` implementation for your graphics backend.
-```
+The completed cache holds ready and failed entries in one bounded `lru::LruCache`.
+Hits and single-entry eviction take expected constant time without shifting an
+ordered array or adding another queue node per hit. Each cache tracks up to 16
+pending requests. Cached failures are not retried until evicted or invalidated
+with `ThumbnailCache::invalidate`.
 
 ## WASM
 
-- The path-based `native-rfd` adapter is desktop-only. Its `Selection` stores
+- The opt-in, path-based `native-rfd` adapter is desktop-only. Its `Selection` stores
   `PathBuf` values, while browser `rfd` pickers return file handles without host
-  paths. For the in-UI browser, enable `imgui` on `dear-file-browser` and `wasm`
-  on its matching core dependency. Build the application and provider together
+  paths. The default ImGui backend enables the core's WASM imports on
+  `wasm32-unknown-unknown`. Build the application and provider together
   as described in the [browser runtime setup](../../docs/WASM.md#runtime-model).
 
   ```toml
   [dependencies]
-  dear-file-browser = { version = "0.23", default-features = false, features = ["imgui"] }
+  dear-file-browser = "0.24"
   dear-imgui-rs = { version = "0.23", features = ["wasm"] }
   ```
 
@@ -606,6 +636,8 @@ let mut provider = ImageThumbnailProvider::default();
 - Background scanning is native-only. Selecting `ScanPolicy::Background` on
   wasm32 returns `FileDialogError::BackgroundScanUnsupported`; it is never
   silently downgraded and never creates a pseudo-worker.
+- `ThumbnailDecoder` is native-only. Browser applications may use the manual
+  thumbnail queue with their own decoder instead.
 
 A custom blocking JavaScript or virtual-filesystem adapter is supported. Implement
 `FileSystem`, then pass it to `FileDialogState::with_blocking_filesystem`. The
@@ -631,9 +663,11 @@ Return directory enumeration errors from `visit_dir` so a partial listing cannot
 
 Implement `inspect_entry` when your backend supports links or cross-device moves. It must describe the named entry itself and provide a size or modification timestamp for files that will be removed after copying. Return `ErrorKind::CrossesDevices` when a rename crosses filesystems.
 
-If other writers can change your filesystem during a paste, implement `rename_noreplace` with an atomic destination check and return a stable object ID from `inspect_move_source`. The defaults support single-writer adapters. The native backend uses exclusive rename on Windows, Linux, Android and Apple platforms. After installing a cross-device move, the browser claims each source entry in a temporary directory on the source volume. It checks the claimed object's volume and file ID on Windows or device and inode on Unix before deleting it. If a changed entry cannot be restored because the original name has been reused, the error reports its recovery path.
+If other writers can change your filesystem during a paste, implement `rename_noreplace` with an atomic destination check and return a stable object ID from `inspect_move_source`. The defaults support single-writer adapters. The native backend uses exclusive rename on Windows, Linux, Android and Apple platforms. When exclusive rename is unavailable on Unix, the operation fails instead of checking the destination and then using a rename that can replace it.
 
-A paste with overwrite replaces the selected destination file or directory. If installation fails and a new entry prevents rollback, the error gives the recovery path for the previous destination. A same-filesystem rename can move a link directly. Recursive copies stop on symbolic links. If another process creates a file during a cross-device move, it stays in the source directory and the browser reports the incomplete cleanup. Cancelling a batch at a conflict keeps the unprocessed cut items on the clipboard. Copying within the same directory creates a sibling with a ` (copy)` suffix before the extensions.
+After installing a cross-device move, the browser claims each source entry in a temporary directory on the source volume. It checks the claimed object's volume and file ID on Windows or device and inode on Unix before deleting it. If a changed entry cannot be restored because the original name has been reused, the error reports its recovery path.
+
+A paste with overwrite replaces the selected destination file or directory. If installation fails and a new entry prevents rollback, the error gives the recovery path for the previous destination. A same-filesystem rename can move a link directly. Recursive copies stop on symbolic links and Windows directory reparse points (including junctions). Deleting a junction removes the link, not the directory it points to. If another process creates a file during a cross-device move, it stays in the source directory and the browser reports the incomplete cleanup. Cancelling a batch at a conflict keeps the unprocessed cut items on the clipboard. Copying within the same directory creates a sibling with a ` (copy)` suffix before the extensions.
 
 ## Fonts (CJK/Emoji)
 

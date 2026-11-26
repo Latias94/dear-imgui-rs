@@ -69,7 +69,7 @@ These examples combine UI with application-owned state, GPU resources, threads, 
 | `wgpu_texture_inspector` | Depth, object-ID and HDR GPU previews; layers/mips and stable registration replacement | Optional `texture-inspector-multi-viewport` | `cargo run -p dear-imgui-examples --bin wgpu_texture_inspector` | WGPU adapter with compute support | Run the readback and native checks below |
 | `console_log` | Filterable console | Default | `cargo run -p dear-imgui-examples --bin console_log` | Desktop GPU | `game_engine_showcase` |
 | `asset_browser_grid` | Asset grid | Default | `cargo run -p dear-imgui-examples --bin asset_browser_grid` | OpenGL driver; bundled image assets | `game_engine_showcase` |
-| `file_dialog_native` | Native file dialog | `file-browser` | `cargo run -p dear-imgui-examples --bin file_dialog_native --features file-browser` | OpenGL driver; OS file dialogs | `file_browser_imgui` |
+| `file_dialog_native` | Native file dialog | `file-browser-native` | `cargo run -p dear-imgui-examples --bin file_dialog_native --features file-browser-native` | OpenGL driver; OS file dialogs | `file_browser_imgui` |
 | `file_browser_imgui` | In-UI file browser | `file-browser` | `cargo run -p dear-imgui-examples --bin file_browser_imgui --features file-browser` | OpenGL driver; desktop file system | File Browser crate README |
 | `ime_debug` | IME diagnostics | Default | `cargo run -p dear-imgui-examples --bin ime_debug` | OS input method; optional CJK font below | Winit backend README |
 | `threaded_snapshot_minimal` | Render-thread handoff | Default | `cargo run -p dear-imgui-examples --bin threaded_snapshot_minimal` | Terminal; completes without a window or GPU | Custom renderer contract |

@@ -147,7 +147,6 @@ fn managed_images_resolve_only_in_the_owner_context_and_generation() {
         });
     }
     let _ = owner.render_legacy();
-    let suspended_owner = owner.suspend_or_panic();
 
     let mut foreign = imgui::Context::create();
     prepare_context(&mut foreign);
@@ -158,9 +157,6 @@ fn managed_images_resolve_only_in_the_owner_context_and_generation() {
     assert!(foreign_result.is_err());
     drop(foreign);
 
-    let mut owner = suspended_owner
-        .activate()
-        .unwrap_or_else(|_| panic!("owner Context should reactivate"));
     owner
         .remove_texture(texture)
         .expect("texture without a renderer binding retires immediately");

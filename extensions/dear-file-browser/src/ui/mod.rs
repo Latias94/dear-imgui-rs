@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use crate::core::{DialogMode, FileDialogError, LayoutStyle, Selection};
 use crate::custom_pane::{CustomPane, CustomPaneCtx};
 use crate::dialog_core::{ConfirmGate, CoreEvent};
@@ -14,7 +12,7 @@ mod file_table;
 mod footer;
 mod header;
 mod igfd_path_popup;
-mod ops;
+pub(crate) mod ops;
 mod path_bar;
 mod places;
 mod popups;
@@ -287,8 +285,8 @@ fn resolve_host_size_constraints(
 fn draw_contents_with_hooks(
     ui: &Ui,
     state: &mut FileDialogState,
-    mut custom_pane: Option<&mut dyn CustomPane>,
-    mut thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
+    custom_pane: Option<&mut dyn CustomPane>,
+    thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
 ) -> Option<Result<Selection, FileDialogError>> {
     if !state.ui.visible {
         return None;
@@ -303,6 +301,9 @@ fn draw_contents_with_hooks(
     let mut request_confirm = false;
     let mut confirm_gate = ConfirmGate::default();
 
+    state.ui.thumbnails.advance_frame();
+    state.core.places.poll_system_places();
+    ops::poll_file_operation(state);
     header::draw_chrome(ui, state, has_thumbnail_backend);
 
     // Content region
@@ -314,463 +315,24 @@ fn draw_contents_with_hooks(
         .height_last
         .max(footer::estimate_footer_height(ui, state));
     let content_h = (avail[1] - footer_h).max(0.0);
-    match state.ui.config.layout {
-        LayoutStyle::Standard => {
-            if state.ui.config.places_pane_shown {
-                const MIN_PLACES_W: f32 = 120.0;
-                const MIN_FILE_LIST_W: f32 = 180.0;
-
-                let splitter_w = splitter_width(ui);
-                let spacing_x = ui.clone_style().item_spacing()[0];
-                let max_places_w =
-                    (avail[0] - MIN_FILE_LIST_W - splitter_w - spacing_x * 2.0).max(0.0);
-                let mut places_w = state.ui.config.places_pane_width.clamp(0.0, max_places_w);
-                if max_places_w >= MIN_PLACES_W {
-                    places_w = places_w.clamp(MIN_PLACES_W, max_places_w);
-                }
-                let file_w = (avail[0] - places_w - splitter_w - spacing_x * 2.0).max(0.0);
-
-                let mut new_cwd: Option<PathBuf> = None;
-                ui.child_window("places_pane")
-                    .size([places_w, content_h])
-                    .border(true)
-                    .build(ui, || {
-                        new_cwd = places::draw_places_pane(ui, state);
-                    });
-                if let Some(p) = new_cwd {
-                    let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
-                }
-
-                ui.same_line();
-                ui.invisible_button("places_pane_splitter", [splitter_w, content_h]);
-                if ui.is_item_hovered() || ui.is_item_active() {
-                    ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
-                }
-                if ui.is_item_active() {
-                    let dx = ui.io().mouse_delta()[0];
-                    let new_w = (places_w + dx).clamp(0.0, max_places_w);
-                    state.ui.config.places_pane_width = if max_places_w >= MIN_PLACES_W {
-                        new_w.clamp(MIN_PLACES_W, max_places_w)
-                    } else {
-                        new_w
-                    };
-                }
-
-                ui.same_line();
-                ui.child_window("file_list")
-                    .size([file_w, content_h])
-                    .build(ui, || {
-                        let inner = ui.content_region_avail();
-                        let show_pane = state.ui.config.custom_pane_enabled
-                            && custom_pane.as_deref_mut().is_some();
-                        if !show_pane {
-                            file_table::draw_file_table(
-                                ui,
-                                state,
-                                [inner[0], inner[1]],
-                                &mut request_confirm,
-                                thumbnails_backend.as_deref_mut(),
-                            );
-                            return;
-                        }
-
-                        match state.ui.config.custom_pane_dock {
-                            CustomPaneDock::Bottom => {
-                                let style = ui.clone_style();
-                                let sep_h = style.item_spacing()[1] * 2.0 + 1.0;
-                                let pane_h = state
-                                    .ui
-                                    .config
-                                    .custom_pane_height
-                                    .clamp(0.0, inner[1].max(0.0));
-                                let mut table_h = inner[1];
-                                if pane_h > 0.0 {
-                                    table_h = (table_h - pane_h - sep_h).max(0.0);
-                                }
-
-                                file_table::draw_file_table(
-                                    ui,
-                                    state,
-                                    [inner[0], table_h],
-                                    &mut request_confirm,
-                                    thumbnails_backend.as_deref_mut(),
-                                );
-
-                                if let Some(pane) = custom_pane.as_deref_mut() {
-                                    if state.ui.config.custom_pane_enabled && pane_h > 0.0 {
-                                        ui.separator();
-                                        ui.child_window("custom_pane")
-                                            .size([inner[0], pane_h])
-                                            .border(true)
-                                            .build(ui, || {
-                                                let selected_entry_ids =
-                                                    state.core.selected_entry_ids();
-                                                let selected_paths =
-                                                    ops::selected_entry_paths_from_ids(state);
-                                                let (selected_files_count, selected_dirs_count) =
-                                                    ops::selected_entry_counts_from_ids(state);
-                                                let ctx = CustomPaneCtx {
-                                                    mode: state.core.mode,
-                                                    cwd: &state.core.cwd,
-                                                    selected_entry_ids: &selected_entry_ids,
-                                                    selected_paths: &selected_paths,
-                                                    selected_files_count,
-                                                    selected_dirs_count,
-                                                    save_name: &state.core.save_name,
-                                                    active_filter: state.core.active_filter(),
-                                                };
-                                                confirm_gate = pane.draw(ui, ctx);
-                                            });
-                                    }
-                                }
-                            }
-                            CustomPaneDock::Right => {
-                                const MIN_TABLE_W: f32 = 120.0;
-                                const MIN_PANE_W: f32 = 120.0;
-
-                                let splitter_w = splitter_width(ui);
-                                let max_pane_w = (inner[0] - MIN_TABLE_W - splitter_w).max(0.0);
-                                let mut pane_w =
-                                    state.ui.config.custom_pane_width.clamp(0.0, max_pane_w);
-                                if max_pane_w >= MIN_PANE_W {
-                                    pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
-                                }
-
-                                let table_w = (inner[0] - pane_w - splitter_w).max(0.0);
-
-                                ui.child_window("file_table_rightdock")
-                                    .size([table_w, inner[1]])
-                                    .build(ui, || {
-                                        file_table::draw_file_table(
-                                            ui,
-                                            state,
-                                            [table_w, inner[1]],
-                                            &mut request_confirm,
-                                            thumbnails_backend.as_deref_mut(),
-                                        );
-                                    });
-
-                                ui.same_line();
-                                ui.invisible_button("custom_pane_splitter", [splitter_w, inner[1]]);
-                                if ui.is_item_hovered() || ui.is_item_active() {
-                                    ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
-                                }
-                                if ui.is_item_active() {
-                                    let dx = ui.io().mouse_delta()[0];
-                                    let new_w = (pane_w - dx).clamp(0.0, max_pane_w);
-                                    state.ui.config.custom_pane_width = if max_pane_w >= MIN_PANE_W
-                                    {
-                                        new_w.clamp(MIN_PANE_W, max_pane_w)
-                                    } else {
-                                        new_w
-                                    };
-                                }
-
-                                ui.same_line();
-                                ui.child_window("custom_pane_rightdock")
-                                    .size([pane_w, inner[1]])
-                                    .border(true)
-                                    .build(ui, || {
-                                        if let Some(pane) = custom_pane.as_deref_mut() {
-                                            let selected_entry_ids =
-                                                state.core.selected_entry_ids();
-                                            let selected_paths =
-                                                ops::selected_entry_paths_from_ids(state);
-                                            let (selected_files_count, selected_dirs_count) =
-                                                ops::selected_entry_counts_from_ids(state);
-                                            let ctx = CustomPaneCtx {
-                                                mode: state.core.mode,
-                                                cwd: &state.core.cwd,
-                                                selected_entry_ids: &selected_entry_ids,
-                                                selected_paths: &selected_paths,
-                                                selected_files_count,
-                                                selected_dirs_count,
-                                                save_name: &state.core.save_name,
-                                                active_filter: state.core.active_filter(),
-                                            };
-                                            confirm_gate = pane.draw(ui, ctx);
-                                        }
-                                    });
-                            }
-                        }
-                    });
-            } else {
-                ui.child_window("file_list")
-                    .size([avail[0], content_h])
-                    .build(ui, || {
-                        let inner = ui.content_region_avail();
-                        let show_pane = state.ui.config.custom_pane_enabled
-                            && custom_pane.as_deref_mut().is_some();
-                        if !show_pane {
-                            file_table::draw_file_table(
-                                ui,
-                                state,
-                                [inner[0], inner[1]],
-                                &mut request_confirm,
-                                thumbnails_backend.as_deref_mut(),
-                            );
-                            return;
-                        }
-
-                        match state.ui.config.custom_pane_dock {
-                            CustomPaneDock::Bottom => {
-                                let style = ui.clone_style();
-                                let sep_h = style.item_spacing()[1] * 2.0 + 1.0;
-                                let pane_h = state
-                                    .ui
-                                    .config
-                                    .custom_pane_height
-                                    .clamp(0.0, inner[1].max(0.0));
-                                let mut table_h = inner[1];
-                                if pane_h > 0.0 {
-                                    table_h = (table_h - pane_h - sep_h).max(0.0);
-                                }
-
-                                file_table::draw_file_table(
-                                    ui,
-                                    state,
-                                    [inner[0], table_h],
-                                    &mut request_confirm,
-                                    thumbnails_backend.as_deref_mut(),
-                                );
-
-                                if let Some(pane) = custom_pane.as_deref_mut() {
-                                    if state.ui.config.custom_pane_enabled && pane_h > 0.0 {
-                                        ui.separator();
-                                        ui.child_window("custom_pane")
-                                            .size([inner[0], pane_h])
-                                            .border(true)
-                                            .build(ui, || {
-                                                let selected_entry_ids =
-                                                    state.core.selected_entry_ids();
-                                                let selected_paths =
-                                                    ops::selected_entry_paths_from_ids(state);
-                                                let (selected_files_count, selected_dirs_count) =
-                                                    ops::selected_entry_counts_from_ids(state);
-                                                let ctx = CustomPaneCtx {
-                                                    mode: state.core.mode,
-                                                    cwd: &state.core.cwd,
-                                                    selected_entry_ids: &selected_entry_ids,
-                                                    selected_paths: &selected_paths,
-                                                    selected_files_count,
-                                                    selected_dirs_count,
-                                                    save_name: &state.core.save_name,
-                                                    active_filter: state.core.active_filter(),
-                                                };
-                                                confirm_gate = pane.draw(ui, ctx);
-                                            });
-                                    }
-                                }
-                            }
-                            CustomPaneDock::Right => {
-                                const MIN_TABLE_W: f32 = 120.0;
-                                const MIN_PANE_W: f32 = 120.0;
-
-                                let splitter_w = splitter_width(ui);
-                                let max_pane_w = (inner[0] - MIN_TABLE_W - splitter_w).max(0.0);
-                                let mut pane_w =
-                                    state.ui.config.custom_pane_width.clamp(0.0, max_pane_w);
-                                if max_pane_w >= MIN_PANE_W {
-                                    pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
-                                }
-
-                                let table_w = (inner[0] - pane_w - splitter_w).max(0.0);
-
-                                ui.child_window("file_table_rightdock")
-                                    .size([table_w, inner[1]])
-                                    .build(ui, || {
-                                        file_table::draw_file_table(
-                                            ui,
-                                            state,
-                                            [table_w, inner[1]],
-                                            &mut request_confirm,
-                                            thumbnails_backend.as_deref_mut(),
-                                        );
-                                    });
-
-                                ui.same_line();
-                                ui.invisible_button("custom_pane_splitter", [splitter_w, inner[1]]);
-                                if ui.is_item_hovered() || ui.is_item_active() {
-                                    ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
-                                }
-                                if ui.is_item_active() {
-                                    let dx = ui.io().mouse_delta()[0];
-                                    let new_w = (pane_w - dx).clamp(0.0, max_pane_w);
-                                    state.ui.config.custom_pane_width = if max_pane_w >= MIN_PANE_W
-                                    {
-                                        new_w.clamp(MIN_PANE_W, max_pane_w)
-                                    } else {
-                                        new_w
-                                    };
-                                }
-
-                                ui.same_line();
-                                ui.child_window("custom_pane_rightdock")
-                                    .size([pane_w, inner[1]])
-                                    .border(true)
-                                    .build(ui, || {
-                                        if let Some(pane) = custom_pane.as_deref_mut() {
-                                            let selected_entry_ids =
-                                                state.core.selected_entry_ids();
-                                            let selected_paths =
-                                                ops::selected_entry_paths_from_ids(state);
-                                            let (selected_files_count, selected_dirs_count) =
-                                                ops::selected_entry_counts_from_ids(state);
-                                            let ctx = CustomPaneCtx {
-                                                mode: state.core.mode,
-                                                cwd: &state.core.cwd,
-                                                selected_entry_ids: &selected_entry_ids,
-                                                selected_paths: &selected_paths,
-                                                selected_files_count,
-                                                selected_dirs_count,
-                                                save_name: &state.core.save_name,
-                                                active_filter: state.core.active_filter(),
-                                            };
-                                            confirm_gate = pane.draw(ui, ctx);
-                                        }
-                                    });
-                            }
-                        }
-                    });
-            }
-        }
-        LayoutStyle::Minimal => {
-            ui.child_window("file_list_min")
-                .size([avail[0], content_h])
-                .build(ui, || {
-                    let inner = ui.content_region_avail();
-                    let show_pane =
-                        state.ui.config.custom_pane_enabled && custom_pane.as_deref_mut().is_some();
-                    if !show_pane {
-                        file_table::draw_file_table(
-                            ui,
-                            state,
-                            [inner[0], inner[1]],
-                            &mut request_confirm,
-                            thumbnails_backend.as_deref_mut(),
-                        );
-                        return;
-                    }
-
-                    match state.ui.config.custom_pane_dock {
-                        CustomPaneDock::Bottom => {
-                            let style = ui.clone_style();
-                            let sep_h = style.item_spacing()[1] * 2.0 + 1.0;
-                            let pane_h = state
-                                .ui
-                                .config
-                                .custom_pane_height
-                                .clamp(0.0, inner[1].max(0.0));
-                            let mut table_h = inner[1];
-                            if pane_h > 0.0 {
-                                table_h = (table_h - pane_h - sep_h).max(0.0);
-                            }
-
-                            file_table::draw_file_table(
-                                ui,
-                                state,
-                                [inner[0], table_h],
-                                &mut request_confirm,
-                                thumbnails_backend.as_deref_mut(),
-                            );
-
-                            if let Some(pane) = custom_pane.as_deref_mut() {
-                                if state.ui.config.custom_pane_enabled && pane_h > 0.0 {
-                                    ui.separator();
-                                    ui.child_window("custom_pane")
-                                        .size([inner[0], pane_h])
-                                        .border(true)
-                                        .build(ui, || {
-                                            let selected_entry_ids =
-                                                state.core.selected_entry_ids();
-                                            let selected_paths =
-                                                ops::selected_entry_paths_from_ids(state);
-                                            let (selected_files_count, selected_dirs_count) =
-                                                ops::selected_entry_counts_from_ids(state);
-                                            let ctx = CustomPaneCtx {
-                                                mode: state.core.mode,
-                                                cwd: &state.core.cwd,
-                                                selected_entry_ids: &selected_entry_ids,
-                                                selected_paths: &selected_paths,
-                                                selected_files_count,
-                                                selected_dirs_count,
-                                                save_name: &state.core.save_name,
-                                                active_filter: state.core.active_filter(),
-                                            };
-                                            confirm_gate = pane.draw(ui, ctx);
-                                        });
-                                }
-                            }
-                        }
-                        CustomPaneDock::Right => {
-                            const MIN_TABLE_W: f32 = 120.0;
-                            const MIN_PANE_W: f32 = 120.0;
-
-                            let splitter_w = splitter_width(ui);
-                            let max_pane_w = (inner[0] - MIN_TABLE_W - splitter_w).max(0.0);
-                            let mut pane_w =
-                                state.ui.config.custom_pane_width.clamp(0.0, max_pane_w);
-                            if max_pane_w >= MIN_PANE_W {
-                                pane_w = pane_w.clamp(MIN_PANE_W, max_pane_w);
-                            }
-
-                            let table_w = (inner[0] - pane_w - splitter_w).max(0.0);
-
-                            ui.child_window("file_table_rightdock")
-                                .size([table_w, inner[1]])
-                                .build(ui, || {
-                                    file_table::draw_file_table(
-                                        ui,
-                                        state,
-                                        [table_w, inner[1]],
-                                        &mut request_confirm,
-                                        thumbnails_backend.as_deref_mut(),
-                                    );
-                                });
-
-                            ui.same_line();
-                            ui.invisible_button("custom_pane_splitter", [splitter_w, inner[1]]);
-                            if ui.is_item_hovered() || ui.is_item_active() {
-                                ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
-                            }
-                            if ui.is_item_active() {
-                                let dx = ui.io().mouse_delta()[0];
-                                let new_w = (pane_w - dx).clamp(0.0, max_pane_w);
-                                state.ui.config.custom_pane_width = if max_pane_w >= MIN_PANE_W {
-                                    new_w.clamp(MIN_PANE_W, max_pane_w)
-                                } else {
-                                    new_w
-                                };
-                            }
-
-                            ui.same_line();
-                            ui.child_window("custom_pane_rightdock")
-                                .size([pane_w, inner[1]])
-                                .border(true)
-                                .build(ui, || {
-                                    if let Some(pane) = custom_pane.as_deref_mut() {
-                                        let selected_entry_ids = state.core.selected_entry_ids();
-                                        let selected_paths =
-                                            ops::selected_entry_paths_from_ids(state);
-                                        let (selected_files_count, selected_dirs_count) =
-                                            ops::selected_entry_counts_from_ids(state);
-                                        let ctx = CustomPaneCtx {
-                                            mode: state.core.mode,
-                                            cwd: &state.core.cwd,
-                                            selected_entry_ids: &selected_entry_ids,
-                                            selected_paths: &selected_paths,
-                                            selected_files_count,
-                                            selected_dirs_count,
-                                            save_name: &state.core.save_name,
-                                            active_filter: state.core.active_filter(),
-                                        };
-                                        confirm_gate = pane.draw(ui, ctx);
-                                    }
-                                });
-                        }
-                    }
-                });
-        }
+    let width = draw_places_split(ui, state, [avail[0], content_h]);
+    let child_id = match state.ui.config.layout {
+        LayoutStyle::Standard => "file_list",
+        LayoutStyle::Minimal => "file_list_min",
+    };
+    ui.child_window(child_id)
+        .size([width, content_h])
+        .build(ui, || {
+            confirm_gate = draw_file_list_and_pane(
+                ui,
+                state,
+                custom_pane,
+                has_thumbnail_backend,
+                &mut request_confirm,
+            );
+        });
+    if let Some(backend) = thumbnails_backend {
+        state.ui.thumbnails.maintain(backend);
     }
 
     // IGFD-style quick path selection popup (opened from breadcrumb separators).
@@ -796,6 +358,142 @@ fn draw_contents_with_hooks(
         state.close();
     }
     out
+}
+
+fn draw_places_split(ui: &Ui, state: &mut FileDialogState, [width, height]: [f32; 2]) -> f32 {
+    if state.ui.config.layout != LayoutStyle::Standard || !state.ui.config.places_pane_shown {
+        return width;
+    }
+
+    let splitter = splitter_width(ui);
+    let gap = splitter + ui.clone_style().item_spacing()[0] * 2.0;
+    let max_places = (width - 180.0 - gap).max(0.0);
+    let min_places = if max_places >= 120.0 { 120.0 } else { 0.0 };
+    let places_width = state
+        .ui
+        .config
+        .places_pane_width
+        .clamp(min_places, max_places);
+    let mut destination = None;
+    ui.child_window("places_pane")
+        .size([places_width, height])
+        .border(true)
+        .build(ui, || destination = places::draw_places_pane(ui, state));
+    if let Some(path) = destination {
+        let _ = state.core.handle_event(CoreEvent::NavigateTo(path));
+    }
+
+    if let Some(delta) = draw_horizontal_splitter(ui, "places_pane_splitter", [splitter, height]) {
+        state.ui.config.places_pane_width = (places_width + delta).clamp(min_places, max_places);
+    }
+    (width - places_width - gap).max(0.0)
+}
+
+fn draw_file_list_and_pane(
+    ui: &Ui,
+    state: &mut FileDialogState,
+    pane: Option<&mut dyn CustomPane>,
+    has_thumbnail_backend: bool,
+    request_confirm: &mut bool,
+) -> ConfirmGate {
+    let [width, height] = ui.content_region_avail();
+    let Some(pane) = pane.filter(|_| state.ui.config.custom_pane_enabled) else {
+        file_table::draw_file_table(
+            ui,
+            state,
+            [width, height],
+            request_confirm,
+            has_thumbnail_backend,
+        );
+        return ConfirmGate::default();
+    };
+
+    let (pane_id, pane_size) = match state.ui.config.custom_pane_dock {
+        CustomPaneDock::Bottom => {
+            let pane_height = state
+                .ui
+                .config
+                .custom_pane_height
+                .clamp(0.0, height.max(0.0));
+            let table_height = if pane_height > 0.0 {
+                let separator = ui.clone_style().item_spacing()[1] * 2.0 + 1.0;
+                (height - pane_height - separator).max(0.0)
+            } else {
+                height
+            };
+            file_table::draw_file_table(
+                ui,
+                state,
+                [width, table_height],
+                request_confirm,
+                has_thumbnail_backend,
+            );
+            if pane_height == 0.0 {
+                return ConfirmGate::default();
+            }
+            ui.separator();
+            ("custom_pane", [width, pane_height])
+        }
+        CustomPaneDock::Right => {
+            let splitter = splitter_width(ui);
+            let max_pane = (width - 120.0 - splitter).max(0.0);
+            let min_pane = if max_pane >= 120.0 { 120.0 } else { 0.0 };
+            let pane_width = state.ui.config.custom_pane_width.clamp(min_pane, max_pane);
+            let table_width = (width - pane_width - splitter).max(0.0);
+            ui.child_window("file_table_rightdock")
+                .size([table_width, height])
+                .build(ui, || {
+                    file_table::draw_file_table(
+                        ui,
+                        state,
+                        [table_width, height],
+                        request_confirm,
+                        has_thumbnail_backend,
+                    );
+                });
+            if let Some(delta) =
+                draw_horizontal_splitter(ui, "custom_pane_splitter", [splitter, height])
+            {
+                state.ui.config.custom_pane_width = (pane_width - delta).clamp(min_pane, max_pane);
+            }
+            ("custom_pane_rightdock", [pane_width, height])
+        }
+    };
+
+    let mut gate = ConfirmGate::default();
+    ui.child_window(pane_id)
+        .size(pane_size)
+        .border(true)
+        .build(ui, || {
+            let selected_entry_ids = state.core.selected_entry_ids();
+            let selected_paths = state.core.selected_entry_paths();
+            let (selected_files_count, selected_dirs_count) = state.core.selected_entry_counts();
+            gate = pane.draw(
+                ui,
+                CustomPaneCtx {
+                    mode: state.core.mode,
+                    cwd: &state.core.cwd,
+                    selected_entry_ids: &selected_entry_ids,
+                    selected_paths: &selected_paths,
+                    selected_files_count,
+                    selected_dirs_count,
+                    save_name: &state.core.save_name,
+                    active_filter: state.core.active_filter(),
+                },
+            );
+        });
+    gate
+}
+
+fn draw_horizontal_splitter(ui: &Ui, id: &str, size: [f32; 2]) -> Option<f32> {
+    ui.same_line();
+    ui.invisible_button(id, size);
+    let active = ui.is_item_active();
+    if active || ui.is_item_hovered() {
+        ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
+    }
+    ui.same_line();
+    active.then(|| ui.io().mouse_delta()[0])
 }
 
 fn splitter_width(ui: &Ui) -> f32 {
@@ -1041,6 +739,76 @@ mod tests {
             modified: None,
         }
     }
+
+    #[test]
+    fn list_and_grid_draw_only_clipped_rows_and_include_the_reveal_target() {
+        use dear_imgui_rs::{Condition, Context};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        };
+
+        let mut context = Context::create();
+        context.set_ini_filename(None::<String>).unwrap();
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        context.io_mut().set_display_size([640.0, 480.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        let entries: Vec<_> = (0..2_000)
+            .map(|index| file_entry(&format!("/virtual/file-{index:04}.txt")))
+            .collect();
+        let reveal = EntryId::from_path(&entries.last().unwrap().path);
+        let target_drawn = Arc::new(AtomicBool::new(false));
+        let draws = Arc::new(AtomicUsize::new(0));
+        let mut state = FileDialogState::with_blocking_filesystem(
+            DialogMode::OpenFile,
+            Box::new(UiTestFs { entries }),
+        );
+        state.core.set_cwd(PathBuf::from("/virtual"));
+        let callback_draws = Arc::clone(&draws);
+        let callback_target = Arc::clone(&target_drawn);
+        state
+            .ui
+            .config
+            .file_styles
+            .set_callback(crate::FileStyleCallback::new(move |name, _| {
+                callback_draws.fetch_add(1, Ordering::Relaxed);
+                if name == "file-1999.txt" {
+                    callback_target.store(true, Ordering::Relaxed);
+                }
+                None
+            }));
+
+        for view in [FileListViewMode::List, FileListViewMode::Grid] {
+            state.ui.config.file_list_view = view;
+            state.ui.operations.reveal_id_next = Some(reveal);
+            target_drawn.store(false, Ordering::Relaxed);
+            draws.store(0, Ordering::Relaxed);
+            let frame = context.begin_frame();
+            let ui = frame.ui();
+            ui.window("File view clipping regression")
+                .position([0.0, 0.0], Condition::Always)
+                .size([400.0, 300.0], Condition::Always)
+                .build(|| {
+                    super::file_table::draw_file_table(
+                        ui,
+                        &mut state,
+                        [380.0, 210.0],
+                        &mut false,
+                        false,
+                    );
+                })
+                .unwrap();
+            assert!(target_drawn.load(Ordering::Relaxed));
+            let drawn = draws.load(Ordering::Relaxed);
+            assert!(drawn < 100, "submitted {drawn} rows or cells");
+            assert_eq!(state.ui.operations.reveal_id_next, None);
+        }
+    }
+
     #[test]
     fn list_column_layout_all_columns_visible_without_preview() {
         let cfg = columns_config(

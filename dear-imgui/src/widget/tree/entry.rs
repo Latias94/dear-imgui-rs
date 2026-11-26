@@ -40,8 +40,7 @@ impl Ui {
     /// when dropped.
     #[doc(alias = "TreePush")]
     pub fn tree_push(&self, id: impl AsRef<str>) -> TreeNodeToken<'_> {
-        let id = self.scratch_txt(id);
-        self.run_with_bound_context(|| unsafe { sys::igTreePush_Str(id) });
+        self.with_scratch_txt(id, |id_ptr| unsafe { sys::igTreePush_Str(id_ptr) });
         TreeNodeToken::new(self)
     }
 
@@ -57,8 +56,7 @@ impl Ui {
     /// Creates a collapsing header widget
     #[doc(alias = "CollapsingHeader")]
     pub fn collapsing_header(&self, label: impl AsRef<str>, flags: TreeNodeFlags) -> bool {
-        let label_ptr = self.scratch_txt(label);
-        self.run_with_bound_context(|| unsafe {
+        self.with_scratch_txt(label, |label_ptr| unsafe {
             sys::igCollapsingHeader_TreeNodeFlags(label_ptr, flags.bits())
         })
     }
@@ -75,8 +73,7 @@ impl Ui {
         visible: &mut bool,
         flags: TreeNodeFlags,
     ) -> bool {
-        let label_ptr = self.scratch_txt(label);
-        self.run_with_bound_context(|| unsafe {
+        self.with_scratch_txt(label, |label_ptr| unsafe {
             sys::igCollapsingHeader_BoolPtr(label_ptr, visible as *mut bool, flags.bits())
         })
     }

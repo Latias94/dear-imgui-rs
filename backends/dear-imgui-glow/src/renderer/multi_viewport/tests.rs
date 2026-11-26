@@ -194,6 +194,7 @@ fn test_renderer(
         clip_origin: crate::GlowClipOrigin::default(),
         has_separate_polygon_modes: false,
         has_sampler_object_support: true,
+        bind_program_pipeline: None,
         gl_context: gl,
         context_binding: None,
         backend_user_data: Box::default(),
@@ -1238,9 +1239,8 @@ fn dropping_wrapper_defers_resource_release_to_context_teardown() {
 #[test]
 fn foreign_frame_is_rejected_before_target_faults_or_renderer_state_are_observed() {
     let _guard = test_guard();
-    let context_a = Context::create();
+    let mut context_a = Context::create();
     let context_a_id = context_a.id();
-    let suspended_a = context_a.suspend_or_panic();
 
     let mut context_b = Context::create();
     let platform_b = attach_test_platform(&mut context_b);
@@ -1250,9 +1250,7 @@ fn foreign_frame_is_rejected_before_target_faults_or_renderer_state_are_observed
     let context_b_id = context_b.id();
     let control_b = runtime_b.control_for_test();
     control_b.record_fault(GlowViewportError::InvalidViewport);
-    let suspended_b = context_b.suspend_or_panic();
 
-    let mut context_a = suspended_a.activate().unwrap();
     context_a
         .font_atlas()
         .try_claim_legacy_renderer()
@@ -1281,8 +1279,6 @@ fn foreign_frame_is_rejected_before_target_faults_or_renderer_state_are_observed
     );
     assert_eq!(unsafe { (*raw_a).FrameCountRendered }, rendered_before);
 
-    let suspended_a = context_a.suspend_or_panic();
-    let mut context_b = suspended_b.activate().unwrap();
     assert!(matches!(
         runtime_b.poll_fault(),
         Err(GlowViewportError::InvalidViewport)
@@ -1290,7 +1286,7 @@ fn foreign_frame_is_rejected_before_target_faults_or_renderer_state_are_observed
     runtime_b.shutdown(&mut context_b).unwrap();
     drop(platform_b);
     drop(context_b);
-    drop(suspended_a);
+    drop(context_a);
 }
 
 #[test]
@@ -1302,7 +1298,6 @@ fn prepared_frame_cannot_cross_runtime_owners() {
     let renderer_a = test_renderer(&mut context_a, Some(Rc::clone(&gl_a)), false);
     let mut runtime_a = unsafe { GlowViewportRuntime::attach(&mut context_a, renderer_a) }.unwrap();
     let context_a_id = context_a.id();
-    let context_a = context_a.suspend_or_panic();
 
     let mut context_b = Context::create();
     let _platform_b = attach_test_platform(&mut context_b);
@@ -1346,7 +1341,6 @@ fn prepared_frame_cannot_cross_runtime_owners() {
 
     runtime_b.shutdown(&mut context_b).unwrap();
     drop(context_b);
-    let mut context_a = context_a.activate().unwrap();
     runtime_a.shutdown(&mut context_a).unwrap();
 }
 

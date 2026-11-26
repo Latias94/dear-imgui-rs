@@ -497,6 +497,59 @@ fn text_and_clip_inputs_validate_before_ffi() {
 }
 
 #[test]
+fn draw_list_validates_explicit_fonts_against_its_own_context() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let other = crate::Context::create();
+    let foreign_font = other
+        .font_atlas()
+        .add_font(&[crate::fonts::FontSource::default_font()]);
+    let other_binding = other.binding();
+    let _other = other;
+
+    let mut owner = crate::Context::create();
+    owner.prepare_frame(crate::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+    owner
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    let ui = owner.frame();
+    let draw_list = ui.get_background_draw_list();
+    let owner_font = ui.current_font();
+    other_binding.with_bound_context(|| {
+        let current = unsafe { sys::igGetCurrentContext() };
+        // Empty text isolates the font ownership check from native glyph rendering.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.add_text_with_font(
+                foreign_font,
+                13.0,
+                [0.0, 0.0],
+                ImColor32::WHITE,
+                "",
+                0.0,
+                None,
+            );
+        }));
+        assert!(
+            result.is_err(),
+            "a font from the current but foreign context was accepted"
+        );
+        draw_list.add_text_with_font(
+            owner_font,
+            13.0,
+            [0.0, 0.0],
+            ImColor32::WHITE,
+            "x",
+            0.0,
+            None,
+        );
+        draw_list.add_text([16.0, 0.0], ImColor32::WHITE, "y");
+        assert_eq!(unsafe { sys::igGetCurrentContext() }, current);
+    });
+    assert!(draw_list_counts(draw_list.draw_list).0 > 0);
+}
+
+#[test]
 fn raw_draw_list_clip_helper_reads_stack_without_mutation() {
     let fixture = TestDrawList::new();
     let before = fixture.clip_stack_size();

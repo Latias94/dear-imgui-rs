@@ -141,47 +141,46 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
     ///
     /// Returns `None` if the tree node is not open and no content should be rendered.
     pub fn push(self) -> Option<TreeNodeToken<'a>> {
+        const FMT: &[u8; 3] = b"%s\0";
+        let flags = self.flags.bits();
         let pushes_tree = !self.flags.contains(TreeNodeFlags::NO_TREE_PUSH_ON_OPEN);
-        let open = self.ui.run_with_bound_context(|| unsafe {
+        let set_next_item_open = || {
             if let Some(opened_cond) = self.opened_cond {
-                sys::igSetNextItemOpen(self.opened, opened_cond as i32);
+                unsafe { sys::igSetNextItemOpen(self.opened, opened_cond as i32) };
             }
+        };
 
-            match &self.id {
-                TreeNodeId::Str(s) => {
-                    if let Some(label) = self.label.as_ref() {
-                        const FMT: &[u8; 3] = b"%s\0";
-                        let (id_ptr, label_ptr) = self.ui.scratch_txt_two(s, label);
-                        sys::igTreeNodeEx_StrStr(
-                            id_ptr,
-                            self.flags.bits(),
-                            FMT.as_ptr().cast(),
-                            label_ptr,
-                        )
-                    } else {
-                        let label_ptr = self.ui.scratch_txt(s);
-                        sys::igTreeNodeEx_Str(label_ptr, self.flags.bits())
-                    }
-                }
-                TreeNodeId::Ptr(ptr) => {
-                    const FMT: &[u8; 3] = b"%s\0";
-                    let label = self.label.as_ref().map_or("", |l| l.as_ref());
-                    let label_ptr = self.ui.scratch_txt(label);
-                    sys::igTreeNodeEx_Ptr(
-                        ptr.cast(),
-                        self.flags.bits(),
-                        FMT.as_ptr().cast(),
-                        label_ptr,
-                    )
-                }
-                TreeNodeId::Int(i) => {
-                    let label = self.label.as_ref().map_or("", |l| l.as_ref());
-                    let label_ptr = self.ui.scratch_txt(label);
-                    let id = sys::igGetID_Int(*i);
-                    sys::igTreeNodeBehavior(id, self.flags.bits(), label_ptr, std::ptr::null())
+        let open = match &self.id {
+            TreeNodeId::Str(id) => {
+                if let Some(label) = self.label.as_ref() {
+                    self.ui
+                        .with_scratch_txt_two(id, label, |id_ptr, label_ptr| unsafe {
+                            set_next_item_open();
+                            sys::igTreeNodeEx_StrStr(id_ptr, flags, FMT.as_ptr().cast(), label_ptr)
+                        })
+                } else {
+                    self.ui.with_scratch_txt(id, |label_ptr| unsafe {
+                        set_next_item_open();
+                        sys::igTreeNodeEx_Str(label_ptr, flags)
+                    })
                 }
             }
-        });
+            TreeNodeId::Ptr(id) => {
+                let label = self.label.as_ref().map_or("", AsRef::as_ref);
+                self.ui.with_scratch_txt(label, |label_ptr| unsafe {
+                    set_next_item_open();
+                    sys::igTreeNodeEx_Ptr(id.cast(), flags, FMT.as_ptr().cast(), label_ptr)
+                })
+            }
+            TreeNodeId::Int(id) => {
+                let label = self.label.as_ref().map_or("", AsRef::as_ref);
+                self.ui.with_scratch_txt(label, |label_ptr| unsafe {
+                    set_next_item_open();
+                    let id = sys::igGetID_Int(*id);
+                    sys::igTreeNodeBehavior(id, flags, label_ptr, std::ptr::null())
+                })
+            }
+        };
 
         if open {
             Some(TreeNodeToken::from_tree_node(self.ui, pushes_tree))

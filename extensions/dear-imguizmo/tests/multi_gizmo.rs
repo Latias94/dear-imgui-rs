@@ -178,13 +178,12 @@ fn handing_off_and_back_cancels_the_previous_hotspot_and_object_or_bounds_drag()
         let _ = draw_object_handle(&mut first, operation);
         queue_mouse(&mut first, position, Some((MouseButton::Left, true)));
         assert!(draw_object_handle(&mut first, operation));
-        let suspended = first.suspend_or_panic();
 
         let mut second = Context::create();
         prepare_imgui(&mut second);
         assert_object_handle_idle(&mut second);
         drop(second);
-        assert_object_handle_idle(&mut suspended.activate_or_panic());
+        assert_object_handle_idle(&mut first);
     }
 }
 

@@ -7,7 +7,7 @@ use std::{collections::HashMap, num::NonZeroU32, sync::Arc, time::Instant};
 
 use dear_file_browser::{
     DialogMode, FileDialogExt, FileDialogState, FileListViewMode, ImageThumbnailProvider,
-    ThumbnailBackend, ThumbnailRenderer, ToolbarDensity, ToolbarIconMode,
+    ThumbnailBackend, ThumbnailDecoder, ThumbnailRenderer, ToolbarDensity, ToolbarIconMode,
 };
 use dear_imgui_glow::{GlowRenderer, RendererTextureId};
 use dear_imgui_rs::*;
@@ -108,7 +108,7 @@ fn initialization_failure(
 struct AppWindow {
     imgui: ImguiState,
     browser: FileDialogState,
-    thumbnails_provider: ImageThumbnailProvider,
+    thumbnails_decoder: ThumbnailDecoder,
     thumbnail_textures: HashMap<TextureId, RendererTextureId>,
     pending_thumbnail_destroys: Vec<TextureId>,
     status: String,
@@ -124,6 +124,7 @@ struct App {
 
 impl AppWindow {
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
+        let thumbnails_decoder = ThumbnailDecoder::spawn(ImageThumbnailProvider::default)?;
         let window_attributes = winit::window::Window::default_attributes()
             .with_title("Dear ImGui - File Browser (ImGui)")
             .with_inner_size(LogicalSize::new(1000.0, 680.0));
@@ -218,7 +219,9 @@ impl AppWindow {
             st.apply_igfd_classic_preset();
             let filter =
                 dear_file_browser::FileFilter::from(("Images", &["png", "jpg", "jpeg"][..]));
-            st.core.set_filters(vec![filter]);
+            st.core
+                .set_filters(vec![filter])
+                .expect("known static image extensions");
             st.ui.config.file_list_view = FileListViewMode::ThumbnailsList;
             st.ui.config.thumbnails_enabled = true;
             st.ui.config.file_list_columns.show_preview = true;
@@ -255,7 +258,7 @@ impl AppWindow {
                 context: imgui_context,
             },
             browser,
-            thumbnails_provider: ImageThumbnailProvider::default(),
+            thumbnails_decoder,
             thumbnail_textures: HashMap::new(),
             pending_thumbnail_destroys: Vec::new(),
             status: String::new(),
@@ -363,7 +366,7 @@ impl AppWindow {
                         pending_destroys: &mut self.pending_thumbnail_destroys,
                     };
                     let mut backend = ThumbnailBackend {
-                        provider: &mut self.thumbnails_provider,
+                        decoder: &self.thumbnails_decoder,
                         renderer: &mut renderer,
                     };
                     if let Some(res) = ui.file_browser().draw_contents_with(

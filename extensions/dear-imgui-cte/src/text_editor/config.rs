@@ -41,9 +41,9 @@ impl TextEditor {
     /// Sets the tab width in columns, in `1..=255` to fit upstream glyph storage.
     pub fn set_tab_size(&mut self, value: usize) -> CteResult<()> {
         validate_tab_size("TextEditor::set_tab_size", "value", value)?;
-        self.with_context("TextEditor::set_tab_size", |raw| unsafe {
+        self.try_with_context("TextEditor::set_tab_size", |raw| unsafe {
             sys::TextEditor_SetTabSize(raw, value)
-        });
+        })?;
         self.invalidate_layout();
         Ok(())
     }
@@ -56,9 +56,9 @@ impl TextEditor {
 
     pub fn set_line_spacing(&mut self, value: f32) -> CteResult<()> {
         validate_finite_f32("TextEditor::set_line_spacing", "value", value)?;
-        self.with_context("TextEditor::set_line_spacing", |raw| unsafe {
+        self.try_with_context("TextEditor::set_line_spacing", |raw| unsafe {
             sys::TextEditor_SetLineSpacing(raw, value)
-        });
+        })?;
         self.invalidate_layout();
         Ok(())
     }

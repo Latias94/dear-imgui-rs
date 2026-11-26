@@ -1,13 +1,15 @@
 use proc_macro::TokenStream;
-use syn::{Data, DeriveInput, parse_macro_input};
+use proc_macro2::{Span, TokenStream as Tokens};
+use quote::{ToTokens, quote, quote_spanned};
+use syn::{Data, DeriveInput, Generics, Ident, parse_macro_input};
 
 mod attrs;
 mod diagnostics;
 mod enum_codegen;
 mod field_codegen;
 mod internal;
+mod numeric_codegen;
 mod numeric_format;
-mod settings_codegen;
 mod struct_codegen;
 #[cfg(test)]
 mod tests;
@@ -32,7 +34,7 @@ mod tests;
 /// - `#[imgui(slider, min = ..., max = ..., format = "...")]` — use a slider
 ///   with a format validated against the exact numeric field type.
 /// - `#[imgui(multiline, lines = 3, read_only)]` — use multiline text
-///   widgets for String/ImString fields. `hint = "..."` is single-line only.
+///   widgets for `String` fields. `hint = "..."` is single-line only.
 #[proc_macro_derive(ImGuiReflect, attributes(imgui))]
 pub fn derive_imgui_reflect(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -40,9 +42,36 @@ pub fn derive_imgui_reflect(input: TokenStream) -> TokenStream {
     let generics = input.generics;
     let attrs = input.attrs;
 
-    match input.data {
-        Data::Struct(data) => struct_codegen::derive_for_struct(ident, generics, data),
-        Data::Enum(data) => enum_codegen::derive_for_enum(ident, generics, attrs, data),
-        Data::Union(data) => diagnostics::union_not_supported(data),
+    let expansion = match input.data {
+        Data::Struct(data) => struct_codegen::derive_for_struct(&ident, generics, &attrs, data),
+        Data::Enum(data) => enum_codegen::derive_for_enum(&ident, generics, &attrs, data),
+        Data::Union(data) => Err(diagnostics::union_not_supported(data)),
+    };
+    expansion
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+fn option_tokens<T: ToTokens>(value: Option<T>) -> Tokens {
+    match value {
+        Some(value) => quote!(::core::option::Option::Some(#value)),
+        None => quote!(::core::option::Option::None),
+    }
+}
+
+fn impl_reflect(ident: &Ident, generics: &Generics, body: Tokens) -> Tokens {
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+    let receiver = quote!(self);
+    quote_spanned! {Span::mixed_site()=>
+        impl #impl_generics ::dear_imgui_reflect::ImGuiReflect for #ident #ty_generics #where_clause {
+            fn imgui_reflect(
+                &mut #receiver,
+                __dear_imgui_reflect_inspector: &mut ::dear_imgui_reflect::Inspector<'_, '_>,
+                __dear_imgui_reflect_label: &str,
+            ) -> bool {
+                let __dear_imgui_reflect_ui = __dear_imgui_reflect_inspector.ui();
+                #body
+            }
+        }
     }
 }

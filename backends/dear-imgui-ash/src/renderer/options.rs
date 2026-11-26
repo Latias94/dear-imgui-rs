@@ -57,6 +57,8 @@ pub struct AshRendererConfig {
     pub(super) queue: vk::Queue,
     pub(super) command_pool: vk::CommandPool,
     pub(super) render_target: RenderTarget,
+    #[cfg(feature = "dynamic-rendering")]
+    pub(super) stencil_attachment_format: vk::Format,
     pub(super) options: Options,
 }
 
@@ -109,6 +111,8 @@ impl AshRendererConfig {
             queue,
             command_pool,
             render_target: RenderTarget::RenderPass(render_pass),
+            #[cfg(feature = "dynamic-rendering")]
+            stencil_attachment_format: vk::Format::UNDEFINED,
             options: Options::default(),
         }
     }
@@ -126,8 +130,22 @@ impl AshRendererConfig {
             queue,
             command_pool,
             render_target: RenderTarget::DynamicRendering(dynamic_rendering),
+            stencil_attachment_format: vk::Format::UNDEFINED,
             options: Options::default(),
         }
+    }
+
+    /// Set the stencil attachment format for the dynamic rendering pipeline.
+    ///
+    /// Declare the format when `VkRenderingInfo::pStencilAttachment` supplies an image view,
+    /// even with stencil testing disabled. Use a stencil-capable format that matches the depth
+    /// format when both attachments are bound. The default is `vk::Format::UNDEFINED`.
+    /// Render-pass pipelines take their attachment formats from the render pass.
+    #[cfg(feature = "dynamic-rendering")]
+    #[must_use]
+    pub fn with_stencil_attachment_format(mut self, format: vk::Format) -> Self {
+        self.stencil_attachment_format = format;
+        self
     }
 
     /// Replace the renderer options.
@@ -143,5 +161,9 @@ impl AshRendererConfig {
 #[derive(Debug, Clone, Copy)]
 pub struct DynamicRendering {
     pub color_attachment_format: vk::Format,
+    /// Format of the view bound as `VkRenderingInfo::pDepthAttachment`.
+    ///
+    /// Declare a bound stencil aspect separately with
+    /// [`AshRendererConfig::with_stencil_attachment_format`].
     pub depth_attachment_format: Option<vk::Format>,
 }

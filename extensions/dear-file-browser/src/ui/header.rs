@@ -541,17 +541,16 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
     if ui.content_region_avail_width() <= 1.0 {
         ui.new_line();
     }
-    let cwd_s = state.core.cwd.display().to_string();
-    if state.ui.runtime.path.last_cwd != cwd_s && !state.ui.runtime.path.input_mode {
-        state.ui.runtime.path.last_cwd = cwd_s.clone();
-        state.ui.runtime.path.buffer = cwd_s.clone();
+    if state.ui.runtime.path.last_cwd != state.core.cwd && !state.ui.runtime.path.input_mode {
+        state.ui.runtime.path.last_cwd.clone_from(&state.core.cwd);
+        state.ui.runtime.path.set_buffer_path(&state.core.cwd);
         if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
             state.ui.runtime.breadcrumb.scroll_to_end_next = true;
         }
-    } else if state.ui.runtime.path.last_cwd.is_empty() {
-        state.ui.runtime.path.last_cwd = cwd_s.clone();
+    } else if state.ui.runtime.path.last_cwd.as_os_str().is_empty() {
+        state.ui.runtime.path.last_cwd.clone_from(&state.core.cwd);
         if state.ui.runtime.path.buffer.trim().is_empty() {
-            state.ui.runtime.path.buffer = cwd_s.clone();
+            state.ui.runtime.path.set_buffer_path(&state.core.cwd);
         }
         if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
             state.ui.runtime.breadcrumb.scroll_to_end_next = true;
@@ -694,14 +693,12 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
         ui.separator();
         for (i, p) in recent_paths.iter().enumerate() {
             let _id = ui.push_id(i as i32);
-            let label = p.display().to_string();
-            if ui.selectable(&label) {
+            let label = crate::fs::display_path(p);
+            if ui.selectable(label.as_ref()) {
                 let _ = state.core.handle_event(CoreEvent::NavigateTo(p.clone()));
                 state.ui.runtime.path.edit = false;
-                state.ui.runtime.path.last_cwd = state.core.cwd.display().to_string();
-                state.ui.runtime.path.buffer = state.ui.runtime.path.last_cwd.clone();
-                state.ui.runtime.path.history_index = None;
-                state.ui.runtime.path.history_saved_buffer = None;
+                state.ui.runtime.path.last_cwd.clone_from(&state.core.cwd);
+                state.ui.runtime.path.set_buffer_path(&state.core.cwd);
                 state.ui.runtime.error = None;
                 ui.close_current_popup();
             }
@@ -769,7 +766,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
         if ui.button(action_label) {
             state.ui.runtime.path.input_mode = !state.ui.runtime.path.input_mode;
             if state.ui.runtime.path.input_mode {
-                state.ui.runtime.path.buffer = state.core.cwd.display().to_string();
+                state.ui.runtime.path.set_buffer_path(&state.core.cwd);
                 state.ui.runtime.path.focus_next = true;
             } else {
                 state.ui.runtime.path.edit = false;

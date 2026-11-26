@@ -7,8 +7,7 @@ impl Ui {
     /// Returns true if the menu item is activated.
     #[doc(alias = "MenuItem")]
     pub fn menu_item(&self, label: impl AsRef<str>) -> bool {
-        let label_ptr = self.scratch_txt(label);
-        self.run_with_bound_context(|| unsafe {
+        self.with_scratch_txt(label, |label_ptr| unsafe {
             sys::igMenuItemEx(label_ptr, std::ptr::null(), std::ptr::null(), false, true)
         })
     }
@@ -22,8 +21,7 @@ impl Ui {
         label: impl AsRef<str>,
         shortcut: impl AsRef<str>,
     ) -> bool {
-        let (label_ptr, shortcut_ptr) = self.scratch_txt_two(label, shortcut);
-        self.run_with_bound_context(|| unsafe {
+        self.with_scratch_txt_two(label, shortcut, |label_ptr, shortcut_ptr| unsafe {
             sys::igMenuItemEx(label_ptr, std::ptr::null(), shortcut_ptr, false, true)
         })
     }
@@ -38,21 +36,9 @@ impl Ui {
         selected: bool,
         enabled: bool,
     ) -> bool {
-        let label = label.as_ref();
-        match shortcut {
-            Some(shortcut) => {
-                let (label_ptr, shortcut_ptr) = self.scratch_txt_two(label, shortcut.as_ref());
-                self.run_with_bound_context(|| unsafe {
-                    sys::igMenuItem_Bool(label_ptr, shortcut_ptr, selected, enabled)
-                })
-            }
-            None => {
-                let label_ptr = self.scratch_txt(label);
-                self.run_with_bound_context(|| unsafe {
-                    sys::igMenuItem_Bool(label_ptr, std::ptr::null(), selected, enabled)
-                })
-            }
-        }
+        self.with_scratch_txt_with_opt(label, shortcut, |label_ptr, shortcut_ptr| unsafe {
+            sys::igMenuItem_Bool(label_ptr, shortcut_ptr, selected, enabled)
+        })
     }
 
     /// Creates a menu item with explicit enabled/selected state (no shortcut).
@@ -92,21 +78,9 @@ impl Ui {
         selected: &mut bool,
         enabled: bool,
     ) -> bool {
-        let label = label.as_ref();
-        match shortcut {
-            Some(shortcut) => {
-                let (label_ptr, shortcut_ptr) = self.scratch_txt_two(label, shortcut.as_ref());
-                self.run_with_bound_context(|| unsafe {
-                    sys::igMenuItem_BoolPtr(label_ptr, shortcut_ptr, selected, enabled)
-                })
-            }
-            None => {
-                let label_ptr = self.scratch_txt(label);
-                self.run_with_bound_context(|| unsafe {
-                    sys::igMenuItem_BoolPtr(label_ptr, std::ptr::null(), selected, enabled)
-                })
-            }
-        }
+        self.with_scratch_txt_with_opt(label, shortcut, |label_ptr, shortcut_ptr| unsafe {
+            sys::igMenuItem_BoolPtr(label_ptr, shortcut_ptr, selected, enabled)
+        })
     }
 
     /// Creates a toggleable menu item bound to `selected` (no shortcut).

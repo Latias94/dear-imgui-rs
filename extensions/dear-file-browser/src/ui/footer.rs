@@ -150,7 +150,7 @@ pub(super) fn draw_footer(
                 state.ui.runtime.path.input_mode = true;
             }
             state.ui.runtime.path.edit = true;
-            state.ui.runtime.path.buffer = state.core.cwd.display().to_string();
+            state.ui.runtime.path.set_buffer_path(&state.core.cwd);
             state.ui.runtime.path.focus_next = true;
         }
         if ctrl && ui.is_key_pressed(Key::F) {
@@ -438,6 +438,9 @@ fn footer_status_text(state: &FileDialogState, gate: &ConfirmGate) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(s) = scan {
         parts.push(s);
+    }
+    if super::ops::file_operation_in_progress(state) {
+        parts.push("File operation in progress".into());
     }
     parts.push(format!("{visible} items"));
     if selected > 0 {

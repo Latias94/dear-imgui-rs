@@ -61,10 +61,10 @@ impl<'ui, 'p> ColorEdit3<'ui, 'p> {
     pub fn build(self) -> bool {
         self.flags.validate("ColorEdit3::build()");
         assert_finite_color3("ColorEdit3::build()", "color", &*self.color);
-        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igColorEdit3(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32)
-        })
+        self.ui
+            .with_scratch_txt(self.label.as_ref(), |label_ptr| unsafe {
+                sys::igColorEdit3(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32)
+            })
     }
 }
 
@@ -123,9 +123,9 @@ impl<'ui, 'p> ColorEdit4<'ui, 'p> {
     pub fn build(self) -> bool {
         self.flags.validate("ColorEdit4::build()");
         assert_finite_color4("ColorEdit4::build()", "color", &*self.color);
-        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igColorEdit4(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32)
-        })
+        self.ui
+            .with_scratch_txt(self.label.as_ref(), |label_ptr| unsafe {
+                sys::igColorEdit4(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32)
+            })
     }
 }

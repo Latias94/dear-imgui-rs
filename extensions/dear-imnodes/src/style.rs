@@ -174,7 +174,8 @@ impl crate::NodeEditor<'_> {
         )
     }
 
-    /// Pushes a temporary style value. The padding and minimap offset variables take a vector.
+    /// Pushes a temporary style value. Padding and minimap offset require finite vectors.
+    /// Grid spacing and link tessellation use the same bounds as the persistent setters.
     pub fn push_style_var(&self, var: crate::StyleVar, value: StyleVarValue) -> StyleVarToken<'_> {
         use crate::StyleVar;
         let takes_vec2 = matches!(
@@ -186,19 +187,23 @@ impl crate::NodeEditor<'_> {
             matches!(value, StyleVarValue::Vec2(_)),
             "dear-imnodes: incorrect value type for {var:?}"
         );
-        StyleVarToken(self.styles.vars.push(|| unsafe {
-            match value {
-                StyleVarValue::Float(value) => {
-                    if var == StyleVar::GridSpacing {
-                        validate_grid_spacing(value);
-                    }
-                    sys::imnodes_PushStyleVar_Float(var as i32, value);
+        let stack = &self.styles.vars;
+        StyleVarToken(match value {
+            StyleVarValue::Float(value) => {
+                match var {
+                    StyleVar::GridSpacing => validate_grid_spacing(value),
+                    StyleVar::LinkLineSegmentsPerLength => validate_link_density(value),
+                    _ => {}
                 }
-                StyleVarValue::Vec2([x, y]) => {
-                    sys::imnodes_PushStyleVar_Vec2(var as i32, sys::ImVec2_c { x, y })
-                }
+                stack.push(|| unsafe { sys::imnodes_PushStyleVar_Float(var as i32, value) })
             }
-        }))
+            StyleVarValue::Vec2(value @ [x, y]) => {
+                validate_finite_pair("vector style value", value);
+                stack.push(|| unsafe {
+                    sys::imnodes_PushStyleVar_Vec2(var as i32, sys::ImVec2_c { x, y })
+                })
+            }
+        })
     }
 
     pub fn push_style_var_f32(&self, var: crate::StyleVar, value: f32) -> StyleVarToken<'_> {
@@ -214,6 +219,20 @@ pub(crate) fn validate_grid_spacing(spacing: f32) {
     assert!(
         spacing.is_finite() && spacing > 0.0,
         "dear-imnodes: grid spacing must be finite and positive"
+    );
+}
+
+pub(crate) fn validate_link_density(density: f32) {
+    assert!(
+        density.is_finite() && density >= 0.0,
+        "dear-imnodes: link tessellation density must be finite and non-negative"
+    );
+}
+
+pub(crate) fn validate_finite_pair(name: &str, value: [f32; 2]) {
+    assert!(
+        value.into_iter().all(f32::is_finite),
+        "dear-imnodes: {name} must contain only finite values"
     );
 }
 

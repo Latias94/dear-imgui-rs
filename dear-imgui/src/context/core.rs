@@ -1,8 +1,8 @@
-use std::ffi::CString;
 use std::ptr;
 use std::rc::Rc;
 
 use crate::clipboard::ClipboardContext;
+use crate::ffi::{RawBox, RawCString};
 use crate::fonts::SharedFontAtlas;
 use crate::io::Io;
 use crate::sys;
@@ -15,36 +15,22 @@ use super::attachment::{
 };
 use super::binding::{
     CTX_MUTEX, ContextAliveToken, ContextBinding, ContextId, ContextState, ContextThreadLease,
-    RawBoundContextGuard, bound_context_scope_active, no_current_context, set_current_context,
-    with_bound_context,
+    RawBoundContextGuard, bound_context_scope_active, set_current_context, with_bound_context,
 };
 use super::snapshot_hub::SnapshotHub;
 use super::texture_registry::{ManagedTextureRegistry, SharedTextureRegistry};
+use super::{ContextOperationError, ContextScopeError, FrameLifecycleState};
 
 /// An imgui context.
 ///
-/// A context needs to be created to access most library functions. Due to current Dear ImGui
-/// design choices, at most one active Context can exist at any time. This limitation will likely
-/// be removed in a future Dear ImGui version.
+/// Multiple contexts can coexist on the same OS thread. Each owns its frames and input.
+/// Safe operations bind the owning context as needed. Use [`Self::binding`] to scope raw
+/// integrations that read Dear ImGui's global current context.
 ///
-/// If you need more than one context, you can use suspended contexts. As long as only one context
-/// is active at a time, it's possible to have multiple independent contexts.
-///
-/// # Examples
-///
-/// Creating a new active context:
 /// ```
-/// let ctx = dear_imgui_rs::Context::create();
-/// // ctx is dropped naturally when it goes out of scope, which deactivates and destroys the
-/// // context
-/// ```
-///
-/// Never try to create an active context when another one is active:
-///
-/// ```should_panic
-/// let ctx1 = dear_imgui_rs::Context::create();
-///
-/// let ctx2 = dear_imgui_rs::Context::create(); // PANIC
+/// let first = dear_imgui_rs::Context::create();
+/// let second = dear_imgui_rs::Context::create();
+/// assert_ne!(first.id(), second.id());
 /// ```
 #[doc(
     alias = "CreateContext",
@@ -60,27 +46,25 @@ pub struct Context {
     pub(super) snapshot_hub: SnapshotHub,
     pub(crate) texture_registry: SharedTextureRegistry,
     pub(in crate::context) shared_font_atlas: Option<SharedFontAtlas>,
-    pub(in crate::context) ini_filename: Option<CString>,
-    pub(in crate::context) log_filename: Option<CString>,
-    pub(in crate::context) platform_name: Option<CString>,
-    pub(in crate::context) renderer_name: Option<CString>,
-    // Boxed so the raw PlatformIO user-data pointer remains stable.
-    // Interior mutability and reentrancy guarding live inside ClipboardContext.
-    pub(in crate::context) clipboard_ctx: Box<ClipboardContext>,
+    pub(in crate::context) ini_filename: Option<RawCString>,
+    pub(in crate::context) log_filename: Option<RawCString>,
+    pub(in crate::context) platform_name: Option<RawCString>,
+    pub(in crate::context) renderer_name: Option<RawCString>,
+    pub(in crate::context) clipboard_ctx: RawBox<ClipboardContext>,
     pub(in crate::context) ui: crate::ui::Ui,
     // Keep process-global GImGui ownership until every Context-owned Rust field is gone.
     pub(super) _thread_lease: ContextThreadLease,
 }
 
 impl Context {
-    /// Tries to create a new active Dear ImGui context.
+    /// Tries to create a new Dear ImGui context on the owner thread.
     ///
-    /// Returns an error if another context is already active or creation fails.
+    /// Existing contexts on this thread remain usable.
     pub fn try_create() -> crate::error::ImGuiResult<Context> {
         Self::try_create_internal(None)
     }
 
-    /// Tries to create a new active Dear ImGui context with a shared font atlas.
+    /// Tries to create a new Dear ImGui context with a shared font atlas.
     ///
     /// Multiple contexts may share the atlas while using legacy renderer-managed texture handling.
     /// Once a managed renderer claims the atlas, registering another context returns
@@ -123,6 +107,53 @@ impl Context {
     /// Returns a persistent capability for calling against this Context while it is alive.
     pub fn binding(&self) -> ContextBinding {
         ContextBinding::new(&self.state)
+    }
+
+    /// Runs an operation with this context current, then restores the prior binding.
+    ///
+    /// The operation must start and finish without an open frame. If it returns an error or
+    /// panics, a frame it left open is ended before the outcome propagates.
+    ///
+    /// # Panics
+    ///
+    /// Propagates the closure's panic. Replacing the Context owner inside the closure is not
+    /// permitted.
+    pub fn try_with_current<T, E>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> Result<T, E>,
+    ) -> Result<T, ContextOperationError<E>> {
+        if self.frame_lifecycle_state_unlocked() == FrameLifecycleState::InFrame {
+            return Err(ContextScopeError::FrameAlreadyOpen.into());
+        }
+        let id = self.id();
+        self.binding()
+            .try_with_bound_context(|| {
+                let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    operation(self)
+                })) {
+                    Ok(result) => result,
+                    Err(payload) => {
+                        if self.id() == id {
+                            let cleanup =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    self.end_frame_for_teardown_unlocked();
+                                }));
+                            if let Err(cleanup_panic) = cleanup {
+                                std::mem::forget(cleanup_panic);
+                            }
+                        }
+                        std::panic::resume_unwind(payload);
+                    }
+                };
+                assert_eq!(self.id(), id, "the Context operation replaced its owner");
+                let ended_frame = self.end_frame_for_teardown_unlocked();
+                match result {
+                    Ok(_) if ended_frame => Err(ContextScopeError::FrameLeftOpen.into()),
+                    Ok(value) => Ok(value),
+                    Err(error) => Err(ContextOperationError::Closure(error)),
+                }
+            })
+            .map_err(ContextScopeError::ContextUnavailable)?
     }
 
     /// Returns a token that can be used to check whether this context is still alive.
@@ -191,25 +222,11 @@ impl Context {
         pio
     }
 
-    pub(super) fn assert_current_context(&self, caller: &str) {
-        assert!(
-            self.is_current_context(),
-            "{caller} requires this context to be current"
-        );
-    }
-
     fn try_create_internal(
         shared_font_atlas: Option<SharedFontAtlas>,
     ) -> crate::error::ImGuiResult<Context> {
-        if bound_context_scope_active() {
-            return Err(crate::error::ImGuiError::ContextBindingScopeActive);
-        }
         let thread_lease = ContextThreadLease::acquire()?;
         let _guard = CTX_MUTEX.lock();
-
-        if !no_current_context() {
-            return Err(crate::error::ImGuiError::ContextAlreadyActive);
-        }
 
         let shared_font_atlas_ptr = match &shared_font_atlas {
             Some(atlas) => atlas.as_ptr(),
@@ -230,8 +247,12 @@ impl Context {
             });
         }
 
-        // Set it as the current context
-        set_current_context(raw);
+        if !bound_context_scope_active() {
+            let current = unsafe { sys::igGetCurrentContext() };
+            if current.is_null() || !unsafe { (*current).WithinFrameScope } {
+                set_current_context(raw);
+            }
+        }
 
         unsafe {
             let io = sys::igGetIO_ContextPtr(raw);
@@ -263,7 +284,7 @@ impl Context {
             log_filename: None,
             platform_name: None,
             renderer_name: None,
-            clipboard_ctx: Box::new(ClipboardContext::dummy(ui.scratch_buffers.clone())),
+            clipboard_ctx: RawBox::new(ClipboardContext::dummy()),
             ui,
         })
     }
@@ -312,11 +333,6 @@ impl Context {
                 &mut *(style_ptr as *mut crate::style::Style)
             })
         }
-    }
-
-    pub(super) fn is_current_context(&self) -> bool {
-        let ctx = unsafe { sys::igGetCurrentContext() };
-        self.raw == ctx
     }
 }
 

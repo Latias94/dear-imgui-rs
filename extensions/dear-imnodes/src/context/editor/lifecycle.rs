@@ -1,9 +1,15 @@
-use super::super::{ActiveEditor, Context, EditorContext, NodeEditor, NodeEditorSetup, PostEditor};
+use super::super::{
+    ActiveEditor, EditorContext, ImNodesContext, NodeEditor, NodeEditorSetup, PostEditor,
+};
 use crate::{style::StyleStacks, sys};
 use dear_imgui_rs::Ui;
 
 impl<'ui> NodeEditorSetup<'ui> {
-    pub(crate) fn new(ui: &'ui Ui, ctx: &'ui Context, editor: Option<&EditorContext>) -> Self {
+    pub(crate) fn new(
+        ui: &'ui Ui,
+        ctx: &'ui ImNodesContext,
+        editor: Option<&EditorContext>,
+    ) -> Self {
         Self {
             ui,
             scope: ctx.scope(editor),

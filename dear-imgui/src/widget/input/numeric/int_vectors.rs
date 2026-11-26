@@ -35,10 +35,11 @@ impl<'ui, 'p, L: AsRef<str>> InputInt2<'ui, 'p, L> {
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
         validate_input_scalar_flags("InputInt2::build()", self.flags);
-        let label_cstr = self.ui.scratch_txt(self.label);
-
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igInputInt2(label_cstr, self.value.as_mut_ptr(), self.flags.raw())
+        self.ui.with_scratch_buffer(|scratch| {
+            let label = scratch.scratch_txt(self.label);
+            self.ui.run_with_bound_context(|| unsafe {
+                sys::igInputInt2(label, self.value.as_mut_ptr(), self.flags.raw())
+            })
         })
     }
 }
@@ -76,10 +77,11 @@ impl<'ui, 'p, L: AsRef<str>> InputInt3<'ui, 'p, L> {
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
         validate_input_scalar_flags("InputInt3::build()", self.flags);
-        let label_cstr = self.ui.scratch_txt(self.label);
-
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igInputInt3(label_cstr, self.value.as_mut_ptr(), self.flags.raw())
+        self.ui.with_scratch_buffer(|scratch| {
+            let label = scratch.scratch_txt(self.label);
+            self.ui.run_with_bound_context(|| unsafe {
+                sys::igInputInt3(label, self.value.as_mut_ptr(), self.flags.raw())
+            })
         })
     }
 }
@@ -117,10 +119,11 @@ impl<'ui, 'p, L: AsRef<str>> InputInt4<'ui, 'p, L> {
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
         validate_input_scalar_flags("InputInt4::build()", self.flags);
-        let label_cstr = self.ui.scratch_txt(self.label);
-
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igInputInt4(label_cstr, self.value.as_mut_ptr(), self.flags.raw())
+        self.ui.with_scratch_buffer(|scratch| {
+            let label = scratch.scratch_txt(self.label);
+            self.ui.run_with_bound_context(|| unsafe {
+                sys::igInputInt4(label, self.value.as_mut_ptr(), self.flags.raw())
+            })
         })
     }
 }

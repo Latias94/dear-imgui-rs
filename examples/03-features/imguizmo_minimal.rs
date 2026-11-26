@@ -51,7 +51,7 @@ fn main() -> Result<(), RunError> {
                     .operation(Operation::TRANSLATE)
                     .mode(Mode::World)
                     .build();
-                gizmo.draw_cubes(&view, &projection, std::slice::from_ref(&model));
+                gizmo.draw_cubes(&view, &projection, &[model.to_cols_array()]);
 
                 ui.dummy(canvas_size);
             });

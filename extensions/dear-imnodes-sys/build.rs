@@ -153,8 +153,6 @@ fn generate_bindings(
         .allowlist_function("LinkDetachWithModifierClick_.*")
         .allowlist_function("MultipleSelectModifier_.*")
         .allowlist_function("getIOKeyCtrlPtr")
-        .allowlist_function("imnodes_getIOKeyShiftPtr")
-        .allowlist_function("imnodes_getIOKeyAltPtr")
         .allowlist_function("imnodes_EditorContextResetToDefault")
         .allowlist_function("imnodes_EditorContextGetCurrent")
         .allowlist_function("imnodes_EditorContextResetToDefaultIfCurrent")
@@ -313,7 +311,9 @@ fn main() {
     for path in sources.native_candidate_paths() {
         println!("cargo:rerun-if-changed={}", path.display());
     }
-    println!("cargo:rerun-if-changed=../../dear-imgui-sys");
+    if Path::new("../../dear-imgui-sys").is_dir() {
+        println!("cargo:rerun-if-changed=../../dear-imgui-sys");
+    }
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_PREBUILT_URL");

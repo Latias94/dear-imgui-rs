@@ -38,6 +38,7 @@ pub use crate::scope::NativeWindowScope;
 /// Represents the Dear ImGui user interface for one frame
 #[derive(Debug)]
 pub struct Ui {
+    native_current: *const *mut sys::ImGuiContext,
     /// Dear ImGui context that owns this per-frame UI entry point.
     pub(crate) ctx: *mut sys::ImGuiContext,
     pub(crate) ctx_binding: ContextBinding,
@@ -45,5 +46,5 @@ pub struct Ui {
     pub(crate) ime: std::rc::Rc<RefCell<crate::context::ime::ImeState>>,
     pub(crate) native_scopes: RefCell<NativeScopeTracker>,
     /// Reused in stack order so nested label conversions and callbacks have independent storage.
-    pub(crate) scratch_buffers: std::rc::Rc<ScratchBuffers>,
+    scratch_buffers: ScratchBuffers,
 }

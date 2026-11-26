@@ -49,21 +49,13 @@ impl PrebuiltSource {
     ) -> Result<PathBuf, String> {
         let directory = match self {
             Self::LibraryDir(directory) => directory.clone(),
-            Self::Archive(source) => {
-                if !source.starts_with("http://") && !source.starts_with("https://") {
-                    println!(
-                        "cargo:rerun-if-changed={}",
-                        source.strip_prefix("file://").unwrap_or(source)
-                    );
-                }
-                crate::download_prebuilt(
-                    &explicit_cache_root(cache_root, source),
-                    source,
-                    library_name,
-                    target_env,
-                )
-                .map_err(|error| format!("explicit prebuilt {source:?}: {error}"))?
-            }
+            Self::Archive(source) => crate::download_prebuilt(
+                &explicit_cache_root(cache_root, source),
+                source,
+                library_name,
+                target_env,
+            )
+            .map_err(|error| format!("explicit prebuilt: {error}"))?,
             Self::PackageDir(directory) => {
                 println!("cargo:rerun-if-changed={}", directory.display());
                 let archive = archive_names.iter().map(|name| directory.join(name))

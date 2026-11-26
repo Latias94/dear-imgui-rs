@@ -87,26 +87,25 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalar<'ui, 'p
     /// Returns true if the value was changed.
     pub fn build(self) -> bool {
         validate_input_scalar_flags("InputScalar::build()", self.flags);
-        let (one, two) = self
-            .ui
-            .scratch_txt_with_opt(self.label, self.display_format);
-
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igInputScalar(
-                one,
-                T::KIND as i32,
-                self.value as *mut T as *mut c_void,
-                self.step
-                    .as_ref()
-                    .map(|step| step as *const T)
-                    .unwrap_or(ptr::null()) as *const c_void,
-                self.step_fast
-                    .as_ref()
-                    .map(|step| step as *const T)
-                    .unwrap_or(ptr::null()) as *const c_void,
-                two,
-                self.flags.raw(),
-            )
+        self.ui.with_scratch_buffer(|scratch| {
+            let (label, format) = scratch.scratch_txt_with_opt(self.label, self.display_format);
+            self.ui.run_with_bound_context(|| unsafe {
+                sys::igInputScalar(
+                    label,
+                    T::KIND as i32,
+                    self.value as *mut T as *mut c_void,
+                    self.step
+                        .as_ref()
+                        .map(|step| step as *const T)
+                        .unwrap_or(ptr::null()) as *const c_void,
+                    self.step_fast
+                        .as_ref()
+                        .map(|step| step as *const T)
+                        .unwrap_or(ptr::null()) as *const c_void,
+                    format,
+                    self.flags.raw(),
+                )
+            })
         })
     }
 }
@@ -191,27 +190,26 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalarN<'ui, '
     pub fn build(self) -> bool {
         validate_input_scalar_flags("InputScalarN::build()", self.flags);
         let count = component_count_i32("InputScalarN::build()", self.values.len());
-        let (one, two) = self
-            .ui
-            .scratch_txt_with_opt(self.label, self.display_format);
-
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igInputScalarN(
-                one,
-                T::KIND as i32,
-                self.values.as_mut_ptr() as *mut c_void,
-                count,
-                self.step
-                    .as_ref()
-                    .map(|step| step as *const T)
-                    .unwrap_or(ptr::null()) as *const c_void,
-                self.step_fast
-                    .as_ref()
-                    .map(|step| step as *const T)
-                    .unwrap_or(ptr::null()) as *const c_void,
-                two,
-                self.flags.raw(),
-            )
+        self.ui.with_scratch_buffer(|scratch| {
+            let (label, format) = scratch.scratch_txt_with_opt(self.label, self.display_format);
+            self.ui.run_with_bound_context(|| unsafe {
+                sys::igInputScalarN(
+                    label,
+                    T::KIND as i32,
+                    self.values.as_mut_ptr() as *mut c_void,
+                    count,
+                    self.step
+                        .as_ref()
+                        .map(|step| step as *const T)
+                        .unwrap_or(ptr::null()) as *const c_void,
+                    self.step_fast
+                        .as_ref()
+                        .map(|step| step as *const T)
+                        .unwrap_or(ptr::null()) as *const c_void,
+                    format,
+                    self.flags.raw(),
+                )
+            })
         })
     }
 }

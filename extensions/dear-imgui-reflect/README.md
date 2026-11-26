@@ -109,8 +109,12 @@ fn configure(
 
 Use separate sessions when panels need different defaults. An inspector
 borrows its session, so settings cannot be changed during a render pass.
+Session defaults also apply to values nested inside vectors, arrays, maps,
+tuples, and `Option`. An `Option` passes its member settings through to its
+payload.
 
-Per-member settings are keyed by reflected type and generated member path:
+For derived types without lifetime or type parameters, member settings can be
+keyed by the exact reflected type and generated member path:
 
 ```rust
 # use dear_imgui_reflect as reflect;
@@ -132,6 +136,28 @@ fn configure_material(
     Ok(())
 }
 ```
+
+For borrowed or type-generic models, use a logical path instead. This does not
+require the model or its type arguments to be `'static`.
+
+```rust
+session.settings_mut().for_path("layers[0].opacity").read_only = true;
+```
+
+Paths use Rust field and variant names, numeric indices, and quoted map keys.
+They are relative to the inspector root and take precedence over type-specific
+settings at the same field. Use separate sessions for unrelated roots that
+need different overrides at the same path.
+
+Built-in editors cover `[T; N]` for any `N` and tuples of up to 16 elements.
+A tuple spelled out directly in a derived field can be longer because the
+macro emits the element accesses for that field. Stable Rust has no variadic
+generics for implementing `ImGuiValue` for every tuple arity. Editable
+string-keyed maps still require `'static` values because the session owns
+typed insertion drafts across frames.
+
+Unknown, duplicate, and incompatible `#[imgui(...)]` attributes are rejected
+at compile time, including on enum payload fields.
 
 ## Manual Values
 
@@ -159,7 +185,7 @@ including during panic unwind.
 
 ## Supported Types
 
-- Primitive scalar and string inputs.
+- Primitive scalar and `String` inputs.
 - `Option<T>`, `Vec<T>`, and fixed arrays.
 - `HashMap<String, V>` and `BTreeMap<String, V>`.
 - Tuples from two through eight elements, plus derive-generated tuple fields.
@@ -172,6 +198,10 @@ the value `TypeId`, the active Dear ImGui ID stack, and the owning
 `ImGuiContext`, so equal text labels in different scopes or contexts do not
 share drafts. Own the session beside its context; rebuild both together after
 destroying and recreating the context.
+
+Existing map keys are edited as drafts. Press Enter or move focus to commit
+a new, nonempty key that is not already present. Press Escape to cancel.
+Unchanged, canceled, and rejected key edits do not report a change.
 
 ## Field Attributes
 

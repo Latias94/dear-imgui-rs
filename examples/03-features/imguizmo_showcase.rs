@@ -641,10 +641,11 @@ impl AppWindow {
                             100.0,
                         );
                         let count = self.state.gizmo_count.clamp(1, 4) as usize;
+                        let matrices = self.state.objects.map(|model| model.to_cols_array());
                         giz.draw_cubes(
                             &self.state.camera_view,
                             &self.state.camera_proj,
-                            &self.state.objects[0..count],
+                            &matrices[..count],
                         );
 
                         // Manipulate each cube (window drawlist already set)
@@ -694,10 +695,11 @@ impl AppWindow {
                     100.0,
                 );
                 let count = self.state.gizmo_count.clamp(1, 4) as usize;
+                let matrices = self.state.objects.map(|model| model.to_cols_array());
                 giz.draw_cubes(
                     &self.state.camera_view,
                     &self.state.camera_proj,
-                    &self.state.objects[0..count],
+                    &matrices[..count],
                 );
                 // Manipulate (foreground drawlist already set)
                 for i in 0..count {

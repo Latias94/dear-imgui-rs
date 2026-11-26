@@ -628,7 +628,7 @@ impl RuntimeControl {
         self.with_renderer_mut(|renderer| {
             let pending = frame
                 .try_render(renderer.renderer_consumer()?)
-                .map_err(RenderError::from)?;
+                .map_err(|(_frame, error)| RenderError::from(error))?;
             renderer.reconcile_frame(pending).map_err(Into::into)
         })
     }
@@ -642,7 +642,7 @@ impl RuntimeControl {
         self.with_renderer_mut(|renderer| {
             let pending = frame
                 .try_render(renderer.renderer_consumer()?)
-                .map_err(RenderError::from)?;
+                .map_err(|(_frame, error)| RenderError::from(error))?;
             let feedback = pending
                 .texture_requests()
                 .iter()

@@ -1,16 +1,10 @@
-use super::buffers::{StringInputBuffer, validate_input_buffer_size};
-use super::callback_bridge::{
-    StringCallbackState, im_string_resize_callback, string_callback_router,
-};
+use super::callback_bridge::with_string_input_buffer;
 use super::callbacks::{InputTextCallback, InputTextCallbackHandler, PassthroughCallback};
 use super::validation::validate_input_text_flags;
 use crate::InputTextFlags;
-use crate::string::ImString;
 use crate::sys;
 use crate::ui::Ui;
 use std::borrow::Cow;
-use std::ffi::c_void;
-use std::marker::PhantomData;
 
 /// Builder for a text input widget
 #[must_use]
@@ -22,107 +16,8 @@ pub struct InputText<'ui, 'p, L = Cow<'ui, str>, H = Cow<'ui, str>, T = Passthro
     capacity_hint: Option<usize>,
     hint: Option<H>,
     callback_handler: T,
-    _phantom: PhantomData<&'ui ()>,
 }
 
-/// Builder for a text input backed by ImString (zero-copy)
-#[must_use]
-pub struct InputTextImStr<'ui, 'p, L = Cow<'ui, str>, H = Cow<'ui, str>, T = PassthroughCallback> {
-    ui: &'ui Ui,
-    label: L,
-    buf: &'p mut ImString,
-    flags: InputTextFlags,
-    hint: Option<H>,
-    callback_handler: T,
-    _phantom: PhantomData<&'ui ()>,
-}
-
-impl<'ui, 'p> InputTextImStr<'ui, 'p, Cow<'ui, str>, Cow<'ui, str>, PassthroughCallback> {
-    pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>, buf: &'p mut ImString) -> Self {
-        Self {
-            ui,
-            label: label.into(),
-            buf,
-            flags: InputTextFlags::empty(),
-            hint: None,
-            callback_handler: PassthroughCallback,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> {
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
-        self.flags = flags;
-        self
-    }
-    pub fn hint<H2: AsRef<str>>(self, hint: H2) -> InputTextImStr<'ui, 'p, L, H2, T> {
-        InputTextImStr {
-            ui: self.ui,
-            label: self.label,
-            buf: self.buf,
-            flags: self.flags,
-            hint: Some(hint),
-            callback_handler: self.callback_handler,
-            _phantom: PhantomData,
-        }
-    }
-    pub fn read_only(mut self, ro: bool) -> Self {
-        self.flags.set(InputTextFlags::READ_ONLY, ro);
-        self
-    }
-    pub fn password(mut self, pw: bool) -> Self {
-        self.flags.set(InputTextFlags::PASSWORD, pw);
-        self
-    }
-    pub fn auto_select_all(mut self, v: bool) -> Self {
-        self.flags.set(InputTextFlags::AUTO_SELECT_ALL, v);
-        self
-    }
-    pub fn enter_returns_true(mut self, v: bool) -> Self {
-        self.flags.set(InputTextFlags::ENTER_RETURNS_TRUE, v);
-        self
-    }
-
-    pub fn build(self) -> bool {
-        validate_input_text_flags("InputTextImStr::build()", self.flags);
-        let (label_ptr, hint_ptr) = self.ui.scratch_txt_with_opt(
-            self.label.as_ref(),
-            self.hint.as_ref().map(|hint| hint.as_ref()),
-        );
-        let buf_size = self.buf.len() + 1;
-        validate_input_buffer_size(buf_size);
-        let buf_ptr = self.buf.as_mut_ptr();
-        let user_ptr = self.buf as *mut ImString as *mut c_void;
-
-        let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
-        let result = self.ui.run_input_widget(label_ptr, || unsafe {
-            if hint_ptr.is_null() {
-                sys::igInputText(
-                    label_ptr,
-                    buf_ptr,
-                    buf_size,
-                    flags,
-                    Some(im_string_resize_callback),
-                    user_ptr,
-                )
-            } else {
-                sys::igInputTextWithHint(
-                    label_ptr,
-                    hint_ptr,
-                    buf_ptr,
-                    buf_size,
-                    flags,
-                    Some(im_string_resize_callback),
-                    user_ptr,
-                )
-            }
-        });
-        // Ensure ImString logical length reflects actual text (scan to NUL)
-        unsafe { self.buf.refresh_len() };
-        result
-    }
-}
 impl<'ui, 'p> InputText<'ui, 'p, Cow<'ui, str>, Cow<'ui, str>, PassthroughCallback> {
     /// Creates a new text input builder
     pub fn new(ui: &'ui Ui, label: impl Into<Cow<'ui, str>>, buf: &'p mut String) -> Self {
@@ -134,7 +29,6 @@ impl<'ui, 'p> InputText<'ui, 'p, Cow<'ui, str>, Cow<'ui, str>, PassthroughCallba
             capacity_hint: None,
             hint: None,
             callback_handler: PassthroughCallback,
-            _phantom: PhantomData,
         }
     }
 }
@@ -162,7 +56,6 @@ impl<'ui, 'p, L, H, T> InputText<'ui, 'p, L, H, T> {
             capacity_hint: self.capacity_hint,
             hint: Some(hint.into()),
             callback_handler: self.callback_handler,
-            _phantom: PhantomData,
         }
     }
 
@@ -179,7 +72,6 @@ impl<'ui, 'p, L, H, T> InputText<'ui, 'p, L, H, T> {
             capacity_hint: self.capacity_hint,
             hint: self.hint,
             callback_handler,
-            _phantom: PhantomData,
         }
     }
 
@@ -249,41 +141,25 @@ where
     /// Builds the text input widget
     pub fn build(self) -> bool {
         validate_input_text_flags("InputText::build()", self.flags);
-        let (label_ptr, hint_ptr) = self.ui.scratch_txt_with_opt(
-            self.label.as_ref(),
-            self.hint.as_ref().map(|hint| hint.as_ref()),
-        );
-
-        let mut input_buffer = StringInputBuffer::new(self.buf, self.capacity_hint);
-        let capacity = input_buffer.bytes.len();
-        let buf_ptr = input_buffer.bytes.as_mut_ptr().cast();
-
-        let mut callback_state =
-            StringCallbackState::new(&mut input_buffer.bytes, self.callback_handler);
-        let user_ptr = callback_state.user_ptr();
-
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
-        self.ui.run_input_widget(label_ptr, || unsafe {
-            if hint_ptr.is_null() {
-                sys::igInputText(
-                    label_ptr,
-                    buf_ptr,
-                    capacity,
-                    flags,
-                    Some(string_callback_router::<T>),
-                    user_ptr,
-                )
-            } else {
-                sys::igInputTextWithHint(
-                    label_ptr,
-                    hint_ptr,
-                    buf_ptr,
-                    capacity,
-                    flags,
-                    Some(string_callback_router::<T>),
-                    user_ptr,
-                )
-            }
-        })
+        with_string_input_buffer(
+            self.buf,
+            self.capacity_hint,
+            self.callback_handler,
+            |buf, size, callback, user_data| {
+                self.ui.with_scratch_buffer(|scratch| {
+                    let (label, hint) = scratch.scratch_txt_with_opt(self.label, self.hint);
+                    self.ui.run_input_widget(label, || unsafe {
+                        if hint.is_null() {
+                            sys::igInputText(label, buf, size, flags, callback, user_data)
+                        } else {
+                            sys::igInputTextWithHint(
+                                label, hint, buf, size, flags, callback, user_data,
+                            )
+                        }
+                    })
+                })
+            },
+        )
     }
 }

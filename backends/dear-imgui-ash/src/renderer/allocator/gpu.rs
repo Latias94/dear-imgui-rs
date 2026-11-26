@@ -117,7 +117,7 @@ impl Allocate for Allocator {
             name: "",
             requirements,
             location: MemoryLocation::GpuOnly,
-            linear: true,
+            linear: false,
             allocation_scheme: AllocationScheme::GpuAllocatorManaged,
         }) {
             Ok(allocation) => allocation,

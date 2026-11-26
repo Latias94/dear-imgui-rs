@@ -6,28 +6,32 @@ use dear_imgui_rs::{
     HistoryDirection, InputTextCallback, InputTextCallbackHandler, TextCallbackData,
 };
 
-use crate::dialog_core::CoreEvent;
+use crate::dialog_core::{CoreEvent, ProjectedEntries};
 use crate::dialog_state::{FileDialogState, PathBarStyle};
+use crate::fs::display_path;
 
-struct PathBarCallback {
-    cwd: PathBuf,
-    completion_dirs: Vec<String>,
-    recent_paths: Vec<String>,
-    history_index: *mut Option<usize>,
-    history_saved_buffer: *mut Option<String>,
-    programmatic_edit: *mut bool,
+struct PathBarCallback<'a> {
+    cwd: &'a Path,
+    entries: ProjectedEntries<'a>,
+    recent_paths: &'a [PathBuf],
+    history_index: &'a mut Option<usize>,
+    history_saved_buffer: &'a mut Option<(String, Option<PathBuf>)>,
+    buffer_path: &'a mut Option<PathBuf>,
+    programmatic_edit: &'a mut bool,
 }
 
-impl PathBarCallback {
+impl PathBarCallback<'_> {
     fn set_text(&mut self, mut data: TextCallbackData, text: &str) {
-        let old = data.str();
+        let Ok(old) = data.str() else {
+            return;
+        };
+        *self.programmatic_edit = true;
         if old == text {
             return;
         }
         data.remove_chars(0, old.len());
         data.insert_chars(0, text);
         data.set_cursor_pos(text.len());
-        unsafe { *self.programmatic_edit = true };
     }
 
     fn common_prefix_len(a: &str, b: &str) -> usize {
@@ -74,7 +78,10 @@ impl PathBarCallback {
     }
 
     fn try_complete_path(&mut self, data: TextCallbackData) {
-        let input = data.str().trim();
+        let Ok(input) = data.str() else {
+            return;
+        };
+        let input = input.trim();
         if input.is_empty() {
             return;
         }
@@ -89,7 +96,7 @@ impl PathBarCallback {
         }
 
         let base_dir = if dir_prefix.is_empty() {
-            self.cwd.clone()
+            self.cwd.to_owned()
         } else {
             let raw = PathBuf::from(dir_prefix);
             if raw.is_absolute() {
@@ -99,30 +106,29 @@ impl PathBarCallback {
             }
         };
 
-        if base_dir != self.cwd {
+        if base_dir != self.cwd && display_path(&base_dir) != display_path(self.cwd) {
             return;
         }
 
         let mut matches = self
-            .completion_dirs
+            .entries
             .iter()
-            .filter(|name| Self::starts_with_case_insensitive(name, frag))
-            .cloned()
+            .filter(|entry| entry.is_dir && Self::starts_with_case_insensitive(&entry.name, frag))
             .collect::<Vec<_>>();
         if matches.is_empty() {
             return;
         }
-        matches.sort();
+        matches.sort_unstable_by(|left, right| left.name.cmp(&right.name));
 
         let completed = if matches.len() == 1 {
-            let mut s = matches[0].clone();
+            let mut s = matches[0].name.clone();
             s.push(sep);
             s
         } else {
-            let first = matches[0].as_str();
+            let first = matches[0].name.as_str();
             let mut prefix_len = first.len();
             for other in matches.iter().skip(1) {
-                prefix_len = prefix_len.min(Self::common_prefix_len(first, other));
+                prefix_len = prefix_len.min(Self::common_prefix_len(first, &other.name));
             }
             first[..prefix_len].to_string()
         };
@@ -133,8 +139,9 @@ impl PathBarCallback {
             format!("{dir_prefix}{completed}")
         };
 
-        unsafe { *self.history_index = None };
-        unsafe { *self.history_saved_buffer = None };
+        *self.history_index = None;
+        *self.history_saved_buffer = None;
+        *self.buffer_path = (matches.len() == 1).then(|| matches[0].path.clone());
         self.set_text(data, &new_text);
     }
 
@@ -142,50 +149,34 @@ impl PathBarCallback {
         if self.recent_paths.is_empty() {
             return;
         }
+        let Ok(input) = data.str() else {
+            return;
+        };
 
-        let idx = unsafe { &mut *self.history_index };
-        let saved = unsafe { &mut *self.history_saved_buffer };
-
-        match (direction, *idx) {
+        let index = match (direction, *self.history_index) {
             (HistoryDirection::Up, None) => {
-                *saved = Some(data.str().to_string());
-                *idx = Some(0);
-                let p = self.recent_paths[0].clone();
-                self.set_text(data, &p);
+                *self.history_saved_buffer = Some((input.to_owned(), self.buffer_path.clone()));
+                0
+            }
+            (HistoryDirection::Up, Some(index)) if index + 1 < self.recent_paths.len() => index + 1,
+            (HistoryDirection::Down, Some(0)) => {
+                let (text, path) = self.history_saved_buffer.take().unwrap_or_default();
+                *self.history_index = None;
+                *self.buffer_path = path;
+                self.set_text(data, &text);
                 return;
             }
-            (HistoryDirection::Down, None) => return,
-            (_, Some(_)) => {}
-        }
-
-        let Some(mut i) = *idx else { return };
-        match direction {
-            HistoryDirection::Up => {
-                if i + 1 < self.recent_paths.len() {
-                    i += 1;
-                    *idx = Some(i);
-                    let p = self.recent_paths[i].clone();
-                    self.set_text(data, &p);
-                }
-            }
-            HistoryDirection::Down => {
-                if i == 0 {
-                    let restore = saved.clone().unwrap_or_else(String::new);
-                    *idx = None;
-                    *saved = None;
-                    self.set_text(data, &restore);
-                } else {
-                    i -= 1;
-                    *idx = Some(i);
-                    let p = self.recent_paths[i].clone();
-                    self.set_text(data, &p);
-                }
-            }
-        }
+            (HistoryDirection::Down, Some(index)) => index - 1,
+            _ => return,
+        };
+        let path = &self.recent_paths[index];
+        *self.history_index = Some(index);
+        *self.buffer_path = Some(path.clone());
+        self.set_text(data, &display_path(path));
     }
 }
 
-impl InputTextCallbackHandler for PathBarCallback {
+impl InputTextCallbackHandler for PathBarCallback<'_> {
     fn on_completion(&mut self, data: TextCallbackData) {
         self.try_complete_path(data);
     }
@@ -210,29 +201,18 @@ pub(super) fn draw_path_input_text(
         state.ui.runtime.path.focus_next = false;
     }
 
-    let callback_recent_paths = recent_paths
-        .iter()
-        .map(|p| p.display().to_string())
-        .collect::<Vec<_>>();
-    let history_index_ptr: *mut Option<usize> = &mut state.ui.runtime.path.history_index;
-    let history_saved_ptr: *mut Option<String> = &mut state.ui.runtime.path.history_saved_buffer;
-    let programmatic_edit_ptr: *mut bool = &mut state.ui.runtime.path.programmatic_edit;
+    let path = &mut state.ui.runtime.path;
     let callback = PathBarCallback {
-        cwd: state.core.cwd.clone(),
-        completion_dirs: state
-            .core
-            .entries()
-            .iter()
-            .filter(|entry| entry.is_dir)
-            .map(|entry| entry.name.clone())
-            .collect(),
-        recent_paths: callback_recent_paths,
-        history_index: history_index_ptr,
-        history_saved_buffer: history_saved_ptr,
-        programmatic_edit: programmatic_edit_ptr,
+        cwd: &state.core.cwd,
+        entries: state.core.entries(),
+        recent_paths,
+        history_index: &mut path.history_index,
+        history_saved_buffer: &mut path.history_saved_buffer,
+        buffer_path: &mut path.buffer_path,
+        programmatic_edit: &mut path.programmatic_edit,
     };
     let submitted = ui
-        .input_text("##path_bar", &mut state.ui.runtime.path.buffer)
+        .input_text("##path_bar", &mut path.buffer)
         .callback(callback)
         .callback_flags(InputTextCallback::COMPLETION | InputTextCallback::HISTORY)
         .auto_select_all(select_all)
@@ -247,6 +227,7 @@ pub(super) fn draw_path_input_text(
     {
         state.ui.runtime.path.history_index = None;
         state.ui.runtime.path.history_saved_buffer = None;
+        state.ui.runtime.path.buffer_path = None;
     }
     state.ui.runtime.path.programmatic_edit = false;
 
@@ -262,17 +243,25 @@ pub(super) fn draw_path_input_text(
 
 fn submit_path_edit(state: &mut FileDialogState) {
     let input = state.ui.runtime.path.buffer.trim();
-    if input.is_empty() {
+    if input.is_empty() && state.ui.runtime.path.buffer_path.is_none() {
         state.ui.runtime.error = Some("Path is empty".into());
         return;
     }
 
-    let raw_p = std::path::PathBuf::from(input);
-    let raw_p = if raw_p.is_absolute() {
-        raw_p
-    } else {
-        state.core.cwd.join(&raw_p)
-    };
+    let raw_p = state
+        .ui
+        .runtime
+        .path
+        .buffer_path
+        .clone()
+        .unwrap_or_else(|| {
+            let typed = Path::new(input);
+            if typed.is_absolute() {
+                typed.to_owned()
+            } else {
+                state.core.cwd.join(typed)
+            }
+        });
     let (p, metadata) = {
         let fs = state.filesystem.as_file_system();
         let p = fs.canonicalize(&raw_p).unwrap_or(raw_p.clone());
@@ -284,8 +273,8 @@ fn submit_path_edit(state: &mut FileDialogState) {
             if md.is_dir {
                 let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
                 state.ui.runtime.path.edit = false;
-                state.ui.runtime.path.last_cwd = state.core.cwd.display().to_string();
-                state.ui.runtime.path.buffer = state.ui.runtime.path.last_cwd.clone();
+                state.ui.runtime.path.last_cwd.clone_from(&state.core.cwd);
+                state.ui.runtime.path.set_buffer_path(&state.core.cwd);
                 state.ui.runtime.error = None;
             } else {
                 state.ui.runtime.error = Some("Path exists but is not a directory".into());
@@ -338,7 +327,7 @@ pub(super) fn estimate_breadcrumbs_total_width(
         match comp {
             Component::Prefix(p) => {
                 saw_prefix = true;
-                crumbs.push(p.as_os_str().to_string_lossy().to_string());
+                crumbs.push(display_path(Path::new(p.as_os_str())).into_owned());
             }
             Component::RootDir => {
                 // Match IGFD: on Windows, the root separator after a drive/UNC prefix is not a
@@ -417,7 +406,10 @@ pub(super) fn draw_breadcrumbs(
         match comp {
             Component::Prefix(p) => {
                 acc.push(p.as_os_str());
-                crumbs.push((p.as_os_str().to_string_lossy().to_string(), acc.clone()));
+                crumbs.push((
+                    display_path(Path::new(p.as_os_str())).into_owned(),
+                    acc.clone(),
+                ));
                 last_is_prefix = true;
             }
             Component::RootDir => {
@@ -453,14 +445,14 @@ pub(super) fn draw_breadcrumbs(
             }
             if ui.is_item_clicked_with_button(MouseButton::Right) {
                 state.ui.runtime.path.edit = true;
-                state.ui.runtime.path.buffer = path.display().to_string();
+                state.ui.runtime.path.set_buffer_path(path);
                 state.ui.runtime.path.focus_next = true;
                 if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                     state.ui.runtime.path.input_mode = true;
                 }
             }
             if ui.is_item_hovered() {
-                ui.tooltip_text(path.display().to_string());
+                ui.tooltip_text(display_path(path).as_ref());
             }
             if auto_scroll_end && i + 1 == n && state.ui.runtime.breadcrumb.scroll_to_end_next {
                 ui.set_scroll_here_x(1.0);
@@ -479,7 +471,7 @@ pub(super) fn draw_breadcrumbs(
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
                         state.ui.runtime.path.edit = true;
-                        state.ui.runtime.path.buffer = path.display().to_string();
+                        state.ui.runtime.path.set_buffer_path(path);
                         state.ui.runtime.path.focus_next = true;
                         if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                             state.ui.runtime.path.input_mode = true;
@@ -500,14 +492,14 @@ pub(super) fn draw_breadcrumbs(
             }
             if ui.is_item_clicked_with_button(MouseButton::Right) {
                 state.ui.runtime.path.edit = true;
-                state.ui.runtime.path.buffer = path.display().to_string();
+                state.ui.runtime.path.set_buffer_path(path);
                 state.ui.runtime.path.focus_next = true;
                 if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                     state.ui.runtime.path.input_mode = true;
                 }
             }
             if ui.is_item_hovered() {
-                ui.tooltip_text(path.display().to_string());
+                ui.tooltip_text(display_path(path).as_ref());
             }
             ui.same_line();
             if label != sep_label {
@@ -518,7 +510,7 @@ pub(super) fn draw_breadcrumbs(
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
                         state.ui.runtime.path.edit = true;
-                        state.ui.runtime.path.buffer = path.display().to_string();
+                        state.ui.runtime.path.set_buffer_path(path);
                         state.ui.runtime.path.focus_next = true;
                         if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                             state.ui.runtime.path.input_mode = true;
@@ -552,7 +544,7 @@ pub(super) fn draw_breadcrumbs(
                     break;
                 }
                 if ui.is_item_hovered() {
-                    ui.tooltip_text(path.display().to_string());
+                    ui.tooltip_text(display_path(path).as_ref());
                 }
             }
         }
@@ -568,7 +560,7 @@ pub(super) fn draw_breadcrumbs(
                 }
                 if ui.is_item_clicked_with_button(MouseButton::Right) {
                     state.ui.runtime.path.edit = true;
-                    state.ui.runtime.path.buffer = parent.display().to_string();
+                    state.ui.runtime.path.set_buffer_path(parent);
                     state.ui.runtime.path.focus_next = true;
                     if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                         state.ui.runtime.path.input_mode = true;
@@ -592,14 +584,14 @@ pub(super) fn draw_breadcrumbs(
             }
             if ui.is_item_clicked_with_button(MouseButton::Right) {
                 state.ui.runtime.path.edit = true;
-                state.ui.runtime.path.buffer = path.display().to_string();
+                state.ui.runtime.path.set_buffer_path(path);
                 state.ui.runtime.path.focus_next = true;
                 if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                     state.ui.runtime.path.input_mode = true;
                 }
             }
             if ui.is_item_hovered() {
-                ui.tooltip_text(path.display().to_string());
+                ui.tooltip_text(display_path(path).as_ref());
             }
             if auto_scroll_end && i + 1 == n && state.ui.runtime.breadcrumb.scroll_to_end_next {
                 ui.set_scroll_here_x(1.0);
@@ -614,7 +606,7 @@ pub(super) fn draw_breadcrumbs(
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
                         state.ui.runtime.path.edit = true;
-                        state.ui.runtime.path.buffer = path.display().to_string();
+                        state.ui.runtime.path.set_buffer_path(path);
                         state.ui.runtime.path.focus_next = true;
                         if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                             state.ui.runtime.path.input_mode = true;

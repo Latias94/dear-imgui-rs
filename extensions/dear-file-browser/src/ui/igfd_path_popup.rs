@@ -120,7 +120,7 @@ fn draw_igfd_path_table_popup(
                 break;
             }
             if ui.is_item_hovered() {
-                ui.tooltip_text(path.display().to_string());
+                ui.tooltip_text(crate::fs::display_path(path).as_ref());
             }
         }
     }

@@ -551,7 +551,6 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
     // The text draw above succeeds only after the renderer processes the requeued font-atlas
     // create request. Managed atlas bindings intentionally have no public TextureId bypass.
 
-    let suspended_owner = context.suspend_or_panic();
     let mut foreign_context = Context::create();
     let foreign_flags = foreign_context.io().backend_flags();
     let foreign_consumer = foreign_context.create_synchronous_renderer_consumer()?;
@@ -578,10 +577,6 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
     foreign_context.io_mut().set_backend_flags(foreign_flags);
     assert_eq!(foreign_context.io().backend_flags(), foreign_flags);
 
-    let suspended_foreign = foreign_context.suspend_or_panic();
-    let mut context = suspended_owner
-        .activate()
-        .expect("renderer owner context should reactivate");
     render_test_frame(&mut renderer, &mut context, &device, &queue, None, None)?;
 
     renderer.shutdown(&mut context)?;
@@ -600,25 +595,21 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
     replacement.shutdown(&mut context)?;
     drop(replacement);
 
-    let suspended_owner = context.suspend_or_panic();
-    let mut context = suspended_foreign
-        .activate()
-        .expect("replacement context should activate after owner shutdown");
-    drop(suspended_owner);
+    drop(context);
 
     let mut foreign_renderer = WgpuRenderer::new(
         WgpuInitInfo::new(device.clone(), queue.clone(), format),
-        &mut context,
+        &mut foreign_context,
     )?;
     render_test_frame(
         &mut foreign_renderer,
-        &mut context,
+        &mut foreign_context,
         &device,
         &queue,
         None,
         None,
     )?;
-    foreign_renderer.shutdown(&mut context)?;
+    foreign_renderer.shutdown(&mut foreign_context)?;
 
     Ok(())
 }

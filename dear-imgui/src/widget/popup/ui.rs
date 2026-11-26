@@ -23,8 +23,7 @@ impl Ui {
     /// that do not need to initialize popup-local state may ignore the result.
     #[doc(alias = "OpenPopup")]
     pub fn open_popup(&self, str_id: impl AsRef<str>) -> bool {
-        let str_id_ptr = self.scratch_txt(str_id);
-        self.run_with_bound_context(|| unsafe {
+        self.with_scratch_txt(str_id, |str_id_ptr| unsafe {
             sys::igOpenPopup_Str(str_id_ptr, PopupOpenFlags::NONE.raw())
         })
     }
@@ -35,8 +34,9 @@ impl Ui {
     #[doc(alias = "OpenPopup")]
     pub fn open_popup_with_flags(&self, str_id: impl AsRef<str>, flags: PopupOpenFlags) -> bool {
         validate_popup_open_flags("Ui::open_popup_with_flags()", flags);
-        let str_id_ptr = self.scratch_txt(str_id);
-        self.run_with_bound_context(|| unsafe { sys::igOpenPopup_Str(str_id_ptr, flags.raw()) })
+        self.with_scratch_txt(str_id, |str_id_ptr| unsafe {
+            sys::igOpenPopup_Str(str_id_ptr, flags.raw())
+        })
     }
 
     /// Opens a popup by an ID from the current ID stack.
@@ -80,10 +80,7 @@ impl Ui {
     ) -> bool {
         let options = flags.into();
         options.validate("Ui::open_popup_on_item_click_with_flags()");
-        let str_id_ptr = str_id
-            .map(|s| self.scratch_txt(s))
-            .unwrap_or(std::ptr::null());
-        self.run_with_bound_context(|| unsafe {
+        self.with_scratch_txt_opt(str_id, |str_id_ptr| unsafe {
             sys::igOpenPopupOnItemClick(str_id_ptr, options.raw())
         })
     }
@@ -105,9 +102,9 @@ impl Ui {
         flags: WindowFlags,
     ) -> Option<PopupToken<'_>> {
         validate_window_flags("Ui::begin_popup_with_flags()", flags);
-        let str_id_ptr = self.scratch_txt(str_id);
-        let render =
-            self.run_with_bound_context(|| unsafe { sys::igBeginPopup(str_id_ptr, flags.bits()) });
+        let render = self.with_scratch_txt(str_id, |str_id_ptr| unsafe {
+            sys::igBeginPopup(str_id_ptr, flags.bits())
+        });
 
         if render {
             Some(PopupToken::new(self))
@@ -135,8 +132,7 @@ impl Ui {
     /// Modal popups block interaction with the rest of the application until closed.
     #[doc(alias = "BeginPopupModal")]
     pub fn begin_modal_popup(&self, name: impl AsRef<str>) -> Option<ModalPopupToken<'_>> {
-        let name_ptr = self.scratch_txt(name);
-        let render = self.run_with_bound_context(|| unsafe {
+        let render = self.with_scratch_txt(name, |name_ptr| unsafe {
             sys::igBeginPopupModal(name_ptr, std::ptr::null_mut(), WindowFlags::empty().bits())
         });
 
@@ -161,9 +157,8 @@ impl Ui {
         name: impl AsRef<str>,
         opened: &mut bool,
     ) -> Option<ModalPopupToken<'_>> {
-        let name_ptr = self.scratch_txt(name);
         let opened_ptr = opened as *mut bool;
-        let render = self.run_with_bound_context(|| unsafe {
+        let render = self.with_scratch_txt(name, |name_ptr| unsafe {
             sys::igBeginPopupModal(name_ptr, opened_ptr, WindowFlags::empty().bits())
         });
 
@@ -227,8 +222,7 @@ impl Ui {
     /// Returns true if the popup is open.
     #[doc(alias = "IsPopupOpen")]
     pub fn is_popup_open(&self, str_id: impl AsRef<str>) -> bool {
-        let str_id_ptr = self.scratch_txt(str_id);
-        self.run_with_bound_context(|| unsafe {
+        self.with_scratch_txt(str_id, |str_id_ptr| unsafe {
             sys::igIsPopupOpen_Str(str_id_ptr, PopupQueryFlags::NONE.raw())
         })
     }
@@ -241,8 +235,9 @@ impl Ui {
         flags: PopupQueryFlags,
     ) -> bool {
         validate_popup_query_flags("Ui::is_popup_open_with_flags()", flags);
-        let str_id_ptr = self.scratch_txt(str_id);
-        self.run_with_bound_context(|| unsafe { sys::igIsPopupOpen_Str(str_id_ptr, flags.raw()) })
+        self.with_scratch_txt(str_id, |str_id_ptr| unsafe {
+            sys::igIsPopupOpen_Str(str_id_ptr, flags.raw())
+        })
     }
 
     /// Begin a popup context menu for the last item.
@@ -269,11 +264,7 @@ impl Ui {
     ) -> Option<PopupToken<'_>> {
         let options = flags.into();
         options.validate("Ui::begin_popup_context_item_with_flags()");
-        let str_id_ptr = str_id
-            .map(|s| self.scratch_txt(s))
-            .unwrap_or(std::ptr::null());
-
-        let render = self.run_with_bound_context(|| unsafe {
+        let render = self.with_scratch_txt_opt(str_id, |str_id_ptr| unsafe {
             sys::igBeginPopupContextItem(str_id_ptr, options.raw())
         });
 
@@ -304,11 +295,7 @@ impl Ui {
     ) -> Option<PopupToken<'_>> {
         let options = flags.into();
         options.validate("Ui::begin_popup_context_window_with_flags()");
-        let str_id_ptr = str_id
-            .map(|s| self.scratch_txt(s))
-            .unwrap_or(std::ptr::null());
-
-        let render = self.run_with_bound_context(|| unsafe {
+        let render = self.with_scratch_txt_opt(str_id, |str_id_ptr| unsafe {
             sys::igBeginPopupContextWindow(str_id_ptr, options.raw())
         });
 
@@ -339,11 +326,7 @@ impl Ui {
     ) -> Option<PopupToken<'_>> {
         let options = flags.into();
         options.validate("Ui::begin_popup_context_void_with_flags()");
-        let str_id_ptr = str_id
-            .map(|s| self.scratch_txt(s))
-            .unwrap_or(std::ptr::null());
-
-        let render = self.run_with_bound_context(|| unsafe {
+        let render = self.with_scratch_txt_opt(str_id, |str_id_ptr| unsafe {
             sys::igBeginPopupContextVoid(str_id_ptr, options.raw())
         });
 

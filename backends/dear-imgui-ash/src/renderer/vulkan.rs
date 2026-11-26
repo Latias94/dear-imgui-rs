@@ -148,11 +148,24 @@ pub fn create_vulkan_pipeline_layout(
     Ok(pipeline_layout)
 }
 
-pub fn create_vulkan_pipeline(
+#[cfg(feature = "dynamic-rendering")]
+fn pipeline_rendering_info(
+    color_attachment_formats: &[vk::Format],
+    depth_attachment_format: Option<vk::Format>,
+    stencil_attachment_format: vk::Format,
+) -> vk::PipelineRenderingCreateInfo<'_> {
+    vk::PipelineRenderingCreateInfo::default()
+        .color_attachment_formats(color_attachment_formats)
+        .depth_attachment_format(depth_attachment_format.unwrap_or(vk::Format::UNDEFINED))
+        .stencil_attachment_format(stencil_attachment_format)
+}
+
+pub(super) fn create_vulkan_pipeline(
     device: &Device,
     pipeline_layout: vk::PipelineLayout,
     render_target: RenderTarget,
     options: Options,
+    #[cfg(feature = "dynamic-rendering")] stencil_attachment_format: vk::Format,
 ) -> RendererResult<vk::Pipeline> {
     let entry_point_name = CString::new("main").unwrap();
 
@@ -282,11 +295,11 @@ pub fn create_vulkan_pipeline(
         #[cfg(feature = "dynamic-rendering")]
         RenderTarget::DynamicRendering(dynamic_rendering) => {
             let color_attachment_formats = [dynamic_rendering.color_attachment_format];
-            let mut rendering_info = vk::PipelineRenderingCreateInfo::default()
-                .color_attachment_formats(&color_attachment_formats);
-            if let Some(depth_attachment_format) = dynamic_rendering.depth_attachment_format {
-                rendering_info = rendering_info.depth_attachment_format(depth_attachment_format);
-            }
+            let mut rendering_info = pipeline_rendering_info(
+                &color_attachment_formats,
+                dynamic_rendering.depth_attachment_format,
+                stencil_attachment_format,
+            );
             let pipeline_info = pipeline_info.push_next(&mut rendering_info);
             unsafe {
                 device.create_graphics_pipelines(
@@ -476,6 +489,7 @@ impl VulkanRendererResources {
         device: &Device,
         render_target: RenderTarget,
         options: Options,
+        #[cfg(feature = "dynamic-rendering")] stencil_attachment_format: vk::Format,
     ) -> RendererResult<Self> {
         let mut resources = Self::empty();
         let result = (|| {
@@ -488,8 +502,14 @@ impl VulkanRendererResources {
                 resources.sampled_image_set_layout,
                 resources.sampler_set_layout,
             )?;
-            resources.pipeline =
-                create_vulkan_pipeline(device, resources.pipeline_layout, render_target, options)?;
+            resources.pipeline = create_vulkan_pipeline(
+                device,
+                resources.pipeline_layout,
+                render_target,
+                options,
+                #[cfg(feature = "dynamic-rendering")]
+                stencil_attachment_format,
+            )?;
             resources.descriptor_pool =
                 create_vulkan_descriptor_pool(device, options.max_textures)?;
             resources.linear_sampler = create_standard_sampler(device, vk::Filter::LINEAR)?;
@@ -798,6 +818,28 @@ fn upload_buffer_to_image(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "dynamic-rendering")]
+    #[test]
+    fn dynamic_pipeline_declares_only_the_bound_depth_and_stencil_aspects() {
+        let colors = [vk::Format::B8G8R8A8_UNORM];
+        let combined = vk::Format::D24_UNORM_S8_UINT;
+        for (depth, stencil) in [
+            (None, vk::Format::UNDEFINED),
+            (Some(vk::Format::D32_SFLOAT), vk::Format::UNDEFINED),
+            (Some(combined), vk::Format::UNDEFINED),
+            (Some(combined), combined),
+            (None, vk::Format::S8_UINT),
+        ] {
+            let info = pipeline_rendering_info(&colors, depth, stencil);
+            assert_eq!(info.color_attachment_count, 1);
+            assert_eq!(
+                info.depth_attachment_format,
+                depth.unwrap_or(vk::Format::UNDEFINED)
+            );
+            assert_eq!(info.stencil_attachment_format, stencil);
+        }
+    }
 
     #[test]
     fn descriptor_pool_reserves_images_and_two_renderer_owned_samplers() {

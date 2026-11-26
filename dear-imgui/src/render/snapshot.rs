@@ -701,6 +701,8 @@ pub enum TextureFeedbackError {
 /// Error returned when a snapshot cannot be captured.
 #[derive(Debug, Error)]
 pub enum SnapshotError {
+    #[error("this frame already rendered for synchronous capture")]
+    FrameAlreadyRendered,
     #[error("user callback commands are not supported by detached snapshots")]
     UserCallbackUnsupported,
     #[error("draw data contains a managed texture not owned by this Context or its font atlas")]
@@ -1708,14 +1710,12 @@ mod tests {
             &pending.viewports[1].draw
         ));
 
-        let suspended_context = context.suspend_or_panic();
+        let suspended_context = context;
         let other_context = crate::Context::create();
         assert!(!pending.viewports[0].is_main());
         assert!(pending.viewports[1].is_main());
         drop(other_context);
-        let _context = suspended_context
-            .activate()
-            .expect("the snapshot owner Context should reactivate");
+        let _context = suspended_context;
 
         unsafe {
             (*main).DrawData = previous_main_draw;

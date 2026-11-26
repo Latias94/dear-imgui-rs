@@ -84,7 +84,10 @@ Rust text access continues to use UTF-8 with owned results.
 The native static library is named `dear_imgui_cte`. Maintained source builds
 use C++20 and disable C++ exceptions (`/EHs-c-` and `_HAS_EXCEPTIONS=0` on
 MSVC, `-fno-exceptions` elsewhere). Bridge entry points are `noexcept`.
-Allocation failure therefore terminates instead of unwinding into Rust.
+The editor constructor returns null if the ImGui allocator refuses its storage.
+Other allocation failures can still terminate in builds without exceptions.
+When compiled with C++ exceptions enabled, the bridge translates exceptions to
+the existing error status or a null constructor result.
 
 ## Environment Variables
 

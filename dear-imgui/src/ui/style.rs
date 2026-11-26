@@ -128,14 +128,14 @@ impl Ui {
     /// Returns true when a different style was selected.
     #[doc(alias = "ShowStyleSelector")]
     pub fn show_style_selector(&self, label: impl AsRef<str>) -> bool {
-        self.run_with_bound_context(|| unsafe { sys::igShowStyleSelector(self.scratch_txt(label)) })
+        self.with_scratch_txt(label, |label| unsafe { sys::igShowStyleSelector(label) })
     }
 
     /// Renders a font selector combo box.
     #[doc(alias = "ShowFontSelector")]
     pub fn show_font_selector(&self, label: impl AsRef<str>) {
-        self.run_with_bound_context(|| unsafe {
-            sys::igShowFontSelector(self.scratch_txt(label));
+        self.with_scratch_txt(label, |label| unsafe {
+            sys::igShowFontSelector(label);
         });
     }
 }

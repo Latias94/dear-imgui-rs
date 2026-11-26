@@ -1,21 +1,26 @@
+use std::borrow::Cow;
+#[cfg(test)]
 use std::cell::Cell;
+use std::cell::OnceCell;
 use std::cmp::Ordering;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::rc::Rc;
+use std::sync::Arc;
 use std::{
-    collections::{BTreeSet, HashSet, VecDeque, btree_set, hash_map::DefaultHasher},
+    collections::{BTreeSet, HashMap, VecDeque, btree_set, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
 };
 
 use crate::core::{
-    ClickAction, DialogMode, ExtensionPolicy, FileDialogError, FileFilter, SavePolicy, Selection,
-    SortBy, SortMode,
+    ClickAction, DialogMode, ExtensionPolicy, FileDialogError, FileFilter, IgfdFilterParseError,
+    SavePolicy, Selection, SortBy, SortMode, build_filter_regex, regex_token,
 };
 use crate::fs::{FileSystem, FsEntry};
 use crate::places::Places;
 use crate::scan::{FileSystemCapability, RuntimeBatch, RuntimeBatchKind, ScanRuntime};
 use indexmap::IndexSet;
-use regex::RegexBuilder;
 
 #[cfg(feature = "tracing")]
 use tracing::trace;
@@ -321,7 +326,7 @@ pub enum ScanStatus {
     },
 }
 
-type ScanHookFn = dyn FnMut(&mut FsEntry) -> ScanHookAction + 'static;
+type ScanHookFn = dyn FnMut(&mut FsEntry) -> ScanHookAction + Send + 'static;
 
 struct ScanHook {
     inner: Box<ScanHookFn>,
@@ -336,7 +341,7 @@ impl std::fmt::Debug for ScanHook {
 impl ScanHook {
     fn new<F>(hook: F) -> Self
     where
-        F: FnMut(&mut FsEntry) -> ScanHookAction + 'static,
+        F: FnMut(&mut FsEntry) -> ScanHookAction + Send + 'static,
     {
         Self {
             inner: Box::new(hook),
@@ -393,11 +398,11 @@ pub(crate) struct DirEntry {
 
 impl DirEntry {
     /// A display label used by the default UI (dirs are bracketed).
-    pub(crate) fn display_name(&self) -> String {
+    pub(crate) fn display_name(&self) -> Cow<'_, str> {
         if self.is_dir {
-            format!("[{}]", self.name)
+            Cow::Owned(format!("[{}]", self.name))
         } else {
-            self.name.clone()
+            Cow::Borrowed(&self.name)
         }
     }
 
@@ -448,6 +453,7 @@ impl ProjectionOrder {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct ProjectionComparisonMetrics {
     comparisons: Cell<usize>,
@@ -455,6 +461,7 @@ struct ProjectionComparisonMetrics {
     batch_start_sequence: Cell<u64>,
 }
 
+#[cfg(test)]
 impl Default for ProjectionComparisonMetrics {
     fn default() -> Self {
         Self {
@@ -465,6 +472,7 @@ impl Default for ProjectionComparisonMetrics {
     }
 }
 
+#[cfg(test)]
 impl ProjectionComparisonMetrics {
     const NO_BATCH: u64 = u64::MAX;
 
@@ -502,6 +510,7 @@ impl ProjectionComparisonMetrics {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Default)]
 struct ProjectionMetricSnapshot {
     comparisons: usize,
@@ -510,25 +519,28 @@ struct ProjectionMetricSnapshot {
 
 #[derive(Clone, Copy, Debug, Default)]
 struct ProjectionBatchWork {
+    #[cfg(test)]
     comparisons: usize,
+    #[cfg(test)]
     existing_entry_visits: usize,
 }
 
 #[derive(Debug)]
 struct ProjectedEntry {
-    entry: DirEntry,
+    entry: Arc<DirEntry>,
     name_lower: String,
     sequence: u64,
     order: ProjectionOrder,
+    #[cfg(test)]
     metrics: Rc<ProjectionComparisonMetrics>,
 }
 
 impl ProjectedEntry {
     fn new(
-        entry: DirEntry,
+        entry: Arc<DirEntry>,
         sequence: u64,
         order: ProjectionOrder,
-        metrics: Rc<ProjectionComparisonMetrics>,
+        #[cfg(test)] metrics: Rc<ProjectionComparisonMetrics>,
     ) -> Self {
         let name_lower = entry.name.to_lowercase();
         Self {
@@ -536,6 +548,7 @@ impl ProjectedEntry {
             name_lower,
             sequence,
             order,
+            #[cfg(test)]
             metrics,
         }
     }
@@ -557,6 +570,7 @@ impl PartialOrd for ProjectedEntry {
 
 impl Ord for ProjectedEntry {
     fn cmp(&self, other: &Self) -> Ordering {
+        #[cfg(test)]
         if Rc::ptr_eq(&self.metrics, &other.metrics) {
             self.metrics
                 .record_comparison(self.sequence, other.sequence);
@@ -574,16 +588,25 @@ impl Ord for ProjectedEntry {
 #[derive(Debug, Default)]
 struct EntryProjection {
     entries: BTreeSet<ProjectedEntry>,
-    visible_ids: HashSet<EntryId>,
+    by_id: HashMap<EntryId, Arc<DirEntry>>,
+    ranks: OnceCell<ProjectionRanks>,
     order: Option<ProjectionOrder>,
     next_sequence: u64,
+    #[cfg(test)]
     metrics: Rc<ProjectionComparisonMetrics>,
+}
+
+#[derive(Debug, Default)]
+struct ProjectionRanks {
+    rows: Vec<EntryId>,
+    by_id: HashMap<EntryId, usize>,
 }
 
 impl EntryProjection {
     fn rebuild(&mut self, order: ProjectionOrder, entries: Vec<DirEntry>) {
         self.entries.clear();
-        self.visible_ids.clear();
+        self.by_id.clear();
+        self.ranks.take();
         self.order = Some(order);
         self.next_sequence = 0;
         for entry in entries {
@@ -599,22 +622,35 @@ impl EntryProjection {
         if self.order != Some(order) {
             return None;
         }
+        if !entries.is_empty() {
+            self.ranks.take();
+        }
+        #[cfg(test)]
         let before = self.metrics.begin_batch(self.next_sequence);
         for entry in entries {
             self.insert(entry, order);
         }
-        Some(self.metrics.finish_batch(before))
+        #[cfg(test)]
+        let work = self.metrics.finish_batch(before);
+        #[cfg(not(test))]
+        let work = ProjectionBatchWork::default();
+        Some(work)
     }
 
     fn insert(&mut self, entry: DirEntry, order: ProjectionOrder) {
         let id = entry.stable_id();
+        let std::collections::hash_map::Entry::Vacant(slot) = self.by_id.entry(id) else {
+            return;
+        };
+        let entry = Arc::new(entry);
+        slot.insert(Arc::clone(&entry));
         let sequence = self.next_sequence;
         self.next_sequence = self.next_sequence.saturating_add(1);
-        self.visible_ids.insert(id);
         self.entries.insert(ProjectedEntry::new(
             entry,
             sequence,
             order,
+            #[cfg(test)]
             Rc::clone(&self.metrics),
         ));
     }
@@ -634,11 +670,25 @@ impl EntryProjection {
     }
 
     fn contains_id(&self, id: EntryId) -> bool {
-        self.visible_ids.contains(&id)
+        self.by_id.contains_key(&id)
     }
 
     fn entry_by_id(&self, id: EntryId) -> Option<&DirEntry> {
-        self.iter().find(|entry| entry.id == id)
+        self.by_id.get(&id).map(Arc::as_ref)
+    }
+
+    fn ranks(&self) -> &ProjectionRanks {
+        self.ranks.get_or_init(|| {
+            let mut ranks = ProjectionRanks {
+                rows: Vec::with_capacity(self.len()),
+                by_id: HashMap::with_capacity(self.len()),
+            };
+            for (index, entry) in self.iter().enumerate() {
+                ranks.rows.push(entry.id);
+                ranks.by_id.insert(entry.id, index);
+            }
+            ranks
+        })
     }
 }
 
@@ -660,17 +710,13 @@ impl ProjectedEntries<'_> {
     pub(crate) fn iter(&self) -> Self {
         self.clone()
     }
-
-    pub(crate) fn to_vec(&self) -> Vec<DirEntry> {
-        self.clone().cloned().collect()
-    }
 }
 
 impl<'a> Iterator for ProjectedEntries<'a> {
     type Item = &'a DirEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|entry| &entry.entry)
+        self.inner.next().map(|entry| entry.entry.as_ref())
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -680,7 +726,7 @@ impl<'a> Iterator for ProjectedEntries<'a> {
 
 impl DoubleEndedIterator for ProjectedEntries<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        self.inner.next_back().map(|entry| &entry.entry)
+        self.inner.next_back().map(|entry| entry.entry.as_ref())
     }
 }
 
@@ -929,30 +975,41 @@ impl FileDialogCore {
 
     /// Replaces the current filter list and resets selection to "auto first filter".
     ///
-    /// Use [`Self::set_active_filter_all`] to explicitly select "All files" afterwards.
-    pub fn set_filters(&mut self, filters: Vec<FileFilter>) {
+    /// Invalid regular expressions leave the current filters unchanged. Use
+    /// [`Self::set_active_filter_all`] to explicitly select "All files" afterwards.
+    pub fn set_filters(&mut self, filters: Vec<FileFilter>) -> Result<(), IgfdFilterParseError> {
+        for filter in &filters {
+            filter.validate()?;
+        }
         self.filters = filters;
         self.filter_selection_mode = FilterSelectionMode::AutoFirst;
         self.normalize_active_filter();
         self.last_view_key = None;
+        Ok(())
     }
 
     /// Adds a filter to the end of the filter list.
-    pub fn add_filter(&mut self, filter: impl Into<FileFilter>) {
-        self.filters.push(filter.into());
-        self.normalize_active_filter();
-        self.last_view_key = None;
+    pub fn add_filter(
+        &mut self,
+        filter: impl Into<FileFilter>,
+    ) -> Result<(), IgfdFilterParseError> {
+        self.extend_filters([filter])
     }
 
     /// Adds multiple filters to the end of the filter list.
-    pub fn extend_filters<I, F>(&mut self, filters: I)
+    pub fn extend_filters<I, F>(&mut self, filters: I) -> Result<(), IgfdFilterParseError>
     where
         I: IntoIterator<Item = F>,
         F: Into<FileFilter>,
     {
-        self.filters.extend(filters.into_iter().map(Into::into));
+        let filters = filters.into_iter().map(Into::into).collect::<Vec<_>>();
+        for filter in &filters {
+            filter.validate()?;
+        }
+        self.filters.extend(filters);
         self.normalize_active_filter();
         self.last_view_key = None;
+        Ok(())
     }
 
     /// Clears all filters and selects "All files".
@@ -996,6 +1053,35 @@ impl FileDialogCore {
     /// Returns a snapshot of the current entries list.
     pub(crate) fn entries(&self) -> ProjectedEntries<'_> {
         self.entries.iter()
+    }
+
+    pub(crate) fn append_row_ids(&self, range: Range<usize>, ids: &mut Vec<EntryId>) {
+        if self.allow_unresolved_selection() {
+            ids.extend(
+                self.entries()
+                    .skip(range.start)
+                    .take(range.len())
+                    .map(DirEntry::stable_id),
+            );
+        } else {
+            ids.extend_from_slice(&self.entries.ranks().rows[range]);
+        }
+    }
+
+    pub(crate) fn row_index(&self, id: EntryId) -> Option<usize> {
+        if self.allow_unresolved_selection() {
+            self.entries().position(|entry| entry.id == id)
+        } else {
+            self.entries.ranks().by_id.get(&id).copied()
+        }
+    }
+
+    fn id_at_row(&self, index: usize) -> Option<EntryId> {
+        if self.allow_unresolved_selection() {
+            self.entries().nth(index).map(DirEntry::stable_id)
+        } else {
+            self.entries.ranks().rows.get(index).copied()
+        }
     }
 
     /// Apply one core event and return host-facing outcome.
@@ -1121,7 +1207,7 @@ impl FileDialogCore {
     /// Calling this invalidates the directory cache.
     pub(crate) fn set_scan_hook<F>(&mut self, hook: F)
     where
-        F: FnMut(&mut FsEntry) -> ScanHookAction + 'static,
+        F: FnMut(&mut FsEntry) -> ScanHookAction + Send + 'static,
     {
         self.scan_hook = Some(ScanHook::new(hook));
         self.invalidate_dir_cache();
@@ -1285,7 +1371,7 @@ impl FileDialogCore {
         self.filter_projection_entries(&mut entries);
         let visible_entries = entries.len();
         let order = ProjectionOrder::new(self);
-        let Some(work) = self.entries.extend(order, entries) else {
+        let Some(_work) = self.entries.extend(order, entries) else {
             self.last_view_key = None;
             return;
         };
@@ -1294,15 +1380,13 @@ impl FileDialogCore {
         {
             self.projection_stats.incremental_batches += 1;
             self.projection_stats.incremental_input_entries += input_entries;
-            self.projection_stats.incremental_order_comparisons += work.comparisons;
-            self.projection_stats.incremental_existing_entry_visits += work.existing_entry_visits;
+            self.projection_stats.incremental_order_comparisons += _work.comparisons;
+            self.projection_stats.incremental_existing_entry_visits += _work.existing_entry_visits;
         }
         trace_projector_incremental(
             input_entries,
             visible_entries,
             self.entries.len(),
-            work.comparisons,
-            work.existing_entry_visits,
             project_started_at.elapsed().as_micros(),
         );
     }
@@ -1517,8 +1601,13 @@ impl FileDialogCore {
         self.entries.entry_by_id(id)
     }
 
-    fn name_for_id(&self, id: EntryId) -> Option<&str> {
-        self.entry_by_id(id).map(|entry| entry.name.as_str())
+    pub(crate) fn use_entry_as_save_name(&mut self, id: EntryId) {
+        if matches!(self.mode, DialogMode::SaveFile)
+            && let Some(entry) = self.entries.entry_by_id(id)
+            && !entry.is_dir
+        {
+            self.save_name.clone_from(&entry.name);
+        }
     }
 
     /// Select the next entry whose base name starts with the given prefix (case-insensitive).
@@ -1530,26 +1619,22 @@ impl FileDialogCore {
             return;
         }
         let prefix_lower = prefix.to_lowercase();
-        let view_ids = self.projected_entry_ids();
-
-        let len = view_ids.len();
+        let len = self.entries.len();
         let start_idx = self
             .focused_id
-            .and_then(|focused| view_ids.iter().position(|id| *id == focused))
+            .and_then(|focused| self.row_index(focused))
             .map(|i| (i + 1) % len)
             .unwrap_or(0);
 
-        for offset in 0..len {
-            let index = (start_idx + offset) % len;
-            let id = view_ids[index];
-            if self
-                .name_for_id(id)
-                .map(|name| name.to_lowercase().starts_with(&prefix_lower))
-                .unwrap_or(false)
-            {
-                self.select_single_by_id(id);
-                break;
-            }
+        let ordered = self.entries.entries.iter();
+        let found = ordered
+            .clone()
+            .skip(start_idx)
+            .chain(ordered.take(start_idx))
+            .find(|entry| entry.name_lower.starts_with(&prefix_lower))
+            .map(|entry| entry.entry.id);
+        if let Some(id) = found {
+            self.select_single_by_id(id);
         }
     }
 
@@ -1559,16 +1644,9 @@ impl FileDialogCore {
         if cap <= 1 {
             return;
         }
-        let ids = self
-            .entries
-            .iter()
-            .take(cap)
-            .map(DirEntry::stable_id)
-            .collect::<Vec<_>>();
         self.selected_ids.clear();
-        for id in ids {
-            self.selected_ids.insert(id);
-        }
+        self.selected_ids
+            .extend(self.entries.iter().take(cap).map(DirEntry::stable_id));
         let last = self.selected_ids.iter().next_back().copied();
         self.focused_id = last;
         self.selection_anchor_id = last;
@@ -1579,27 +1657,16 @@ impl FileDialogCore {
         if self.entries.is_empty() {
             return;
         }
-        let view_ids = self.projected_entry_ids();
-
-        let len = view_ids.len();
-        let current_idx = self
-            .focused_id
-            .and_then(|id| view_ids.iter().position(|candidate| *candidate == id));
-        let next_idx = match current_idx {
-            Some(index) => {
-                let next = index as i32 + delta;
-                next.clamp(0, (len - 1) as i32) as usize
-            }
-            None => {
-                if delta >= 0 {
-                    0
-                } else {
-                    len - 1
-                }
-            }
+        let last = self.entries.len() - 1;
+        let next_idx = match self.focused_id.and_then(|id| self.row_index(id)) {
+            Some(index) => index.saturating_add_signed(delta as isize).min(last),
+            None if delta < 0 => last,
+            None => 0,
+        };
+        let Some(target_id) = self.id_at_row(next_idx) else {
+            return;
         };
 
-        let target_id = view_ids[next_idx];
         if modifiers.shift {
             let anchor_id = self
                 .selection_anchor_id
@@ -1608,10 +1675,7 @@ impl FileDialogCore {
             if self.selection_anchor_id.is_none() {
                 self.selection_anchor_id = Some(anchor_id);
             }
-            if let Some(range) =
-                select_range_by_id_capped(&view_ids, anchor_id, target_id, self.selection_cap())
-            {
-                self.selected_ids = range.into_iter().collect();
+            if self.select_range(anchor_id, target_id) {
                 self.focused_id = Some(target_id);
             } else {
                 self.select_single_by_id(target_id);
@@ -1636,7 +1700,7 @@ impl FileDialogCore {
 
     /// Handles a click on an entry row.
     pub(crate) fn click_entry(&mut self, id: EntryId, modifiers: Modifiers) {
-        let Some(entry) = self.entry_by_id(id).cloned() else {
+        let Some(entry) = self.entry_by_id(id) else {
             return;
         };
 
@@ -1646,22 +1710,18 @@ impl FileDialogCore {
                     self.select_single_by_id(id);
                 }
                 ClickAction::Navigate => {
-                    self.navigate_to_with_history(entry.path);
+                    self.navigate_to_with_history(entry.path.clone());
                 }
             }
             return;
         }
 
         if modifiers.shift {
-            if let Some(anchor_id) = self.selection_anchor_id {
-                let view_ids = self.projected_entry_ids();
-                if let Some(range) =
-                    select_range_by_id_capped(&view_ids, anchor_id, id, self.selection_cap())
-                {
-                    self.selected_ids = range.into_iter().collect();
-                    self.focused_id = Some(id);
-                    return;
-                }
+            if let Some(anchor_id) = self.selection_anchor_id
+                && self.select_range(anchor_id, id)
+            {
+                self.focused_id = Some(id);
+                return;
             }
             self.select_single_by_id(id);
             return;
@@ -1684,12 +1744,12 @@ impl FileDialogCore {
             return false;
         }
 
-        let Some(entry) = self.entry_by_id(id).cloned() else {
+        let Some(entry) = self.entry_by_id(id) else {
             return false;
         };
 
         if entry.is_dir {
-            self.navigate_to_with_history(entry.path);
+            self.navigate_to_with_history(entry.path.clone());
             return false;
         }
 
@@ -1865,12 +1925,7 @@ impl FileDialogCore {
         if cap == usize::MAX || self.selected_ids.len() <= cap {
             return;
         }
-        while self.selected_ids.len() > cap {
-            let Some(first) = self.selected_ids.iter().next().copied() else {
-                break;
-            };
-            self.selected_ids.shift_remove(&first);
-        }
+        drop(self.selected_ids.drain(..self.selected_ids.len() - cap));
     }
 
     fn retain_selected_visible(&mut self) {
@@ -1917,8 +1972,21 @@ impl FileDialogCore {
         )
     }
 
-    fn projected_entry_ids(&self) -> Vec<EntryId> {
-        self.entries.iter().map(DirEntry::stable_id).collect()
+    fn select_range(&mut self, anchor: EntryId, target: EntryId) -> bool {
+        let (Some(anchor), Some(target)) = (self.row_index(anchor), self.row_index(target)) else {
+            return false;
+        };
+        let cap = self.selection_cap();
+        let range = if anchor <= target {
+            anchor.max((target + 1).saturating_sub(cap))..target + 1
+        } else {
+            target..(anchor + 1).min(target.saturating_add(cap))
+        };
+        let mut ids = Vec::with_capacity(range.len());
+        self.append_row_ids(range, &mut ids);
+        self.selected_ids.clear();
+        self.selected_ids.extend(ids);
+        true
     }
 }
 
@@ -1978,6 +2046,7 @@ fn effective_filters(filters: &[FileFilter], active_filter: Option<usize>) -> Ve
 #[derive(Debug)]
 enum FilterMatcher {
     Any,
+    Invalid,
     Extension(String),
     ExtensionGlob(String),
     NameRegex(regex::Regex),
@@ -1992,14 +2061,11 @@ fn compile_filter_matchers(filters: &[FileFilter]) -> Vec<FilterMatcher> {
                 continue;
             }
 
-            if let Some(re) = parse_regex_token(t) {
-                let built = RegexBuilder::new(re)
-                    .case_insensitive(true)
-                    .build()
-                    .map(FilterMatcher::NameRegex);
-                if let Ok(m) = built {
-                    out.push(m);
-                }
+            if t.starts_with("((") {
+                let matcher = regex_token(t)
+                    .and_then(|pattern| build_filter_regex(pattern).ok())
+                    .map_or(FilterMatcher::Invalid, FilterMatcher::NameRegex);
+                out.push(matcher);
                 continue;
             }
 
@@ -2033,23 +2099,15 @@ fn matches_filter_matchers(name: &str, matchers: &[FilterMatcher]) -> bool {
         return true;
     }
     let name_lower = name.to_lowercase();
-    let ext_full = full_extension_lower(&name_lower);
+    let ext_full = full_extension(name);
 
     matchers.iter().any(|m| match m {
         FilterMatcher::Any => true,
+        FilterMatcher::Invalid => false,
         FilterMatcher::Extension(ext) => has_extension_suffix(&name_lower, ext),
         FilterMatcher::ExtensionGlob(pat) => wildcard_match(pat.as_str(), ext_full),
         FilterMatcher::NameRegex(re) => re.is_match(name),
     })
-}
-
-fn parse_regex_token(token: &str) -> Option<&str> {
-    let t = token.trim();
-    if t.starts_with("((") && t.ends_with("))") && t.len() >= 4 {
-        Some(&t[2..t.len() - 2])
-    } else {
-        None
-    }
 }
 
 fn plain_extension_token(token: &str) -> Option<&str> {
@@ -2057,7 +2115,7 @@ fn plain_extension_token(token: &str) -> Option<&str> {
     if t.is_empty() {
         return None;
     }
-    if parse_regex_token(t).is_some() {
+    if t.starts_with("((") {
         return None;
     }
     if t.contains(['*', '?', '/', '\\', '\0']) {
@@ -2067,54 +2125,47 @@ fn plain_extension_token(token: &str) -> Option<&str> {
 }
 
 fn normalize_extension_glob(token: &str) -> String {
-    let t = token.trim().to_lowercase();
+    let t = token.trim();
     if t.starts_with('.') || t.starts_with('*') || t.starts_with('?') {
-        t
+        t.to_owned()
     } else {
         format!(".{t}")
     }
 }
 
-fn full_extension_lower(name_lower: &str) -> &str {
-    name_lower.find('.').map(|i| &name_lower[i..]).unwrap_or("")
+fn full_extension(name: &str) -> &str {
+    name.find('.').map(|index| &name[index..]).unwrap_or("")
 }
 
 fn wildcard_match(pattern: &str, text: &str) -> bool {
-    // Basic glob matcher supporting `*` and `?`.
-    //
-    // - `*` matches any sequence (including empty)
-    // - `?` matches any single byte
-    let p = pattern.as_bytes();
-    let t = text.as_bytes();
-    let (mut pi, mut ti) = (0usize, 0usize);
-    let mut star_pi: Option<usize> = None;
-    let mut star_ti: usize = 0;
-
-    while ti < t.len() {
-        if pi < p.len() && (p[pi] == b'?' || p[pi] == t[ti]) {
-            pi += 1;
-            ti += 1;
-            continue;
+    let mut pattern = pattern.chars().peekable();
+    let mut text = text.chars().peekable();
+    let mut last_star = None;
+    while let Some(&actual) = text.peek() {
+        match pattern.peek() {
+            Some('*') => {
+                pattern.next();
+                last_star = Some((pattern.clone(), text.clone()));
+            }
+            Some(&expected)
+                if expected == '?'
+                    || expected == actual
+                    || expected.to_lowercase().eq(actual.to_lowercase()) =>
+            {
+                pattern.next();
+                text.next();
+            }
+            _ => {
+                let Some((after_star, retry)) = &mut last_star else {
+                    return false;
+                };
+                retry.next();
+                pattern = after_star.clone();
+                text = retry.clone();
+            }
         }
-        if pi < p.len() && p[pi] == b'*' {
-            star_pi = Some(pi);
-            pi += 1;
-            star_ti = ti;
-            continue;
-        }
-        if let Some(sp) = star_pi {
-            pi = sp + 1;
-            star_ti += 1;
-            ti = star_ti;
-            continue;
-        }
-        return false;
     }
-
-    while pi < p.len() && p[pi] == b'*' {
-        pi += 1;
-    }
-    pi == p.len()
+    pattern.all(|character| character == '*')
 }
 
 fn has_extension_suffix(name_lower: &str, ext: &str) -> bool {
@@ -2136,27 +2187,6 @@ fn toggle_select_id(list: &mut IndexSet<EntryId>, id: EntryId) {
     if !list.shift_remove(&id) {
         list.insert(id);
     }
-}
-
-fn select_range_by_id_capped(
-    view_ids: &[EntryId],
-    anchor: EntryId,
-    target: EntryId,
-    cap: usize,
-) -> Option<Vec<EntryId>> {
-    let ia = view_ids.iter().position(|id| *id == anchor)?;
-    let it = view_ids.iter().position(|id| *id == target)?;
-    let (lo, hi) = if ia <= it { (ia, it) } else { (it, ia) };
-    let mut range = view_ids[lo..=hi].to_vec();
-    if cap != usize::MAX && range.len() > cap {
-        if it >= ia {
-            let start = range.len() - cap;
-            range = range[start..].to_vec();
-        } else {
-            range.truncate(cap);
-        }
-    }
-    Some(range)
 }
 
 fn finalize_selection(
@@ -2347,8 +2377,8 @@ fn compare_entry_order(
             }
         }
         SortBy::Extension => {
-            let a_extension = full_extension_lower(a_name_lower);
-            let b_extension = full_extension_lower(b_name_lower);
+            let a_extension = full_extension(a_name_lower);
+            let b_extension = full_extension(b_name_lower);
             let extension_order = cmp_lower(a_extension, b_extension, order.sort_mode);
             if extension_order == Ordering::Equal {
                 cmp_lower(a_name_lower, b_name_lower, order.sort_mode)
@@ -2376,7 +2406,7 @@ fn igfd_type_dots_to_extract(active_filter: Option<&FileFilter>) -> usize {
         if t.is_empty() {
             continue;
         }
-        if parse_regex_token(t).is_some() {
+        if regex_token(t).is_some() {
             continue;
         }
         let dot_count = t.as_bytes().iter().filter(|&&b| b == b'.').count();
@@ -2394,7 +2424,7 @@ fn igfd_type_dots_to_extract(active_filter: Option<&FileFilter>) -> usize {
 
 fn type_extension_lower(name_lower: &str, dots_to_extract: usize) -> &str {
     if dots_to_extract == 0 {
-        return full_extension_lower(name_lower);
+        return full_extension(name_lower);
     }
     let bytes = name_lower.as_bytes();
     let total_dots = bytes.iter().filter(|&&b| b == b'.').count();
@@ -2606,8 +2636,6 @@ fn trace_projector_incremental(
     input_entries: usize,
     visible_entries: usize,
     total_visible_entries: usize,
-    order_comparisons: usize,
-    existing_entry_visits: usize,
     duration_us: u128,
 ) {
     trace!(
@@ -2615,8 +2643,6 @@ fn trace_projector_incremental(
         input_entries,
         visible_entries,
         total_visible_entries,
-        order_comparisons,
-        existing_entry_visits,
         duration_us,
         "projector indexed a scan batch"
     );
@@ -2627,8 +2653,6 @@ fn trace_projector_incremental(
     _input_entries: usize,
     _visible_entries: usize,
     _total_visible_entries: usize,
-    _order_comparisons: usize,
-    _existing_entry_visits: usize,
     _duration_us: u128,
 ) {
 }
@@ -3474,7 +3498,8 @@ mod tests {
         let mut core = FileDialogCore::new(DialogMode::SaveFile);
         core.cwd = PathBuf::from("/tmp");
         core.save_name = "asset".into();
-        core.set_filters(vec![FileFilter::new("Images", vec!["png".to_string()])]);
+        core.set_filters(vec![FileFilter::new("Images", vec!["png".to_string()])])
+            .unwrap();
         core.save_policy.extension_policy = ExtensionPolicy::AddIfMissing;
         core.save_policy.confirm_overwrite = false;
 
@@ -3490,7 +3515,8 @@ mod tests {
         let mut core = FileDialogCore::new(DialogMode::SaveFile);
         core.cwd = PathBuf::from("/tmp");
         core.save_name = "asset.jpg".into();
-        core.set_filters(vec![FileFilter::new("Images", vec!["png".to_string()])]);
+        core.set_filters(vec![FileFilter::new("Images", vec!["png".to_string()])])
+            .unwrap();
         core.save_policy.extension_policy = ExtensionPolicy::KeepUser;
         core.save_policy.confirm_overwrite = false;
 
@@ -3506,7 +3532,8 @@ mod tests {
         let mut core = FileDialogCore::new(DialogMode::SaveFile);
         core.cwd = PathBuf::from("/tmp");
         core.save_name = "asset.jpg".into();
-        core.set_filters(vec![FileFilter::new("Images", vec!["png".to_string()])]);
+        core.set_filters(vec![FileFilter::new("Images", vec!["png".to_string()])])
+            .unwrap();
         core.save_policy.extension_policy = ExtensionPolicy::ReplaceByFilter;
         core.save_policy.confirm_overwrite = false;
 
@@ -3534,6 +3561,26 @@ mod tests {
         assert!(matches_filters("proj.vcxproj.filters", &filters));
         assert!(matches_filters("proj.vcxproj", &filters));
         assert!(!matches_filters("README", &filters));
+    }
+
+    #[test]
+    fn wildcard_question_mark_matches_one_unicode_scalar() {
+        let filters = FileFilter::parse_igfd(".?界").unwrap();
+        assert!(matches_filters("file.é界", &filters));
+        assert!(matches_filters("file.🙂界", &filters));
+        assert!(matches_filters("file.İ界", &filters));
+        assert!(!matches_filters("file.é🙂界", &filters));
+        assert!(wildcard_match("*.?界", ".tar.🙂界"));
+    }
+
+    #[test]
+    fn replacing_filters_with_invalid_regex_keeps_the_old_filters() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.add_filter(("PNG", &["png"][..])).unwrap();
+        let invalid = FileFilter::new("Invalid", vec!["(([))".into()]);
+        assert!(core.set_filters(vec![invalid.clone()]).is_err());
+        assert!(!matches_filters("file.txt", &[invalid]));
+        assert_eq!(core.filters()[0].name, "PNG");
     }
 
     #[test]
@@ -3690,8 +3737,10 @@ mod tests {
         old.size = Some(7);
         let mut new = make_file_entry("new.txt");
         new.size = Some(7);
-        let old_projected = ProjectedEntry::new(old.clone(), 0, order, Rc::clone(&metrics));
-        let new_projected = ProjectedEntry::new(new.clone(), 1, order, Rc::clone(&metrics));
+        let old_projected =
+            ProjectedEntry::new(Arc::new(old.clone()), 0, order, Rc::clone(&metrics));
+        let new_projected =
+            ProjectedEntry::new(Arc::new(new.clone()), 1, order, Rc::clone(&metrics));
 
         let before_metrics = old_projected.cmp(&new_projected);
         let metric_snapshot = metrics.begin_batch(1);
@@ -3784,7 +3833,8 @@ mod tests {
         core.set_filters(vec![FileFilter::new(
             "Images",
             vec!["a/b".into(), "png".into()],
-        )]);
+        )])
+        .unwrap();
         core.save_policy.extension_policy = ExtensionPolicy::ReplaceByFilter;
         core.confirm(&TestFs::default(), &ConfirmGate::default(), None)
             .unwrap();
@@ -3835,10 +3885,10 @@ mod tests {
 
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.cwd = PathBuf::from("/tmp");
-        let visited = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let hook_visited = std::rc::Rc::clone(&visited);
+        let visited = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let hook_visited = Arc::clone(&visited);
         core.set_scan_hook(move |entry| {
-            hook_visited.borrow_mut().push(entry.name.clone());
+            hook_visited.lock().unwrap().push(entry.name.clone());
             if entry.name == "drop.txt" {
                 ScanHookAction::Drop
             } else {
@@ -3848,7 +3898,7 @@ mod tests {
 
         core.rescan_if_needed(&fs);
 
-        assert_eq!(&*visited.borrow(), &["keep.txt", "drop.txt"]);
+        assert_eq!(&*visited.lock().unwrap(), &["keep.txt", "drop.txt"]);
 
         let names: Vec<&str> = core
             .entries()
@@ -4568,7 +4618,8 @@ mod tests {
         core.sort_mode = SortMode::Lexicographic;
         core.dirs_first = false;
         core.show_hidden = true;
-        core.set_filters(vec![FileFilter::new("Rust", vec!["rs".to_string()])]);
+        core.set_filters(vec![FileFilter::new("Rust", vec!["rs".to_string()])])
+            .unwrap();
 
         for _ in 0..5 {
             core.rescan_if_needed(&fs);

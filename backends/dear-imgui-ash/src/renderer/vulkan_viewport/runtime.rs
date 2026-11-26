@@ -800,7 +800,7 @@ impl OwningViewportRuntime {
         let (frame, retirement) = self.control.with_renderer_mut("prepare", |renderer| {
             let frame = frame
                 .try_render(renderer.renderer_consumer()?)
-                .map_err(RendererError::from)?;
+                .map_err(|(_frame, error)| RendererError::from(error))?;
             renderer.prepare_frame(frame).map_err(Into::into)
         })?;
         self.prepare_reconciled(frame, retirement)

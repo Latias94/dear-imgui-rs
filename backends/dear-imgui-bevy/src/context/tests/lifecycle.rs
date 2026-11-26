@@ -13,9 +13,10 @@ use bevy_time::{Real, Time};
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
 use dear_imgui_bevy::{
     ContextId, ImguiAppExt, ImguiContextConfig, ImguiContextError, ImguiContextRetired,
-    ImguiContexts, ImguiFrame, ImguiPass, ImguiPassError, ImguiPlugin, ImguiPrimaryPass,
-    IntoImguiSystemConfigs,
+    ImguiContextScopeError, ImguiContexts, ImguiFrame, ImguiPass, ImguiPassError, ImguiPlugin,
+    ImguiPrimaryPass, IntoImguiSystemConfigs,
 };
+use dear_imgui_rs::{Context, FrameLifecycleState, FramePrepareOptions, sys};
 use std::time::Duration;
 
 struct ContextPassA;
@@ -774,7 +775,7 @@ fn terminal_shutdown_invalidates_retained_registries_and_rejects_app_scoped_read
             .is_none(),
         "terminal shutdown must release private pass schedules and their systems"
     );
-    let rejected = dear_imgui_rs::SuspendedContext::create();
+    let rejected = Context::create();
     let rejected_id = rejected.id();
     let error = match app.adopt_imgui_primary_context(rejected) {
         Err(error) => error,
@@ -825,7 +826,7 @@ fn shutdown_before_plugin_installation_still_closes_context_admission() {
 
     app.shutdown_imgui().unwrap();
 
-    let rejected = dear_imgui_rs::SuspendedContext::create();
+    let rejected = Context::create();
     let rejected_id = rejected.id();
     let error = match app.adopt_imgui_primary_context(rejected) {
         Err(error) => error,
@@ -842,7 +843,7 @@ fn removing_the_registry_does_not_open_a_second_context_admission() {
     app.add_plugins(ImguiPlugin::default());
     let retained = app.world_mut().remove_non_send::<ImguiContexts>().unwrap();
 
-    let rejected = dear_imgui_rs::SuspendedContext::create();
+    let rejected = Context::create();
     let rejected_id = rejected.id();
     let error = match app.adopt_imgui_primary_context(rejected) {
         Err(error) => error,
@@ -880,7 +881,7 @@ fn primary_promotion_and_replacement_are_transactional() {
     assert_eq!(promoted.previous(), Some(initial_primary));
     assert_eq!(promoted.current(), context_a);
 
-    let duplicate = dear_imgui_rs::SuspendedContext::create();
+    let duplicate = Context::create();
     let duplicate_id = duplicate.id();
     let duplicate_error = app
         .world_mut()
@@ -900,7 +901,7 @@ fn primary_promotion_and_replacement_are_transactional() {
         Some(context_a)
     );
 
-    let replacement = dear_imgui_rs::SuspendedContext::create();
+    let replacement = Context::create();
     let replacement_id = replacement.id();
     let replaced = app
         .world_mut()
@@ -949,7 +950,7 @@ fn primary_and_two_additional_contexts_run_in_stable_order_with_independent_fram
                     assert_eq!(
                         unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
                         raw,
-                        "configuration must activate exactly the requested Context"
+                        "configuration must bind exactly the requested Context"
                     );
                     raw as usize
                 })
@@ -1214,17 +1215,13 @@ fn duplicate_pass_and_stale_context_errors_are_typed_and_recover_ownership() {
     let primary_pass = app.imgui_primary_pass().unwrap();
     let pass_a = app.declare_imgui_pass::<ContextPassA>().unwrap();
     let lifecycle = crate::context::pass::lifecycle(app.world());
-    let mut contexts = ImguiContexts::with_primary(
-        dear_imgui_rs::SuspendedContext::create(),
-        primary_pass,
-        lifecycle,
-    );
+    let mut contexts = ImguiContexts::with_primary(Context::create(), primary_pass, lifecycle);
     let context_a = contexts.create(ImguiContextConfig::new(&pass_a)).unwrap();
-    let rejected = dear_imgui_rs::SuspendedContext::create();
+    let rejected = Context::create();
     let rejected_id = rejected.id();
 
     let error = contexts
-        .insert_suspended(rejected, ImguiContextConfig::new(&pass_a))
+        .insert_context(rejected, ImguiContextConfig::new(&pass_a))
         .expect_err("duplicate pass ownership must be rejected");
     assert!(matches!(
         error.error(),
@@ -1249,16 +1246,12 @@ fn pass_from_another_app_is_rejected_without_consuming_the_context() {
     let mut owner_app = App::new();
     let primary_pass = owner_app.imgui_primary_pass().unwrap();
     let lifecycle = crate::context::pass::lifecycle(owner_app.world());
-    let mut contexts = ImguiContexts::with_primary(
-        dear_imgui_rs::SuspendedContext::create(),
-        primary_pass,
-        lifecycle,
-    );
-    let rejected = dear_imgui_rs::SuspendedContext::create();
+    let mut contexts = ImguiContexts::with_primary(Context::create(), primary_pass, lifecycle);
+    let rejected = Context::create();
     let rejected_id = rejected.id();
 
     let error = contexts
-        .insert_suspended(rejected, ImguiContextConfig::new(&foreign_pass))
+        .insert_context(rejected, ImguiContextConfig::new(&foreign_pass))
         .expect_err("a pass declared by another App must be rejected");
 
     assert!(matches!(
@@ -1276,16 +1269,12 @@ fn additional_multi_viewport_config_can_be_registered_before_backend_attachment(
     let primary_pass = app.imgui_primary_pass().unwrap();
     let pass_a = app.declare_imgui_pass::<ContextPassA>().unwrap();
     let lifecycle = crate::context::pass::lifecycle(app.world());
-    let mut contexts = ImguiContexts::with_primary(
-        dear_imgui_rs::SuspendedContext::create(),
-        primary_pass,
-        lifecycle,
-    );
-    let additional = dear_imgui_rs::SuspendedContext::create();
+    let mut contexts = ImguiContexts::with_primary(Context::create(), primary_pass, lifecycle);
+    let additional = Context::create();
     let additional_id = additional.id();
 
     let admitted = contexts
-        .insert_suspended(
+        .insert_context(
             additional,
             ImguiContextConfig::new(&pass_a).with_multi_viewport(true),
         )
@@ -1309,13 +1298,13 @@ fn attached_backend_rejects_unavailable_native_multi_viewport_without_consuming_
     let mut app = app_with_primary_window();
     app.add_plugins(ImguiPlugin::default());
     let pass_a = app.declare_imgui_pass::<ContextPassA>().unwrap();
-    let additional = dear_imgui_rs::SuspendedContext::create();
+    let additional = Context::create();
     let additional_id = additional.id();
 
     let error = app
         .world_mut()
         .non_send_mut::<ImguiContexts>()
-        .insert_suspended(
+        .insert_context(
             additional,
             ImguiContextConfig::new(&pass_a).with_multi_viewport(true),
         )
@@ -1442,6 +1431,91 @@ fn headless_driver_reports_managed_font_atlas_conflicts() {
         .unwrap();
 }
 
+fn open_test_frame(context: &mut Context) {
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    context.prepare_frame(FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0));
+    let _ = context.frame();
+}
+
+#[test]
+fn admission_returns_a_context_with_its_preexisting_frame_intact() {
+    let _guard = imgui_context_guard();
+    let mut app = App::new();
+    let pass = app.declare_imgui_pass::<ContextPassA>().unwrap();
+    let mut context = Context::create();
+    let id = context.id();
+    open_test_frame(&mut context);
+
+    let Err(error) = app.adopt_imgui_primary_context(context) else {
+        panic!("initial primary admission must reject an open frame");
+    };
+    assert!(matches!(
+        error.error(),
+        ImguiContextError::ContextScope {
+            context_id,
+            source: ImguiContextScopeError::FrameAlreadyOpen,
+        } if *context_id == id
+    ));
+    assert!(app.world().get_non_send::<ImguiContexts>().is_none());
+
+    app.adopt_imgui_primary_context(Context::create()).unwrap();
+    let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
+    let config = ImguiContextConfig::new(&pass);
+    let error = contexts
+        .insert_context(error.into_context(), config.clone())
+        .expect_err("additional Context admission must reject an open frame");
+    assert!(matches!(
+        error.error(),
+        ImguiContextError::ContextScope {
+            context_id,
+            source: ImguiContextScopeError::FrameAlreadyOpen,
+        } if *context_id == id
+    ));
+    assert!(!contexts.contains(id).unwrap());
+    let mut context = error.into_context();
+    assert!(context.end_frame(), "admission must leave the frame open");
+    assert_eq!(contexts.insert_context(context, config).unwrap(), id);
+}
+
+#[test]
+fn configuration_ends_a_left_open_frame_and_restores_the_previous_binding() {
+    let _guard = imgui_context_guard();
+    let mut external = Context::create();
+    let mut app = App::new();
+    external
+        .try_with_current(|external| {
+            app.add_plugins(ImguiPlugin::default());
+            let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
+            let primary = contexts.primary_id().unwrap().unwrap();
+            let error = contexts
+                .configure(primary, |context| {
+                    assert_ne!(external.id(), context.id());
+                    assert_eq!(unsafe { sys::igGetCurrentContext() }, context.as_raw());
+                    open_test_frame(context);
+                })
+                .expect_err("configuration cannot leave a frame open");
+            assert!(matches!(
+                error,
+                ImguiContextError::ContextScope {
+                    context_id,
+                    source: ImguiContextScopeError::FrameLeftOpen,
+                } if context_id == primary
+            ));
+            assert_eq!(unsafe { sys::igGetCurrentContext() }, external.as_raw());
+            let state = contexts
+                .configure(primary, |context| context.frame_lifecycle_state())
+                .expect("the Context must be configurable again");
+            assert_ne!(state, FrameLifecycleState::InFrame);
+            assert_eq!(unsafe { sys::igGetCurrentContext() }, external.as_raw());
+            Ok::<_, std::convert::Infallible>(())
+        })
+        .unwrap();
+}
+
 #[derive(Resource, Default)]
 struct PanicOnce(bool);
 
@@ -1453,7 +1527,7 @@ fn panic_once(_frame: ImguiFrame<'_>, mut state: ResMut<PanicOnce>) {
 }
 
 #[test]
-fn pass_panic_reinserts_the_private_runner_and_leaves_no_context_active() {
+fn pass_panic_reinserts_the_private_runner_and_restores_the_previous_binding() {
     let _guard = imgui_context_guard();
 
     let mut app = app_with_primary_window();
@@ -1471,43 +1545,46 @@ fn pass_panic_reinserts_the_private_runner_and_leaves_no_context_active() {
         .unwrap()
         .unwrap();
 
-    app.world_mut().run_schedule(PreUpdate);
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let external = Context::create();
+    external.binding().with_bound_context(|| {
+        app.world_mut().run_schedule(PreUpdate);
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::context::drive_imgui_contexts(app.world_mut());
+        }));
+        assert!(panic.is_err());
+        assert_eq!(
+            unsafe { sys::igGetCurrentContext() },
+            external.as_raw(),
+            "unwinding must restore the previously bound Context"
+        );
+        {
+            let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
+            assert!(contexts.contains(primary).unwrap());
+            assert_eq!(contexts.frame_index(primary).unwrap(), 0);
+        }
+        app.world_mut().run_schedule(PreUpdate);
         crate::context::drive_imgui_contexts(app.world_mut());
-    }));
-    assert!(panic.is_err());
-    assert_eq!(
-        unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
-        std::ptr::null_mut(),
-        "the suspended Context must not remain active after unwinding"
-    );
-    {
-        let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
-        assert!(contexts.contains(primary).unwrap());
-        assert_eq!(contexts.frame_index(primary).unwrap(), 0);
-    }
-    app.world_mut().run_schedule(PreUpdate);
-    crate::context::drive_imgui_contexts(app.world_mut());
-    assert_eq!(
-        app.world()
-            .get_non_send::<ImguiContexts>()
-            .unwrap()
-            .frame_index(primary)
-            .unwrap(),
-        1,
-        "the private pass runner must survive unwinding"
-    );
-    assert_eq!(
-        unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
-        std::ptr::null_mut(),
-        "the next successful frame must suspend its Context"
-    );
-    drop(app);
-    assert_eq!(
-        unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
-        std::ptr::null_mut(),
-        "dropping the App must not install a Context"
-    );
+        assert_eq!(
+            app.world()
+                .get_non_send::<ImguiContexts>()
+                .unwrap()
+                .frame_index(primary)
+                .unwrap(),
+            1,
+            "the private pass runner must survive unwinding"
+        );
+        assert_eq!(
+            unsafe { sys::igGetCurrentContext() },
+            external.as_raw(),
+            "the next successful frame must also restore the previous binding"
+        );
+        drop(app);
+        assert_eq!(
+            unsafe { sys::igGetCurrentContext() },
+            external.as_raw(),
+            "dropping the App must not change the previous binding"
+        );
+    });
 }
 
 #[test]
@@ -1717,6 +1794,7 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
             .collect::<Vec<_>>(),
         vec![retirement]
     );
+    app.shutdown_imgui().unwrap();
 }
 
 #[cfg(feature = "render")]

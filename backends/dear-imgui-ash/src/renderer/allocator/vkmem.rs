@@ -120,15 +120,19 @@ impl Allocate for Allocator {
         memory: &mut Self::Memory,
         data: &[T],
     ) -> RendererResult<()> {
-        let size = std::mem::size_of_val(data) as _;
+        let size = std::mem::size_of_val(data) as vk::DeviceSize;
+        if size == 0 {
+            return Ok(());
+        }
 
         let allocator = self.get_allocator()?;
         let data_ptr = unsafe { allocator.map_memory(memory)? as *mut std::ffi::c_void };
         let mut align =
             unsafe { ash::util::Align::new(data_ptr, std::mem::align_of::<T>() as _, size) };
         align.copy_from_slice(data);
+        // Flush the allocation-relative range while mapped, including for non-coherent memory.
+        let flush_result = allocator.flush_allocation(memory, 0, size);
         unsafe { allocator.unmap_memory(memory) };
-
-        Ok(())
+        flush_result.map_err(Into::into)
     }
 }

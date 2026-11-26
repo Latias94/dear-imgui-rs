@@ -1,6 +1,7 @@
 use crate::mat::Mat4Like;
-use crate::types::{AxisMask, Bounds, DrawListTarget, Mode, Operation, Vec3Like};
+use crate::types::{AxisMask, Bounds, DrawListTarget, Mode, Operation};
 use crate::ui::GizmoUi;
+use dear_imgui_rs::math::Vec3Like;
 
 /// Builder for ImGuizmo::Manipulate in a dear-imgui-style API
 pub struct Manipulate<'ui, T: Mat4Like> {

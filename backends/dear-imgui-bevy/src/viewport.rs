@@ -111,7 +111,7 @@ pub(crate) use runtime::{
 };
 #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) use runtime::{
-    ImguiViewportBridgeContext, settle_pending_client_placements,
+    ImguiViewportBridgeContext, abandon_viewport_ecs_release, settle_pending_client_placements,
     track_viewport_ecs_despawn_for_test,
 };
 #[cfg(test)]

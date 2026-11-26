@@ -3,7 +3,7 @@
 //! This module provides high-level functionality for creating complex plots
 //! with multiple subplots, legends, and advanced layout management.
 
-use crate::context::with_cleanup;
+use crate::context::{is_valid_axis_range, with_cleanup};
 use crate::{AxisFlags, YAxis, plots::PlotError, sys};
 use crate::{PlotCond, PlotScope, PlotSetup, PlotUi};
 use std::ffi::CString;
@@ -40,11 +40,11 @@ fn validate_ratios(caller: &str, name: &str, ratios: &[f32]) -> Result<(), PlotE
 }
 
 fn validate_range(caller: &str, min: f64, max: f64) -> Result<(), PlotError> {
-    if min.is_finite() && max.is_finite() && min != max {
+    if is_valid_axis_range(min, max) {
         Ok(())
     } else {
         Err(PlotError::InvalidData(format!(
-            "{caller} range values must be finite and distinct"
+            "{caller} min must be less than max with a finite range width"
         )))
     }
 }
@@ -317,7 +317,7 @@ pub struct LegendManager;
 
 impl LegendManager {
     /// Configure the legend during plot setup.
-    pub fn setup(setup: &PlotSetup<'_>, location: LegendLocation, flags: LegendFlags) {
+    pub fn setup(setup: &PlotSetup<'_, '_>, location: LegendLocation, flags: LegendFlags) {
         setup.plot.with_bound_context(|| unsafe {
             sys::ImPlot_SetupLegend(location as _, flags.bits() as _)
         });

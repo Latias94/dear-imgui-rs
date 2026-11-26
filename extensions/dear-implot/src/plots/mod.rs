@@ -437,14 +437,6 @@ pub fn validate_data_lengths<T, U>(data1: &[T], data2: &[U]) -> Result<(), PlotE
     Ok(())
 }
 
-pub(crate) fn with_plot_str<R>(s: &str, f: impl FnOnce(*const c_char) -> R) -> Option<R> {
-    if s.contains('\0') {
-        None
-    } else {
-        Some(with_scratch_txt(s, f))
-    }
-}
-
 pub(crate) fn with_plot_str_or_empty<R>(s: &str, f: impl FnOnce(*const c_char) -> R) -> R {
     let s = if s.contains('\0') { "" } else { s };
     with_scratch_txt(s, f)

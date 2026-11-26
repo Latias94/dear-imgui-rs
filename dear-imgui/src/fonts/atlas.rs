@@ -132,7 +132,7 @@ mod validation;
 pub use config::FontConfig;
 pub use core::FontAtlas;
 pub use custom_rect::{CustomRectData, CustomRectId, CustomRectSnapshot};
-pub use error::{FontAtlasLoaderError, FontAtlasModeError};
+pub use error::{FontAtlasLoaderError, FontAtlasModeError, FontLoadError};
 pub use flags::FontAtlasFlags;
 pub use id::FontId;
 pub use legacy::LegacyFontAtlas;
@@ -142,7 +142,9 @@ pub use source::FontSource;
 pub use texture::FontAtlasTexture;
 pub use validated::{StbTrueTypeFontData, StbTrueTypeFontError, StbTrueTypeFontLoadError};
 
-pub(crate) use id::{validate_font_id, validate_font_id_for_current_context};
+pub(crate) use id::{
+    validate_font_id, validate_font_id_for_context, validate_font_id_for_current_context,
+};
 pub(crate) use state::{
     assert_font_atlas_renderer_mode, assert_no_font_atlas_texture_borrows,
     claim_validated_font_atlas_managed_renderer, font_atlas_snapshot_identities,

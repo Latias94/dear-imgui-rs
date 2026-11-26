@@ -1,9 +1,45 @@
+use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
 mod windows;
+
+pub(crate) fn display_path(path: &Path) -> Cow<'_, str> {
+    let text = path.to_string_lossy();
+    #[cfg(windows)]
+    if let Some(std::path::Component::Prefix(prefix)) = path.components().next() {
+        match prefix.kind() {
+            std::path::Prefix::VerbatimDisk(_) => {
+                if let Some(standard) = text.strip_prefix(r"\\?\") {
+                    return Cow::Owned(standard.to_owned());
+                }
+            }
+            std::path::Prefix::VerbatimUNC(_, _) => {
+                if let Some(standard) = text.strip_prefix(r"\\?\UNC\") {
+                    return Cow::Owned(format!(r"\\{standard}"));
+                }
+            }
+            _ => {}
+        }
+    }
+    text
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn path_labels_omit_only_known_verbatim_wrappers() {
+    for (native, display) in [
+        (r"\\?\C:\path", r"C:\path"),
+        (r"\\?\UNC\server\share\path", r"\\server\share\path"),
+        (r"\\?\Volume{guid}\path", r"\\?\Volume{guid}\path"),
+    ] {
+        let path = Path::new(native);
+        assert_eq!(display_path(path), display);
+        assert_eq!(path.as_os_str(), native);
+    }
+}
 
 pub(crate) fn file_name(path: &Path) -> io::Result<&OsStr> {
     path.file_name()
@@ -19,12 +55,20 @@ pub(crate) fn canonical_entry(fs: &dyn FileSystem, path: &Path) -> io::Result<Pa
     Ok(fs.canonicalize(parent)?.join(name))
 }
 
+fn is_link(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    if windows::is_directory_reparse_point(metadata) {
+        return true;
+    }
+    metadata.file_type().is_symlink()
+}
+
 /// Minimal file metadata used by the in-UI file browser.
 #[derive(Clone, Debug)]
 pub struct FsMetadata {
     /// Whether the path refers to a directory.
     pub is_dir: bool,
-    /// Whether the path itself is a symbolic link.
+    /// Whether the path itself is a symbolic link or a Windows directory reparse point.
     pub is_symlink: bool,
 }
 
@@ -46,7 +90,7 @@ pub struct FsEntry {
     pub path: PathBuf,
     /// Whether this entry is a directory.
     pub is_dir: bool,
-    /// Whether this entry itself is a symbolic link.
+    /// Whether this entry itself is a symbolic link or a Windows directory reparse point.
     pub is_symlink: bool,
     /// File size in bytes (files and file-links only; `None` for directories or when unavailable).
     pub size: Option<u64>,
@@ -64,7 +108,7 @@ impl FsEntry {
                 .into_owned(),
             path,
             is_dir: metadata.is_dir(),
-            is_symlink: metadata.file_type().is_symlink(),
+            is_symlink: is_link(&metadata),
             size: metadata.is_file().then_some(metadata.len()),
             modified: metadata.modified().ok(),
         }
@@ -161,7 +205,7 @@ pub trait FileSystem {
             Err(e) => Err(e),
         }
     }
-    /// Remove a file or the symbolic link itself, including a link to a directory.
+    /// Remove a file or the link itself, including a Windows directory reparse point.
     fn remove_file(&self, path: &Path) -> std::io::Result<()>;
     /// Remove an empty directory.
     fn remove_dir(&self, path: &Path) -> std::io::Result<()>;
@@ -173,7 +217,10 @@ pub trait FileSystem {
     fn copy_file(&self, from: &Path, to: &Path) -> std::io::Result<u64>;
 }
 
-/// Default filesystem implementation using `std::fs`.
+/// Default filesystem implementation using native filesystem operations.
+///
+/// On Unix, `rename_noreplace` requires native support for an exclusive rename.
+/// It fails if the operation cannot be performed atomically.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StdFileSystem;
 
@@ -245,7 +292,7 @@ impl FileSystem for StdFileSystem {
         let link_md = std::fs::symlink_metadata(path)?;
         Ok(FsMetadata {
             is_dir: md.is_dir(),
-            is_symlink: link_md.file_type().is_symlink(),
+            is_symlink: is_link(&link_md),
         })
     }
 
@@ -284,8 +331,34 @@ impl FileSystem for StdFileSystem {
     #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
     fn rename_noreplace(&self, from: &Path, to: &Path) -> std::io::Result<()> {
         use rustix::fs::{CWD, RenameFlags, renameat_with};
+        use rustix::io::Errno;
 
-        Ok(renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE)?)
+        renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE).map_err(|error| {
+            let cause = io::Error::from(error);
+            if error == Errno::NOSYS
+                || error == Errno::OPNOTSUPP
+                || cause.kind() == io::ErrorKind::Unsupported
+            {
+                return io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    format!("atomic no-replace rename is unavailable: {cause}"),
+                );
+            }
+            // EINVAL can also describe an invalid move. Preserve it and EXDEV,
+            // which is what lets a cross-device cut proceed by copying.
+            cause
+        })
+    }
+
+    #[cfg(all(
+        unix,
+        not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))
+    ))]
+    fn rename_noreplace(&self, _from: &Path, _to: &Path) -> std::io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "atomic no-replace rename is unavailable on this platform",
+        ))
     }
 
     #[cfg(windows)]
@@ -295,14 +368,8 @@ impl FileSystem for StdFileSystem {
 
     fn remove_file(&self, path: &Path) -> std::io::Result<()> {
         #[cfg(windows)]
-        {
-            use std::os::windows::fs::FileTypeExt;
-            if std::fs::symlink_metadata(path)?
-                .file_type()
-                .is_symlink_dir()
-            {
-                return std::fs::remove_dir(path);
-            }
+        if windows::is_directory_reparse_point(&std::fs::symlink_metadata(path)?) {
+            return std::fs::remove_dir(path);
         }
         std::fs::remove_file(path)
     }

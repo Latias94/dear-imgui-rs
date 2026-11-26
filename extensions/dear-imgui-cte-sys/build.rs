@@ -428,7 +428,9 @@ fn emit_rerun_directives(sources: &build_support::source_inventory::MaintainedSo
     for path in sources.native_candidate_paths() {
         println!("cargo:rerun-if-changed={}", path.display());
     }
-    println!("cargo:rerun-if-changed=../../dear-imgui-sys");
+    if Path::new("../../dear-imgui-sys").is_dir() {
+        println!("cargo:rerun-if-changed=../../dear-imgui-sys");
+    }
     for variable in [
         "CTE_SYS_LIB_DIR",
         "CTE_SYS_SKIP_CC",

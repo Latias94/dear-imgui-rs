@@ -381,7 +381,6 @@ fn construction_panic_rolls_back_target_context_and_restores_the_previous_curren
     let _guard = lock_context();
     let mut context_a = Context::create();
     let raw_a = context_a.as_raw();
-    unsafe { dear_imgui_rs::sys::igSetCurrentContext(std::ptr::null_mut()) };
     let context_b = Context::create();
     let raw_b = context_b.as_raw();
 
@@ -410,9 +409,7 @@ fn construction_panic_rolls_back_target_context_and_restores_the_previous_curren
     runtime.shutdown(&mut context_a).unwrap();
     assert_eq!(unsafe { dear_imgui_rs::sys::igGetCurrentContext() }, raw_b);
 
-    unsafe { dear_imgui_rs::sys::igSetCurrentContext(raw_a) };
     drop(context_a);
-    unsafe { dear_imgui_rs::sys::igSetCurrentContext(raw_b) };
     drop(context_b);
 }
 
@@ -902,8 +899,6 @@ fn callback_claim_targets_the_passed_context_and_restores_the_previous_one() {
     let _guard = lock_context();
     let mut context_a = Context::create();
     let raw_a = context_a.as_raw();
-    unsafe { dear_imgui_rs::sys::igSetCurrentContext(std::ptr::null_mut()) };
-
     let context_b = Context::create();
     let raw_b = context_b.as_raw();
     let platform_io_b = unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw_b) };
@@ -921,9 +916,7 @@ fn callback_claim_targets_the_passed_context_and_restores_the_previous_one() {
     let mut runtime = runtime;
     runtime.shutdown(&mut context_a).unwrap();
     assert_eq!(unsafe { dear_imgui_rs::sys::igGetCurrentContext() }, raw_b);
-    unsafe { dear_imgui_rs::sys::igSetCurrentContext(raw_a) };
     drop(context_a);
-    unsafe { dear_imgui_rs::sys::igSetCurrentContext(raw_b) };
     drop(context_b);
 }
 
@@ -2117,7 +2110,6 @@ fn public_platform_owner_rejects_a_foreign_context_without_detaching() {
     let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
     let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
         .expect("test runtime should attach to the platform owner");
-    let suspended = context.suspend_or_panic();
     let mut foreign = Context::create();
 
     assert_eq!(
@@ -2127,7 +2119,6 @@ fn public_platform_owner_rejects_a_foreign_context_without_detaching() {
     assert!(platform.viewports_enabled());
 
     drop(foreign);
-    let mut context = suspended.activate().unwrap();
     platform.disable_viewports(&mut context).unwrap();
     platform.shutdown(&mut context).unwrap();
     drop(runtime);
@@ -2145,7 +2136,6 @@ fn full_event_route_rejects_a_foreign_context_before_consuming_faults() {
         .record_fault(WinitPlatformError::CallbackPanicked {
             callback: "queued before foreign full event",
         });
-    let suspended = context.suspend_or_panic();
     let mut foreign = Context::create();
     let foreign_flags = foreign.io().backend_flags();
 
@@ -2167,7 +2157,6 @@ fn full_event_route_rejects_a_foreign_context_before_consuming_faults() {
     ));
 
     drop(foreign);
-    let mut context = suspended.activate().unwrap();
     platform.disable_viewports(&mut context).unwrap();
     platform.shutdown(&mut context).unwrap();
     drop(runtime);
@@ -2185,7 +2174,6 @@ fn secondary_window_route_rejects_a_foreign_context_before_consuming_faults() {
         .record_fault(WinitPlatformError::CallbackPanicked {
             callback: "queued before foreign window event",
         });
-    let suspended = context.suspend_or_panic();
     let mut foreign = Context::create();
     let foreign_flags = foreign.io().backend_flags();
 
@@ -2207,7 +2195,6 @@ fn secondary_window_route_rejects_a_foreign_context_before_consuming_faults() {
     ));
 
     drop(foreign);
-    let mut context = suspended.activate().unwrap();
     platform.disable_viewports(&mut context).unwrap();
     platform.shutdown(&mut context).unwrap();
     drop(runtime);
@@ -2690,7 +2677,6 @@ fn shutdown_rejects_a_foreign_context_before_changing_runtime_state() {
     let _guard = lock_context();
     let mut context = Context::create();
     let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
-    let suspended = context.suspend_or_panic();
     let mut foreign = Context::create();
 
     assert_eq!(
@@ -2700,7 +2686,6 @@ fn shutdown_rejects_a_foreign_context_before_changing_runtime_state() {
     assert_eq!(runtime.control().state(), RuntimeState::Attached);
 
     drop(foreign);
-    let mut context = suspended.activate().unwrap();
     runtime.shutdown(&mut context).unwrap();
 }
 

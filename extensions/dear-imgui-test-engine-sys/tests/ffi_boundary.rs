@@ -844,6 +844,20 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             sys::ImGuiTestEngineStatus_Success
         );
         assert_eq!(run_test_count, 0);
+        let script_during_terminal_run = create_script();
+        assert_eq!(
+            sys::imgui_test_engine_register_script_test(
+                engine,
+                c"boundary".as_ptr(),
+                c"unconsumed_run".as_ptr(),
+                script_during_terminal_run,
+            ),
+            sys::ImGuiTestEngineStatus_InvalidState
+        );
+        assert_eq!(
+            sys::imgui_test_engine_script_destroy(script_during_terminal_run),
+            sys::ImGuiTestEngineStatus_Success
+        );
         assert_eq!(
             sys::imgui_test_engine_finish_run(engine, no_match_run_id),
             sys::ImGuiTestEngineStatus_Success
@@ -925,8 +939,8 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
         assert_eq!(counters.EnginesStarted, 1);
         assert_eq!(counters.EnginesStopped, 1);
         assert_eq!(counters.EnginesUnbound, 1);
-        assert_eq!(counters.ScriptsCreated, 5);
-        assert_eq!(counters.ScriptsDestroyed, 5);
+        assert_eq!(counters.ScriptsCreated, 6);
+        assert_eq!(counters.ScriptsDestroyed, 6);
         assert_eq!(counters.ScriptsRegistered, 3);
         assert_eq!(
             sys::imgui_test_engine_test_reset_lifecycle_counters(),

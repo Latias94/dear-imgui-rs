@@ -117,6 +117,6 @@ impl Ui {
     /// Display a text label with a boolean value (for quick debug UIs).
     #[doc(alias = "Value")]
     pub fn value_bool(&self, prefix: impl AsRef<str>, v: bool) {
-        self.run_with_bound_context(|| unsafe { sys::igValue_Bool(self.scratch_txt(prefix), v) })
+        self.with_scratch_txt(prefix, |prefix| unsafe { sys::igValue_Bool(prefix, v) })
     }
 }

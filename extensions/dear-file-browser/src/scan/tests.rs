@@ -386,7 +386,7 @@ fn blocked_runtime_workers_do_not_starve_a_new_runtime() {
 }
 
 #[test]
-fn runtime_drop_waits_for_a_blocked_worker_to_finish() {
+fn runtime_drop_cancels_without_waiting_for_a_blocked_worker() {
     let (started_tx, started_rx) = mpsc::channel();
     let filesystem = Arc::new(ControlledFileSystem::new(entries(8), started_tx, false));
     let capability = FileSystemCapability::background(filesystem.clone());
@@ -421,16 +421,11 @@ fn runtime_drop_waits_for_a_blocked_worker_to_finish() {
         );
         std::thread::yield_now();
     }
-    assert!(
-        dropped_rx.recv_timeout(Duration::from_millis(100)).is_err(),
-        "runtime drop returned before the blocked worker finished"
-    );
-
-    filesystem.release();
     dropped_rx
         .recv_timeout(Duration::from_secs(1))
-        .expect("runtime drop did not finish after the worker returned");
+        .expect("runtime drop waited for the blocked worker");
     drop_thread.join().expect("runtime drop panicked");
+    filesystem.release();
 
     let deadline = Instant::now() + Duration::from_secs(1);
     while !filesystem.finished.load(Ordering::Acquire) {

@@ -1,4 +1,5 @@
 use super::super::NodeEditorSetup;
+use crate::style::{validate_finite_pair, validate_link_density};
 use crate::sys;
 use dear_imgui_rs::MouseButton;
 use dear_imgui_rs::sys as imgui_sys;
@@ -95,7 +96,12 @@ impl<'ui> NodeEditorSetup<'ui> {
             io.AltMouseButton = button as i32;
         });
     }
+    /// Sets the editor's auto-panning speed. The speed must be finite.
     pub fn set_auto_panning_speed(&self, speed: f32) {
+        assert!(
+            speed.is_finite(),
+            "dear-imnodes: auto-panning speed must be finite"
+        );
         self.with_io(|io| {
             io.AutoPanningSpeed = speed;
         });
@@ -135,7 +141,9 @@ impl<'ui> NodeEditorSetup<'ui> {
     pub fn set_node_corner_rounding(&self, rounding: f32) {
         self.with_style(|style| style.NodeCornerRounding = rounding);
     }
+    /// Sets node padding. Both components must be finite.
     pub fn set_node_padding(&self, padding: [f32; 2]) {
+        validate_finite_pair("node padding", padding);
         self.with_style(|style| {
             style.NodePadding = sys::ImVec2_c {
                 x: padding[0],
@@ -164,13 +172,17 @@ impl<'ui> NodeEditorSetup<'ui> {
     pub fn set_link_hover_distance(&self, v: f32) {
         self.with_style(|style| style.LinkHoverDistance = v);
     }
-    pub fn set_link_line_segments_per_length(&self, v: f32) {
-        self.with_style(|style| style.LinkLineSegmentsPerLength = v);
+    /// Sets link tessellation density. The density must be finite and non-negative.
+    pub fn set_link_line_segments_per_length(&self, density: f32) {
+        validate_link_density(density);
+        self.with_style(|style| style.LinkLineSegmentsPerLength = density);
     }
     pub fn set_node_border_thickness(&self, v: f32) {
         self.with_style(|style| style.NodeBorderThickness = v);
     }
+    /// Sets minimap padding. Both components must be finite.
     pub fn set_minimap_padding(&self, padding: [f32; 2]) {
+        validate_finite_pair("minimap padding", padding);
         self.with_style(|style| {
             style.MiniMapPadding = sys::ImVec2_c {
                 x: padding[0],
@@ -178,7 +190,9 @@ impl<'ui> NodeEditorSetup<'ui> {
             };
         });
     }
+    /// Sets the minimap offset. Both components must be finite.
     pub fn set_minimap_offset(&self, offset: [f32; 2]) {
+        validate_finite_pair("minimap offset", offset);
         self.with_style(|style| {
             style.MiniMapOffset = sys::ImVec2_c {
                 x: offset[0],

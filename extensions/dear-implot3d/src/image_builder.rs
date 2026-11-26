@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use dear_imgui_rs::texture::TextureRef;
 
 use crate::item_style::{Plot3DItemStyle, plot3d_spec_with_style};
+use crate::plots::{Plot3DError, validate_item_label};
 use crate::{Image3DFlags, Item3DFlags, Plot3DDataLayout, Plot3DScope, imvec2, imvec4, sys};
 
 /// Image by axes builder
@@ -35,11 +36,21 @@ impl<'ui, 'tex> Image3DByAxesBuilder<'ui, 'tex> {
         self.flags = flags;
         self
     }
+    /// Submits the image. Labels containing NUL are ignored.
     pub fn plot(self) {
+        let _ = self.try_plot();
+    }
+
+    /// Submits the image or returns an error if the label contains NUL.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a managed texture does not belong to this plot's ImGui context or is retired.
+    pub fn try_plot(self) -> Result<(), Plot3DError> {
+        let label = self.label.as_ref();
+        validate_item_label(label)?;
         self._ui.with_bound_context(|| {
             let tex_ref = to_sys_texture_ref(self._ui, self.texture);
-            let label = self.label.as_ref();
-            let label = if label.contains('\0') { "image" } else { label };
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
                 let spec = plot3d_spec_with_style(
                     &self._ui.next_item,
@@ -71,7 +82,8 @@ impl<'ui, 'tex> Image3DByAxesBuilder<'ui, 'tex> {
                     spec,
                 );
             })
-        })
+        });
+        Ok(())
     }
 }
 
@@ -110,11 +122,21 @@ impl<'ui, 'tex> Image3DByCornersBuilder<'ui, 'tex> {
         self.flags = flags;
         self
     }
+    /// Submits the image. Labels containing NUL are ignored.
     pub fn plot(self) {
+        let _ = self.try_plot();
+    }
+
+    /// Submits the image or returns an error if the label contains NUL.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a managed texture does not belong to this plot's ImGui context or is retired.
+    pub fn try_plot(self) -> Result<(), Plot3DError> {
+        let label = self.label.as_ref();
+        validate_item_label(label)?;
         self._ui.with_bound_context(|| {
             let tex_ref = to_sys_texture_ref(self._ui, self.texture);
-            let label = self.label.as_ref();
-            let label = if label.contains('\0') { "image" } else { label };
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
                 let spec = plot3d_spec_with_style(
                     &self._ui.next_item,
@@ -153,7 +175,8 @@ impl<'ui, 'tex> Image3DByCornersBuilder<'ui, 'tex> {
                     spec,
                 );
             })
-        })
+        });
+        Ok(())
     }
 }
 

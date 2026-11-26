@@ -351,7 +351,6 @@ fn conditional_aggregate_setter_clear_targets_its_receiver_context() {
         }
         platform_io.as_raw_mut()
     };
-    let first = first.suspend_or_panic();
     let second = crate::Context::create();
     let second_platform_io = second.platform_io().as_raw();
 
@@ -498,7 +497,6 @@ fn callback_registration_and_uninstall_target_the_receiving_context() {
             .platform_io_mut()
             .set_platform_get_window_pos_raw(Some(first_pos))
     };
-    let first = first.suspend_or_panic();
     let mut second = crate::Context::create();
     first_binding.with_bound_context(|| {
         unsafe {
@@ -532,8 +530,10 @@ fn callback_registration_and_uninstall_target_the_receiving_context() {
     });
     assert!(second.platform_io().renderer_callbacks_are_empty());
     drop(second);
-    let mut first = first.activate_or_panic();
-    assert_eq!(query_position(&mut first), [11.0, 12.0]);
+    assert_eq!(
+        first_binding.with_bound_context(|| query_position(&mut first)),
+        [11.0, 12.0]
+    );
 }
 
 #[cfg(feature = "multi-viewport")]

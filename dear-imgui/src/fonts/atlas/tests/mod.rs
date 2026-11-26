@@ -15,6 +15,7 @@ fn reconcile_with_retry(
         .expect("explicit retry outcomes must reconcile the frame")
 }
 
+mod checked_bytes;
 mod mode;
 mod shared;
 mod source_validation;

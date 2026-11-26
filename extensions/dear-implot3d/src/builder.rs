@@ -19,14 +19,14 @@ impl Plot3DBuilder<'_> {
         self
     }
 
-    /// Draws a plot with the default setup. Returns `None` if the plot is skipped.
+    /// Draws a plot with the default setup. Returns `None` if skipped or the title is invalid.
     pub fn build<R>(self, draw: impl FnOnce(&Plot3DScope<'_>) -> R) -> Option<R> {
         self.build_with_setup(|_| {}, draw)
     }
 
-    /// Configures the axes, finishes native setup, and draws the plot. A skipped plot runs
-    /// neither closure. Both closures can use other ImGui windows and must return to the host
-    /// window and table cell to operate on this plot.
+    /// Configures the axes, finishes native setup, and draws the plot. A skipped plot or an empty
+    /// or NUL-containing title runs neither closure. Both closures can use other ImGui windows
+    /// and must return to the host window and table cell to operate on this plot.
     ///
     /// # Panics
     ///
@@ -60,7 +60,12 @@ impl Plot3DBuilder<'_> {
                 host,
                 next_item: Default::default(),
             };
-            host.run(|| setup(&Plot3DSetup { plot: &plot }));
+            host.run(|| {
+                setup(&Plot3DSetup {
+                    plot: &plot,
+                    axes: Default::default(),
+                });
+            });
 
             // GetPlotRectPos calls SetupLock, which pushes a second native clip rect. Install it
             // after all setup-closure scopes have closed and before application drawing begins.

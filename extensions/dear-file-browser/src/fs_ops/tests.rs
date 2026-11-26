@@ -4,6 +4,16 @@ use std::cell::Cell;
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+fn paste(
+    fs: &dyn FileSystem,
+    op: ClipboardOp,
+    from: &Path,
+    to: &Path,
+    overwrite: bool,
+) -> Result<(), PasteError> {
+    paste_cancellable(fs, op, from, to, overwrite, &|| false)
+}
+
 pub(crate) struct TempDir(PathBuf);
 
 impl TempDir {
@@ -584,7 +594,14 @@ fn moves_and_deletes_act_on_the_link_even_when_its_referent_is_an_ancestor() {
     let source = dir.join("file");
     fs::write(&source, b"source").unwrap();
     symlink(dir.join("missing"), &link).unwrap();
-    assert!(StdFileSystem.rename_noreplace(&source, &link).is_err());
+    assert_eq!(
+        StdFileSystem
+            .rename_noreplace(&source, &link)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::AlreadyExists
+    );
+    assert_eq!(fs::read(&source).unwrap(), b"source");
     assert_eq!(fs::read_link(&link).unwrap(), dir.join("missing"));
     fs::remove_file(&link).unwrap();
     symlink(dir, &link).unwrap();
@@ -611,4 +628,49 @@ fn deleting_a_windows_directory_link_preserves_its_target() {
     delete_entry(&StdFileSystem, &link, false).unwrap();
     assert!(!entry_exists(&StdFileSystem, &link).unwrap());
     assert_eq!(fs::read(target.join("child")).unwrap(), b"child");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_junctions_are_never_traversed_during_copy_or_deletion() {
+    let temp = TempDir::new();
+    let source = temp.path().join("source");
+    let referent = temp.path().join("referent");
+    let junction = source.join("junction");
+    let destination = temp.path().join("destination");
+    fs::create_dir(&source).unwrap();
+    fs::create_dir(&referent).unwrap();
+    fs::write(referent.join("child"), b"original").unwrap();
+
+    // Use fixed relative arguments so cmd.exe never expands a user-supplied path.
+    let output = std::process::Command::new("cmd.exe")
+        .args(["/D", "/C", "mklink", "/J", r"source\junction", "referent"])
+        .current_dir(temp.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "mklink /J failed: {output:?}");
+
+    let fs = StdFileSystem;
+    assert!(fs.inspect_entry(&junction).unwrap().is_symlink);
+    fs.visit_dir(&source, &mut |entry| {
+        assert!(entry.is_dir && entry.is_symlink);
+        ScanVisit::Continue
+    })
+    .unwrap();
+    assert!(matches!(
+        paste(&fs, ClipboardOp::Copy, &source, &destination, false),
+        Err(PasteError::Transfer(e)) if e.kind() == ErrorKind::Unsupported
+    ));
+    assert!(!entry_exists(&fs, &destination).unwrap());
+
+    let cross_device = MoveFs::cross_device(&junction);
+    assert!(matches!(
+        paste(&cross_device, ClipboardOp::Cut, &junction, &destination, false),
+        Err(PasteError::Transfer(e)) if e.kind() == ErrorKind::Unsupported
+    ));
+    assert!(!entry_exists(&fs, &destination).unwrap());
+
+    delete_entry(&fs, &junction, false).unwrap();
+    assert!(!entry_exists(&fs, &junction).unwrap());
+    assert_eq!(std::fs::read(referent.join("child")).unwrap(), b"original");
 }

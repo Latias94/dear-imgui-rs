@@ -7,7 +7,7 @@ use dear_imnodes::ImNodesExt;
 #[test]
 fn basic_editor_smoke_test() {
     let mut imgui = Context::create();
-    let imnodes_ctx = imnodes::Context::create(&imgui);
+    let imnodes_ctx = imnodes::ImNodesContext::create(&imgui);
 
     // One editor context for this test
     let editor = imnodes_ctx.create_editor_context();

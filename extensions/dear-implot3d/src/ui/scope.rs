@@ -1,6 +1,8 @@
 use crate::Plot3DUi;
+use crate::axis::AxisDomain;
 use crate::layout::NextItemStyle;
 use dear_imgui_rs::{DrawListMut, NativeWindowScope};
+use std::cell::Cell;
 
 /// Axis and box configuration, borrowed before the plot locks setup.
 ///
@@ -12,6 +14,7 @@ use dear_imgui_rs::{DrawListMut, NativeWindowScope};
 /// ```
 pub struct Plot3DSetup<'plot> {
     pub(crate) plot: &'plot Plot3DScope<'plot>,
+    pub(crate) axes: [Cell<AxisDomain>; 3],
 }
 
 impl Plot3DSetup<'_> {

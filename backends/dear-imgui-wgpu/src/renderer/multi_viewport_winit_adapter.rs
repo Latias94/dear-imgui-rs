@@ -5,13 +5,15 @@ use super::multi_viewport_runtime::WgpuViewportError;
 pub(super) use dear_imgui_winit::WinitWindowRenderLease as NativeWindowLease;
 pub(super) use dear_imgui_winit::multi_viewport::WinitViewportRendererAdapter as PlatformOwner;
 
+pub(super) type ViewportSurface = wgpu::Surface<'static>;
+
 /// Creates a surface retaining the exact validated native window allocation.
 pub(super) fn create_surface(
     instance: &wgpu::Instance,
     platform: &PlatformOwner,
     viewport: &Viewport,
     expected: Option<NativeWindowInstanceId>,
-) -> Result<(wgpu::Surface<'static>, [u32; 2], NativeWindowTarget), WgpuViewportError> {
+) -> Result<(ViewportSurface, [u32; 2], NativeWindowTarget), WgpuViewportError> {
     let snapshot = match expected {
         Some(instance) => platform.window_snapshot_for_instance(instance)?,
         None => platform.window_snapshot_for_viewport(viewport.id())?,

@@ -1,11 +1,10 @@
-use super::multiline::{InputTextMultiline, InputTextMultilineImStr};
+use super::multiline::InputTextMultiline;
 use super::numeric::{
     InputDouble, InputFloat, InputFloat2, InputFloat3, InputFloat4, InputInt, InputInt2, InputInt3,
     InputInt4, InputScalar, InputScalarN,
 };
-use super::single_line::{InputText, InputTextImStr};
+use super::single_line::InputText;
 use crate::internal::DataTypeKind;
-use crate::string::ImString;
 use crate::ui::Ui;
 use std::borrow::Cow;
 
@@ -33,15 +32,6 @@ impl Ui {
         InputText::new(self, label, buf)
     }
 
-    /// Creates a single-line text input backed by ImString (zero-copy)
-    pub fn input_text_imstr<'ui, 'p>(
-        &'ui self,
-        label: impl Into<Cow<'ui, str>>,
-        buf: &'p mut ImString,
-    ) -> InputTextImStr<'ui, 'p> {
-        InputTextImStr::new(self, label, buf)
-    }
-
     /// Creates a multi-line text input widget builder.
     ///
     /// # Examples
@@ -63,16 +53,6 @@ impl Ui {
         size: impl Into<[f32; 2]>,
     ) -> InputTextMultiline<'ui, 'p> {
         InputTextMultiline::new(self, label, buf, size)
-    }
-
-    /// Creates a multi-line text input backed by ImString (zero-copy)
-    pub fn input_text_multiline_imstr<'ui, 'p>(
-        &'ui self,
-        label: impl Into<Cow<'ui, str>>,
-        buf: &'p mut ImString,
-        size: impl Into<[f32; 2]>,
-    ) -> InputTextMultilineImStr<'ui, 'p> {
-        InputTextMultilineImStr::new(self, label, buf, size)
     }
 
     /// Creates an integer input widget.

@@ -69,7 +69,7 @@ silently downgrades the policy.
 ## Worker Lifecycle
 
 Each native `ScanRuntime` owns one `ScanWorker` and a bounded session queue. The
-worker owns its wake channel, cooperative cancellation state, and `JoinHandle`. A
+worker owns its wake channel and cooperative cancellation state. A
 dialog runtime has:
 
 - one bounded raw-batch `sync_channel`,
@@ -87,11 +87,10 @@ retaining every intermediate filesystem/path or waiting for the old call. If a
 filesystem is blocked before it can observe cancellation, the latest request starts
 when that call returns; navigation and submission still return immediately.
 
-`ScanRuntime::drop` marks its session closed, requests cancellation, closes the
-worker wake channel, and joins the worker after releasing the session mutex. No
-worker outlives its runtime. A filesystem blocked in an uninterruptible call delays
-destruction of that dialog until the call returns, but cannot occupy capacity needed
-by another dialog's worker.
+Dropping `ScanRuntime` closes its session and wake channel and requests cancellation
+without joining the worker. A worker blocked in a filesystem call may outlive
+the dialog until that call returns. It cannot apply a result to the dropped dialog
+or occupy capacity needed by another dialog's worker.
 
 The bounded sender retries while checking cancellation. This prevents a worker
 from remaining blocked forever when its receiver is dropped or its generation is
@@ -138,8 +137,8 @@ sleeps. It proves:
 - repeated blocked generations retain only the latest pending request,
 - stale entries and errors cannot replace the new cwd, status, or selection,
 - cancellation reaches the streaming visitor, and
-- runtime drop requests cancellation, waits for its worker, and finishes once a
-  blocked filesystem is released, and
+- runtime drop requests cancellation and finishes even before a blocked filesystem
+  is released, and
 - blocked workers belonging to several dialogs do not starve a fresh dialog scan.
 
 Run:

@@ -2,12 +2,15 @@
 
 use std::collections::{HashSet, hash_map::Entry};
 
+use bevy_render::{render_resource::DownlevelFlags, renderer::RenderAdapter};
+
 use super::prepare::{render_viewport_for_pass, scissor_for_render_pass};
 use super::*;
 
 #[derive(SystemParam)]
 pub(super) struct ImguiRenderPassParams<'w> {
     pipeline_cache: Option<Res<'w, PipelineCache>>,
+    render_adapter: Option<Res<'w, RenderAdapter>>,
     render_queue: Option<Res<'w, RenderQueue>>,
     queued: Res<'w, ImguiQueuedPipelines>,
     prepared: Res<'w, ImguiPreparedRenderFrame>,
@@ -126,19 +129,28 @@ pub(super) fn render_imgui_overlay(
             1.0,
         );
     }
-    if let Some(vertex_buffer) = params.gpu_buffers.vertex_buffer() {
-        render_pass.set_vertex_buffer(0, *vertex_buffer.slice(..));
-    } else {
+    let Some(vertex_buffer) = params.gpu_buffers.vertex_buffer() else {
         return;
-    }
+    };
+    render_pass.set_vertex_buffer(0, *vertex_buffer.slice(..));
     if let Some(index_buffer) = params.gpu_buffers.index_buffer() {
         render_pass.set_index_buffer(*index_buffer.slice(..), IndexFormat::Uint16);
     } else {
         return;
     }
 
+    let supports_base_vertex = params.render_adapter.as_ref().is_some_and(|adapter| {
+        adapter
+            .get_downlevel_capabilities()
+            .flags
+            .contains(DownlevelFlags::BASE_VERTEX)
+    });
     let mut bound_context = None;
+    let mut bound_vertex_offset = 0;
     for draw in drawable {
+        if draw.index_range.is_empty() {
+            continue;
+        }
         let common_bind_group = common_bind_groups
             .get(&draw.context_id)
             .expect("drawable Context must retain its prepared uniform bind group");
@@ -155,7 +167,20 @@ pub(super) fn render_imgui_overlay(
         }
         render_pass.set_bind_group(1, texture_bind_group, &[]);
         render_pass.set_scissor_rect(scissor.x, scissor.y, scissor.width, scissor.height);
-        render_pass.draw_indexed(draw.index_range.clone(), draw.vertex_offset, 0..1);
+
+        // WebGL2 and some downlevel adapters need the command's vertex range bound at slot zero.
+        let base_vertex = if supports_base_vertex {
+            draw.vertex_offset
+        } else {
+            if draw.vertex_offset != bound_vertex_offset {
+                let offset = draw.vertex_offset as BufferAddress
+                    * size_of::<ImguiGpuVertex>() as BufferAddress;
+                render_pass.set_vertex_buffer(0, *vertex_buffer.slice(offset..));
+                bound_vertex_offset = draw.vertex_offset;
+            }
+            0
+        };
+        render_pass.draw_indexed(draw.index_range.clone(), base_vertex, 0..1);
     }
 }
 

@@ -644,6 +644,7 @@ mod tests {
             clip_origin: super::super::core::GlowClipOrigin::default(),
             has_separate_polygon_modes: false,
             has_sampler_object_support: true,
+            bind_program_pipeline: None,
             gl_context: None,
             context_binding: None,
             backend_user_data: Box::default(),
@@ -1192,7 +1193,6 @@ mod tests {
         let mut owner = ImGuiContext::create();
         let mut renderer = make_protocol_renderer(&mut owner);
         let gl = make_fake_gl();
-        let owner = owner.suspend_or_panic();
 
         let mut foreign = ImGuiContext::create();
         foreign.prepare_frame(
@@ -1243,8 +1243,9 @@ mod tests {
 
         drop(foreign_consumer);
         drop(foreign);
-        let mut owner = owner.activate().expect("owner Context should reactivate");
         renderer.shutdown_with_context(&gl, &mut owner).unwrap();
+        assert!(owner.io().backend_renderer_user_data().is_null());
+        assert!(owner.io().backend_renderer_name().is_none());
     }
 
     #[test]

@@ -475,7 +475,9 @@ fn main() {
     for path in sources.native_candidate_paths() {
         println!("cargo:rerun-if-changed={}", path.display());
     }
-    println!("cargo:rerun-if-changed=../../dear-imgui-sys");
+    if Path::new("../../dear-imgui-sys").is_dir() {
+        println!("cargo:rerun-if-changed=../../dear-imgui-sys");
+    }
     println!("cargo:rerun-if-env-changed=IMPLOT3D_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMPLOT3D_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=IMPLOT3D_SYS_PREBUILT_URL");

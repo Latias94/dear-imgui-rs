@@ -129,8 +129,7 @@ impl Ui {
             !text.contains('\0'),
             "Ui::debug_text_encoding() text must not contain interior NUL bytes"
         );
-        let text = self.scratch_txt(text);
-        self.run_with_bound_context(|| unsafe { sys::igDebugTextEncoding(text) });
+        self.with_scratch_txt(text, |text| unsafe { sys::igDebugTextEncoding(text) });
     }
 
     /// Temporarily flashes a style color in Dear ImGui's debug tools.

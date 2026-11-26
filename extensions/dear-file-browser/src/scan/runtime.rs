@@ -184,12 +184,3 @@ impl ScanRuntime {
             .and_then(BackgroundSession::current_cancel)
     }
 }
-
-impl Drop for ScanRuntime {
-    fn drop(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(mut session) = self.background_session.take() {
-            session.close();
-        }
-    }
-}

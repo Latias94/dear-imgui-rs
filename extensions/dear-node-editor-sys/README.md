@@ -8,6 +8,13 @@ raw upstream C wrapper. This keeps C++ ID helper objects out of the Rust API and
 lets the high-level crate expose `NodeId`, `PinId`, and `LinkId` as plain
 pointer-sized newtypes.
 
+The native shim contains C++ exceptions at the `dne_*` boundary. Creation
+returns null on failure. Queries with no current editor return neutral values.
+An exception during a native scope transition terminates the process rather
+than letting the caller proceed with an unbalanced canvas or style stack.
+Callers still own native phase ordering and pointer validity. A settings load
+uses a size query and a matching copy for the same editor or node.
+
 ## Upstream Sources
 
 This crate vendors:

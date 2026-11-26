@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::core::{ClickAction, SortMode};
-use crate::dialog_core::EntryId;
+use crate::dialog_core::{EntryId, ScanStatus};
 use crate::dialog_state::{
     FileDialogState, FileListColumnsConfig, FileListViewMode, PasteConflictAction,
 };
@@ -33,7 +33,7 @@ pub(super) fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState) {
 
     if let Some(_popup) = ui.begin_modal_popup(POPUP_ID) {
         ui.text("Create a new folder in:");
-        ui.text_disabled(state.core.cwd.display().to_string());
+        ui.text_disabled(crate::fs::display_path(&state.core.cwd).as_ref());
         ui.separator();
 
         if state.ui.operations.new_folder.focus_next {
@@ -63,6 +63,10 @@ pub(super) fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState) {
 }
 
 pub(super) fn try_create_new_folder_in_cwd(state: &mut FileDialogState) -> bool {
+    if super::ops::file_operation_in_progress(state) {
+        state.ui.operations.new_folder.error = Some("Another file operation is in progress".into());
+        return false;
+    }
     state.ui.operations.new_folder.error = None;
     let name = state.ui.operations.new_folder.name.trim();
     if !is_entry_name(name) {
@@ -298,7 +302,7 @@ pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState) {
             .unwrap_or_else(|| from_path.display().to_string());
 
         ui.text("Rename in:");
-        ui.text_disabled(state.core.cwd.display().to_string());
+        ui.text_disabled(crate::fs::display_path(&state.core.cwd).as_ref());
         ui.separator();
         ui.text(format!("From: {from_name}"));
 
@@ -309,7 +313,11 @@ pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState) {
         ui.input_text("To", &mut state.ui.operations.rename.to)
             .build();
 
-        let rename = ui.button("Rename");
+        let rename = {
+            let _disabled =
+                ui.begin_disabled_with_cond(super::ops::file_operation_in_progress(state));
+            ui.button("Rename")
+        };
         ui.same_line();
         let cancel = ui.button("Cancel");
         if cancel {
@@ -323,7 +331,7 @@ pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState) {
             let to_name = state.ui.operations.rename.to.trim();
             if !is_entry_name(to_name) {
                 state.ui.operations.rename.error = Some("Invalid target name".into());
-            } else if to_name == from_name.as_str() {
+            } else if state.ui.operations.rename.to == from_name || to_name == from_name.as_str() {
                 state.ui.operations.rename.error = Some("Target name is unchanged".into());
             } else {
                 let to_name = to_name.to_string();
@@ -363,6 +371,19 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState) {
     const POPUP_ID: &str = "Delete";
 
     if state.ui.operations.delete.open_next {
+        let delete = &state.ui.operations.delete;
+        if delete.error.is_some()
+            && matches!(
+                state.scan_status(),
+                ScanStatus::Scanning { .. } | ScanStatus::Partial { .. }
+            )
+            && delete
+                .target_ids
+                .iter()
+                .any(|&id| state.core.entry_by_id(id).is_none())
+        {
+            return;
+        }
         state.ui.operations.delete.open_next = false;
         state.ui.operations.delete.recursive = false;
         if !ui.is_popup_open(POPUP_ID) {
@@ -428,7 +449,7 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState) {
                 "ies"
             }
         ));
-        ui.text_disabled(state.core.cwd.display().to_string());
+        ui.text_disabled(crate::fs::display_path(&state.core.cwd).as_ref());
         ui.separator();
 
         let preview_n = 6usize.min(delete_target_names.len());
@@ -509,8 +530,11 @@ pub(super) fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState) {
             .unwrap_or_else(|| prompt.source.display().to_string());
 
         ui.text(format!("Target already exists: {src_name}"));
-        ui.text_disabled(format!("Source: {}", prompt.source.display()));
-        ui.text_disabled(format!("Target: {}", prompt.dest.display()));
+        ui.text_disabled(format!(
+            "Source: {}",
+            crate::fs::display_path(&prompt.source)
+        ));
+        ui.text_disabled(format!("Target: {}", crate::fs::display_path(&prompt.dest)));
         ui.separator();
 
         let mut apply_to_all = prompt.apply_to_all;

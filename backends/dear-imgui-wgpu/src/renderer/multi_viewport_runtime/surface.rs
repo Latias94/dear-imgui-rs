@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use super::platform_adapter;
+use super::platform_adapter::{self, ViewportSurface};
 use super::registry::GlobalHandles;
 use super::runtime::WgpuViewportError;
 use crate::WgpuViewportSurfaceConfig;
@@ -11,7 +11,7 @@ use dear_imgui_rs::platform_io::Viewport;
 
 pub(super) struct ViewportWgpuData {
     pub(super) native_target: dear_imgui_rs::NativeWindowTarget,
-    pub(super) surface: Option<Rc<wgpu::Surface<'static>>>,
+    pub(super) surface: Option<Rc<ViewportSurface>>,
     pub(super) targets: Option<ViewportRenderTargets>,
     pub(super) size: [u32; 2],
     pub(super) pending_reconfigure: bool,
@@ -222,7 +222,8 @@ pub(super) unsafe fn create_viewport_data(
     viewport: &Viewport,
     globals: &GlobalHandles,
 ) -> Result<ViewportWgpuData, WgpuViewportError> {
-    let (surface, size, native_target) = create_native_surface(globals, viewport, None)?;
+    let (surface, size, native_target) =
+        platform_adapter::create_surface(&globals.instance, &globals.platform, viewport, None)?;
     let targets = configure_surface(globals, &surface, size)?;
     Ok(ViewportWgpuData {
         native_target,
@@ -231,33 +232,6 @@ pub(super) unsafe fn create_viewport_data(
         size,
         pending_reconfigure: false,
     })
-}
-
-fn create_native_surface(
-    globals: &GlobalHandles,
-    viewport: &Viewport,
-    expected: Option<dear_imgui_rs::NativeWindowInstanceId>,
-) -> Result<
-    (
-        wgpu::Surface<'static>,
-        [u32; 2],
-        dear_imgui_rs::NativeWindowTarget,
-    ),
-    WgpuViewportError,
-> {
-    #[cfg(feature = "multi-viewport-winit")]
-    return platform_adapter::create_surface(
-        &globals.instance,
-        &globals.platform,
-        viewport,
-        expected,
-    );
-    #[cfg(all(not(feature = "multi-viewport-winit"), feature = "multi-viewport-sdl3"))]
-    // SAFETY: renderer resources are released before SDL platform-window teardown. The exact
-    // captured owner validates the registration before lending the native pointer.
-    unsafe {
-        platform_adapter::create_surface(&globals.instance, &globals.platform, viewport, expected)
-    }
 }
 
 pub(super) fn reconfigure_surface(
@@ -300,8 +274,12 @@ unsafe fn recreate_surface(
     globals: &GlobalHandles,
 ) -> Result<(), WgpuViewportError> {
     data.release_surface_bundle();
-    let (surface, size, native_target) =
-        create_native_surface(globals, viewport, Some(data.native_target.instance_id))?;
+    let (surface, size, native_target) = platform_adapter::create_surface(
+        &globals.instance,
+        &globals.platform,
+        viewport,
+        Some(data.native_target.instance_id),
+    )?;
     let targets = configure_surface(globals, &surface, size)?;
     data.surface = Some(Rc::new(surface));
     data.native_target = native_target;

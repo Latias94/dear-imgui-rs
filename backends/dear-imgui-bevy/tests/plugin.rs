@@ -267,7 +267,7 @@ fn plugin_adopts_an_app_scoped_registry_without_replacing_its_primary_context() 
     let _guard = imgui_context_guard();
     let mut app = App::new();
     let additional_pass = app.declare_imgui_pass::<AdditionalPass>().unwrap();
-    let primary = dear_imgui_rs::SuspendedContext::create();
+    let primary = dear_imgui_rs::Context::create();
     let primary_id = primary.id();
     app.adopt_imgui_primary_context(primary).unwrap();
     let additional_id = app
@@ -309,27 +309,22 @@ fn plugin_adopts_an_app_scoped_registry_without_replacing_its_primary_context() 
 #[test]
 fn removing_a_context_clears_only_backend_state_owned_by_bevy() {
     let _guard = imgui_context_guard();
-    let primary = dear_imgui_rs::SuspendedContext::create();
+    let primary = dear_imgui_rs::Context::create();
     let primary_id = primary.id();
     let mut app = App::new();
     app.adopt_imgui_primary_context(primary).unwrap();
     app.add_plugins(ImguiPlugin::default());
 
-    let mut removed = app
+    let removed = app
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
         .try_remove_immediately(primary_id)
         .expect("headless backend teardown should complete immediately");
-    removed
-        .try_with_active(|context| {
-            assert!(context.io().backend_platform_name().is_none());
-            assert!(context.io().backend_platform_user_data().is_null());
-            assert!(context.io().backend_renderer_name().is_none());
-            assert!(context.io().backend_renderer_user_data().is_null());
-            Ok::<_, ()>(())
-        })
-        .unwrap();
+    assert!(removed.io().backend_platform_name().is_none());
+    assert!(removed.io().backend_platform_user_data().is_null());
+    assert!(removed.io().backend_renderer_name().is_none());
+    assert!(removed.io().backend_renderer_user_data().is_null());
     assert_eq!(
         app.world()
             .get_non_send::<ImguiContexts>()
@@ -343,13 +338,8 @@ fn removing_a_context_clears_only_backend_state_owned_by_bevy() {
 #[test]
 fn foreign_platform_name_is_not_overwritten_when_bevy_does_not_own_the_platform_contract() {
     let _guard = imgui_context_guard();
-    let mut primary = dear_imgui_rs::SuspendedContext::create();
-    primary
-        .try_with_active(|context| {
-            context.set_platform_name(Some("foreign-platform")).unwrap();
-            Ok::<_, ()>(())
-        })
-        .unwrap();
+    let mut primary = dear_imgui_rs::Context::create();
+    primary.set_platform_name(Some("foreign-platform")).unwrap();
     let primary_id = primary.id();
 
     let mut app = App::new();
@@ -389,17 +379,15 @@ fn managed_shared_font_atlas_admission_fails_before_backend_fields_are_mutated()
     let mut app = app_with_render_schedule();
     let additional_pass = app.declare_imgui_pass::<AdditionalPass>().unwrap();
     let atlas = dear_imgui_rs::SharedFontAtlas::create();
-    let primary =
-        dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(atlas.clone()).unwrap();
+    let primary = dear_imgui_rs::Context::try_create_with_shared_font_atlas(atlas.clone()).unwrap();
     let primary_id = primary.id();
-    let additional =
-        dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(atlas).unwrap();
+    let additional = dear_imgui_rs::Context::try_create_with_shared_font_atlas(atlas).unwrap();
     let additional_id = additional.id();
     app.adopt_imgui_primary_context(primary).unwrap();
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
-        .insert_suspended(additional, ImguiContextConfig::new(&additional_pass))
+        .insert_context(additional, ImguiContextConfig::new(&additional_pass))
         .unwrap();
 
     let failure = install_error(
@@ -446,22 +434,20 @@ fn later_renderer_admission_failure_leaves_earlier_font_atlas_unclaimed() {
     let additional_pass = app.declare_imgui_pass::<AdditionalPass>().unwrap();
     let primary_atlas = dear_imgui_rs::SharedFontAtlas::create();
     let primary =
-        dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(primary_atlas.clone())
-            .unwrap();
+        dear_imgui_rs::Context::try_create_with_shared_font_atlas(primary_atlas.clone()).unwrap();
     let primary_id = primary.id();
 
     let blocked_atlas = dear_imgui_rs::SharedFontAtlas::create();
     let additional =
-        dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(blocked_atlas.clone())
-            .unwrap();
+        dear_imgui_rs::Context::try_create_with_shared_font_atlas(blocked_atlas.clone()).unwrap();
     let blocked_peer =
-        dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(blocked_atlas).unwrap();
+        dear_imgui_rs::Context::try_create_with_shared_font_atlas(blocked_atlas).unwrap();
     let additional_id = additional.id();
     app.adopt_imgui_primary_context(primary).unwrap();
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
-        .insert_suspended(additional, ImguiContextConfig::new(&additional_pass))
+        .insert_context(additional, ImguiContextConfig::new(&additional_pass))
         .unwrap();
 
     let failure = install_error(
@@ -479,9 +465,8 @@ fn later_renderer_admission_failure_leaves_earlier_font_atlas_unclaimed() {
     );
     assert!(!app.is_plugin_added::<ImguiPlugin>());
 
-    let primary_peer =
-        dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(primary_atlas)
-            .expect("the earlier Context atlas must remain in legacy-unclaimed mode");
+    let primary_peer = dear_imgui_rs::Context::try_create_with_shared_font_atlas(primary_atlas)
+        .expect("the earlier Context atlas must remain in legacy-unclaimed mode");
     drop(primary_peer);
     drop(blocked_peer);
 
@@ -523,7 +508,7 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
     )
     .unwrap();
     app.add_plugins(ImguiPlugin::default());
-    let stale = dear_imgui_rs::SuspendedContext::create();
+    let stale = dear_imgui_rs::Context::create();
     let stale_id = stale.id();
     drop(stale);
     let (primary_id, additional_id) = {
@@ -739,13 +724,8 @@ fn renderer_ownership_drift_blocks_shutdown_before_registry_removal_and_can_be_r
 #[test]
 fn foreign_renderer_claim_is_rejected_without_mutating_the_context() {
     let _guard = imgui_context_guard();
-    let mut primary = dear_imgui_rs::SuspendedContext::create();
-    primary
-        .try_with_active(|context| {
-            context.set_renderer_name(Some("foreign-renderer")).unwrap();
-            Ok::<_, ()>(())
-        })
-        .unwrap();
+    let mut primary = dear_imgui_rs::Context::create();
+    primary.set_renderer_name(Some("foreign-renderer")).unwrap();
     let primary_id = primary.id();
 
     let mut app = app_with_render_schedule();
@@ -786,8 +766,8 @@ fn foreign_renderer_claim_is_rejected_without_mutating_the_context() {
 #[test]
 fn unknown_context_error_does_not_alias_the_primary_identity() {
     let _guard = imgui_context_guard();
-    let primary = dear_imgui_rs::SuspendedContext::create();
-    let stale = dear_imgui_rs::SuspendedContext::create();
+    let primary = dear_imgui_rs::Context::create();
+    let stale = dear_imgui_rs::Context::create();
     let stale_id = stale.id();
     drop(stale);
     let mut app = App::new();

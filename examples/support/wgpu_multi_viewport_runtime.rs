@@ -168,7 +168,9 @@ impl AppRenderer {
     ) -> Result<AppPreparedFrame<'frame>, Box<dyn std::error::Error>> {
         match self {
             Self::Single(renderer) => {
-                let pending_frame = frame.try_render(renderer.renderer_consumer()?)?;
+                let pending_frame = frame
+                    .try_render(renderer.renderer_consumer()?)
+                    .map_err(|(_frame, error)| error)?;
                 Ok(AppPreparedFrame::Single(
                     renderer.reconcile_frame(pending_frame)?,
                 ))

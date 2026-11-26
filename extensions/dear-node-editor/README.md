@@ -129,6 +129,10 @@ The corresponding scoped and manual entry points are:
 candidate and use the response to accept or reject it. The initial color and
 thickness style the preview, and the styled response methods can override them.
 
+`group_hint` lends a mutable hint token. Drop its foreground draw-list
+wrapper before requesting the background wrapper, or vice versa. These calls
+select different channels of the same native draw list.
+
 Run the repository examples:
 
 ```bash

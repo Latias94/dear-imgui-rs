@@ -7,7 +7,7 @@ use std::{
 };
 
 use super::{
-    platform_adapter::NativeWindowLease,
+    platform_adapter::{NativeWindowLease, ViewportSurface},
     runtime::WgpuViewportError,
     trace::{ObservationKey, WgpuViewportFrameReport},
 };
@@ -55,7 +55,7 @@ impl std::error::Error for WgpuViewportWorkError {
 /// The acquired frame is released before the Surface, then the exact window and its owner chain.
 pub(super) struct AcquiredTarget {
     pub(super) frame: Option<wgpu::SurfaceTexture>,
-    pub(super) surface: Option<Rc<wgpu::Surface<'static>>>,
+    pub(super) surface: Option<Rc<ViewportSurface>>,
     pub(super) native_window: Option<NativeWindowLease>,
 }
 

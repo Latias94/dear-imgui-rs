@@ -1,5 +1,4 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
 use dear_imgui_rs::Context;
@@ -29,7 +28,6 @@ fn plot_ui_rejects_a_ui_from_another_context_by_identity() {
     let _guard = test_guard();
     let imgui_a = Context::create();
     let plot_a = PlotContext::create(&imgui_a);
-    let suspended_a = imgui_a.suspend_or_panic();
 
     let mut imgui_b = Context::create();
     prepare_imgui(&mut imgui_b);
@@ -40,9 +38,6 @@ fn plot_ui_rejects_a_ui_from_another_context_by_identity() {
     }
     drop(imgui_b);
 
-    let imgui_a = suspended_a
-        .activate()
-        .unwrap_or_else(|_| panic!("context A should reactivate after context B is dropped"));
     drop(plot_a);
     drop(imgui_a);
 }
@@ -52,36 +47,38 @@ fn plot_binding_restores_imgui_and_implot_contexts_after_panic() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    let imgui_raw = imgui.as_raw();
     let plot = PlotContext::create(&imgui);
-    let previous_plot = unsafe { dear_implot_sys::ImPlot_GetCurrentContext() };
+    let previous_imgui = Context::create();
+    let previous_plot = PlotContext::create(&previous_imgui);
+    let previous_raw = unsafe { previous_plot.raw() };
 
     {
         let frame = imgui.begin_frame();
         let plot_ui = plot.get_plot_ui(frame.ui());
-        unsafe {
-            dear_imgui_rs::sys::igSetCurrentContext(ptr::null_mut());
-            dear_implot_sys::ImPlot_SetCurrentContext(ptr::null_mut());
-        }
+        previous_imgui.binding().with_bound_context(|| {
+            unsafe { dear_implot_sys::ImPlot_SetCurrentContext(previous_raw) };
 
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            unsafe {
-                // The empty style contains no array pointers to validate.
-                plot_ui.with_plot("unwind", |plot| {
-                    plot.with_next_plot_item_array_style(PlotItemArrayStyle::new(), |_| {
-                        panic!("binding panic probe")
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                unsafe {
+                    // The empty style contains no array pointers to validate.
+                    plot_ui.with_plot("unwind", |plot| {
+                        plot.with_next_plot_item_array_style(PlotItemArrayStyle::new(), |_| {
+                            panic!("binding panic probe")
+                        });
                     });
-                });
-            }
-        }));
+                }
+            }));
 
-        assert!(result.is_err());
-        assert!(unsafe { dear_imgui_rs::sys::igGetCurrentContext() }.is_null());
-        assert!(unsafe { dear_implot_sys::ImPlot_GetCurrentContext() }.is_null());
-        unsafe {
-            dear_imgui_rs::sys::igSetCurrentContext(imgui_raw);
-            dear_implot_sys::ImPlot_SetCurrentContext(previous_plot);
-        }
+            assert!(result.is_err());
+            assert_eq!(
+                unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+                previous_imgui.as_raw()
+            );
+            assert_eq!(
+                unsafe { dear_implot_sys::ImPlot_GetCurrentContext() },
+                previous_raw
+            );
+        });
     }
     drop(plot);
 }

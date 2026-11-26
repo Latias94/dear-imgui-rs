@@ -161,6 +161,30 @@ const _: [(); 4] = [(); std::mem::size_of::<ImWchar>()];
 /// Whether this build linked the repository-owned PlatformIO aggregate ABI hook shim.
 pub const HAS_PLATFORM_IO_AGGREGATE_HOOKS: bool = cfg!(dear_imgui_rs_platform_io_hooks);
 
+#[cfg(dear_imgui_rs_platform_io_hooks)]
+unsafe extern "C" {
+    fn dear_imgui_rs_current_context_slot() -> *const *mut ImGuiContext;
+}
+
+/// Returns the native current-context storage when using the workspace's native artifact.
+///
+/// # Safety
+///
+/// The caller must own the Dear ImGui thread lease while obtaining or reading the slot.
+/// The slot is read-only and must never be passed to a different thread.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn current_context_slot() -> *const *mut ImGuiContext {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    {
+        unsafe { dear_imgui_rs_current_context_slot() }
+    }
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        std::ptr::null()
+    }
+}
+
 #[cfg(feature = "stack-layout")]
 mod stack_layout {
     use super::*;

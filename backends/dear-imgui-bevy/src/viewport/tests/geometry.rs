@@ -14,15 +14,17 @@ fn settle_test_decorated_client_placements(
 }
 
 fn reset_platform_geometry_requests(app: &mut App, viewport_id: imgui::Id) {
-    with_primary_context(app, |_context| {
-        let raw_viewport = unsafe { sys::igFindViewportByID(viewport_id.raw()) };
-        assert!(
-            !raw_viewport.is_null(),
-            "the secondary viewport must remain in Dear ImGui's registry"
-        );
-        let viewport = unsafe { imgui::Viewport::from_raw_mut(raw_viewport) };
-        viewport.set_platform_request_move(false);
-        viewport.set_platform_request_resize(false);
+    with_primary_context(app, |context| {
+        context.binding().with_bound_context(|| {
+            let raw_viewport = unsafe { sys::igFindViewportByID(viewport_id.raw()) };
+            assert!(
+                !raw_viewport.is_null(),
+                "the secondary viewport must remain in Dear ImGui's registry"
+            );
+            let viewport = unsafe { imgui::Viewport::from_raw_mut(raw_viewport) };
+            viewport.set_platform_request_move(false);
+            viewport.set_platform_request_resize(false);
+        });
     });
 }
 

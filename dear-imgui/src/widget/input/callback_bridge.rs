@@ -1,240 +1,112 @@
-use super::buffers::resize_string_input_buffer;
+use super::buffers::{StringInputBuffer, resize_string_input_buffer};
 use super::callbacks::{HistoryDirection, InputTextCallbackHandler, TextCallbackData};
-use crate::string::ImString;
 use crate::sys;
-use std::ffi::{c_int, c_void};
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::any::Any;
+use std::ffi::{c_char, c_int, c_void};
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
-pub(in crate::widget::input) struct StringResizeCallbackState {
-    buffer: *mut Vec<u8>,
-}
-
-impl StringResizeCallbackState {
-    pub(in crate::widget::input) fn new(buffer: &mut Vec<u8>) -> Self {
-        Self {
-            buffer: buffer as *mut Vec<u8>,
-        }
-    }
-
-    pub(in crate::widget::input) fn user_ptr(&mut self) -> *mut c_void {
-        self as *mut Self as *mut c_void
-    }
-}
-
-pub(in crate::widget::input) struct StringCallbackState<T> {
+struct StringCallbackState<T> {
     buffer: *mut Vec<u8>,
     handler: T,
+    panic: Option<Box<dyn Any + Send>>,
 }
 
-impl<T> StringCallbackState<T> {
-    pub(in crate::widget::input) fn new(buffer: &mut Vec<u8>, handler: T) -> Self {
-        Self {
-            buffer: buffer as *mut Vec<u8>,
-            handler,
-        }
-    }
-
-    pub(in crate::widget::input) fn user_ptr(&mut self) -> *mut c_void {
-        self as *mut Self as *mut c_void
-    }
-}
-
-pub(in crate::widget::input) extern "C" fn im_string_resize_callback(
-    data: *mut sys::ImGuiInputTextCallbackData,
-) -> c_int {
-    resize_im_string_with_panic_message(data, "dear-imgui-rs: panic in ImString resize callback")
-}
-
-pub(in crate::widget::input) extern "C" fn im_string_multiline_resize_callback(
-    data: *mut sys::ImGuiInputTextCallbackData,
-) -> c_int {
-    resize_im_string_with_panic_message(
-        data,
-        "dear-imgui-rs: panic in ImString multiline resize callback",
-    )
-}
-
-pub(in crate::widget::input) extern "C" fn string_multiline_resize_callback(
-    data: *mut sys::ImGuiInputTextCallbackData,
-) -> c_int {
-    if data.is_null() {
-        return 0;
-    }
-
-    abort_on_panic(
-        "dear-imgui-rs: panic in multiline InputText resize callback",
-        || unsafe {
-            let state = (*data).UserData as *mut StringResizeCallbackState;
-            route_string_resize_callback(state, data)
-        },
-    )
-}
-
-pub(in crate::widget::input) extern "C" fn string_callback_router<T: InputTextCallbackHandler>(
-    data: *mut sys::ImGuiInputTextCallbackData,
-) -> c_int {
-    route_string_callback_with_panic_message::<T>(
-        data,
-        "dear-imgui-rs: panic in InputText callback",
-    )
-}
-
-pub(in crate::widget::input) extern "C" fn string_multiline_callback_router<
-    T: InputTextCallbackHandler,
->(
-    data: *mut sys::ImGuiInputTextCallbackData,
-) -> c_int {
-    route_string_callback_with_panic_message::<T>(
-        data,
-        "dear-imgui-rs: panic in InputText multiline callback",
-    )
-}
-
-fn resize_im_string_with_panic_message(
-    data: *mut sys::ImGuiInputTextCallbackData,
-    panic_message: &str,
-) -> c_int {
-    if data.is_null() {
-        return 0;
-    }
-
-    abort_on_panic(panic_message, || unsafe { resize_im_string(data) })
-}
-
-fn route_string_callback_with_panic_message<T: InputTextCallbackHandler>(
-    data: *mut sys::ImGuiInputTextCallbackData,
-    panic_message: &str,
-) -> c_int {
-    if data.is_null() {
-        return 0;
-    }
-
-    abort_on_panic(panic_message, || unsafe {
-        let state = (*data).UserData as *mut StringCallbackState<T>;
-        route_string_callback(state, data)
-    })
-}
-
-fn abort_on_panic(message: &str, f: impl FnOnce() -> c_int) -> c_int {
-    match catch_unwind(AssertUnwindSafe(f)) {
-        Ok(value) => value,
-        Err(_) => {
-            eprintln!("{message}");
-            std::process::abort();
-        }
-    }
-}
-
-unsafe fn resize_im_string(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
-    let event_flag = unsafe { (*data).EventFlag as i32 };
-    if event_flag != sys::ImGuiInputTextFlags_CallbackResize as i32 {
-        return 0;
-    }
-
-    let user_data = unsafe { (*data).UserData as *mut ImString };
-    let Some(im_string) = (unsafe { user_data.as_mut() }) else {
-        return 0;
+pub(super) fn with_string_input_buffer<T: InputTextCallbackHandler>(
+    target: &mut String,
+    capacity_hint: Option<usize>,
+    handler: T,
+    build: impl FnOnce(*mut c_char, usize, sys::ImGuiInputTextCallback, *mut c_void) -> bool,
+) -> bool {
+    let mut input = StringInputBuffer::new(target, capacity_hint);
+    let mut state = StringCallbackState {
+        buffer: &raw mut input.bytes,
+        handler,
+        panic: None,
     };
-
-    let requested_i32 = unsafe { (*data).BufSize };
-    if requested_i32 < 0 {
-        return 0;
+    let size = input.bytes.len();
+    let ptr = input.bytes.as_mut_ptr().cast();
+    let changed = build(
+        ptr,
+        size,
+        Some(string_callback_router::<T>),
+        (&raw mut state).cast(),
+    );
+    drop(input);
+    let panic = state.panic.take();
+    drop(state);
+    if let Some(payload) = panic {
+        resume_unwind(payload);
     }
-
-    let requested = requested_i32 as usize;
-    im_string.ensure_buf_size(requested);
-    unsafe {
-        (*data).Buf = im_string.as_mut_ptr();
-        (*data).BufDirty = true;
-    }
-    0
+    changed
 }
 
-unsafe fn route_string_resize_callback(
-    state: *mut StringResizeCallbackState,
+/// Continues to process native resize requests after a user callback panics.
+unsafe extern "C" fn string_callback_router<T: InputTextCallbackHandler>(
     data: *mut sys::ImGuiInputTextCallbackData,
 ) -> c_int {
-    let event_flag = unsafe { (*data).EventFlag as i32 };
-    if event_flag != sys::ImGuiInputTextFlags_CallbackResize as i32 {
+    if data.is_null() {
         return 0;
     }
-
+    let state = unsafe { (*data).UserData.cast::<StringCallbackState<T>>() };
     let Some(state) = (unsafe { state.as_mut() }) else {
         return 0;
     };
-    let Some(buffer) = (unsafe { state.buffer.as_mut() }) else {
+    let event = unsafe { (*data).EventFlag };
+    if event == sys::ImGuiInputTextFlags_CallbackResize as i32 {
+        unsafe { resize_string_input_buffer(&mut *state.buffer, &mut *data) };
         return 0;
-    };
+    }
 
-    unsafe {
-        debug_assert_eq!(buffer.as_ptr() as *const _, (*data).Buf);
-        resize_string_input_buffer(buffer, (*data).BufSize, data)
+    let fallback = c_int::from(event == sys::ImGuiInputTextFlags_CallbackCharFilter as i32);
+    if state.panic.is_some() {
+        return fallback;
+    }
+    match catch_unwind(AssertUnwindSafe(|| unsafe {
+        dispatch_user_callback(&mut state.handler, data, event)
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            state.panic = Some(payload);
+            fallback
+        }
     }
 }
 
-unsafe fn route_string_callback<T: InputTextCallbackHandler>(
-    state: *mut StringCallbackState<T>,
-    data: *mut sys::ImGuiInputTextCallbackData,
-) -> c_int {
-    let Some(state) = (unsafe { state.as_mut() }) else {
-        return 0;
-    };
-    let event_flag = unsafe { (*data).EventFlag as i32 };
-    match event_flag {
-        value if value == sys::ImGuiInputTextFlags_CallbackResize as i32 => unsafe {
-            let Some(buffer) = state.buffer.as_mut() else {
-                return 0;
-            };
-            debug_assert_eq!(buffer.as_ptr() as *const _, (*data).Buf);
-            resize_string_input_buffer(buffer, (*data).BufSize, data)
-        },
-        value if value == sys::ImGuiInputTextFlags_CallbackCompletion as i32 => {
-            let info = unsafe { TextCallbackData::new(data) };
-            state.handler.on_completion(info);
-            0
-        }
-        value if value == sys::ImGuiInputTextFlags_CallbackHistory as i32 => {
-            let dir = unsafe { history_direction(data) };
-            let info = unsafe { TextCallbackData::new(data) };
-            state.handler.on_history(dir, info);
-            0
-        }
-        value if value == sys::ImGuiInputTextFlags_CallbackAlways as i32 => {
-            let info = unsafe { TextCallbackData::new(data) };
-            state.handler.on_always(info);
-            0
-        }
-        value if value == sys::ImGuiInputTextFlags_CallbackEdit as i32 => {
-            let info = unsafe { TextCallbackData::new(data) };
-            state.handler.on_edit(info);
-            0
-        }
-        value if value == sys::ImGuiInputTextFlags_CallbackCharFilter as i32 => {
-            dispatch_char_filter(&mut state.handler, data);
-            0
-        }
-        _ => 0,
-    }
-}
-
-unsafe fn history_direction(data: *mut sys::ImGuiInputTextCallbackData) -> HistoryDirection {
-    let key = unsafe { (*data).EventKey };
-    if key == sys::ImGuiKey_UpArrow {
-        HistoryDirection::Up
-    } else {
-        HistoryDirection::Down
-    }
-}
-
-fn dispatch_char_filter<T: InputTextCallbackHandler>(
+unsafe fn dispatch_user_callback<T: InputTextCallbackHandler>(
     handler: &mut T,
     data: *mut sys::ImGuiInputTextCallbackData,
-) {
-    let ch = unsafe { std::char::from_u32((*data).EventChar as u32).unwrap_or('\0') };
-    let new_ch = handler.char_filter(ch).map(|c| c as u32).unwrap_or(0);
-    unsafe {
-        (*data).EventChar = sys::ImWchar::try_from(new_ch).unwrap_or(0 as sys::ImWchar);
+    event: sys::ImGuiInputTextFlags,
+) -> c_int {
+    match event {
+        value if value == sys::ImGuiInputTextFlags_CallbackCompletion as i32 => {
+            handler.on_completion(unsafe { TextCallbackData::new(&mut *data) });
+        }
+        value if value == sys::ImGuiInputTextFlags_CallbackHistory as i32 => {
+            let direction = if unsafe { (*data).EventKey } == sys::ImGuiKey_UpArrow {
+                HistoryDirection::Up
+            } else {
+                HistoryDirection::Down
+            };
+            handler.on_history(direction, unsafe { TextCallbackData::new(&mut *data) });
+        }
+        value if value == sys::ImGuiInputTextFlags_CallbackAlways as i32 => {
+            handler.on_always(unsafe { TextCallbackData::new(&mut *data) });
+        }
+        value if value == sys::ImGuiInputTextFlags_CallbackEdit as i32 => {
+            handler.on_edit(unsafe { TextCallbackData::new(&mut *data) });
+        }
+        value if value == sys::ImGuiInputTextFlags_CallbackCharFilter as i32 => {
+            let Some(character) = char::from_u32(unsafe { (*data).EventChar } as u32)
+                .and_then(|character| handler.char_filter(character))
+                .and_then(|character| sys::ImWchar::try_from(character as u32).ok())
+            else {
+                return 1;
+            };
+            unsafe { (*data).EventChar = character };
+        }
+        _ => (),
     }
+    0
 }
 
 #[cfg(test)]
@@ -248,8 +120,8 @@ mod tests {
     }
 
     impl InputTextCallbackHandler for RecordingHandler {
-        fn char_filter(&mut self, c: char) -> Option<char> {
-            self.char_filter_seen = Some(c);
+        fn char_filter(&mut self, character: char) -> Option<char> {
+            self.char_filter_seen = Some(character);
             Some('z')
         }
 
@@ -258,59 +130,88 @@ mod tests {
         }
     }
 
-    fn callback_data_for_buffer(buffer: &mut [u8]) -> sys::ImGuiInputTextCallbackData {
-        let mut data = sys::ImGuiInputTextCallbackData::default();
-        data.Buf = buffer.as_mut_ptr().cast();
-        data.BufTextLen = buffer.len().saturating_sub(1) as i32;
-        data.BufSize = buffer.len() as i32;
-        data
-    }
-
     #[test]
-    fn string_callback_router_dispatches_char_filter() {
+    fn string_callback_router_dispatches_char_filter_and_history() {
         let mut buffer = b"abc\0".to_vec();
-        let mut callback_state = StringCallbackState::new(&mut buffer, RecordingHandler::default());
-        let mut data = callback_data_for_buffer(&mut buffer);
-        data.UserData = callback_state.user_ptr();
-        data.EventFlag = sys::ImGuiInputTextFlags_CallbackCharFilter as i32;
-        data.EventChar = 'a' as sys::ImWchar;
-
-        assert_eq!(string_callback_router::<RecordingHandler>(&mut data), 0);
-
-        assert_eq!(callback_state.handler.char_filter_seen, Some('a'));
-        assert_eq!(data.EventChar, 'z' as sys::ImWchar);
-    }
-
-    #[test]
-    fn string_callback_router_dispatches_history_direction() {
-        let mut buffer = b"abc\0".to_vec();
-        let mut callback_state = StringCallbackState::new(&mut buffer, RecordingHandler::default());
-        let mut data = callback_data_for_buffer(&mut buffer);
-        data.UserData = callback_state.user_ptr();
-        data.EventFlag = sys::ImGuiInputTextFlags_CallbackHistory as i32;
-        data.EventKey = sys::ImGuiKey_UpArrow;
-
-        assert_eq!(string_callback_router::<RecordingHandler>(&mut data), 0);
+        let mut state = StringCallbackState {
+            buffer: &raw mut buffer,
+            handler: RecordingHandler::default(),
+            panic: None,
+        };
+        let mut data = sys::ImGuiInputTextCallbackData {
+            Buf: buffer.as_mut_ptr().cast(),
+            BufTextLen: 3,
+            BufSize: 4,
+            UserData: (&raw mut state).cast(),
+            EventFlag: sys::ImGuiInputTextFlags_CallbackCharFilter as i32,
+            EventChar: 'a' as sys::ImWchar,
+            ..Default::default()
+        };
 
         assert_eq!(
-            callback_state.handler.history_seen,
-            Some(HistoryDirection::Up)
+            unsafe { string_callback_router::<RecordingHandler>(&mut data) },
+            0
         );
+        assert_eq!(state.handler.char_filter_seen, Some('a'));
+        assert_eq!(data.EventChar, 'z' as sys::ImWchar);
+
+        data.EventFlag = sys::ImGuiInputTextFlags_CallbackHistory as i32;
+        data.EventKey = sys::ImGuiKey_UpArrow;
+        assert_eq!(
+            unsafe { string_callback_router::<RecordingHandler>(&mut data) },
+            0
+        );
+        assert_eq!(state.handler.history_seen, Some(HistoryDirection::Up));
     }
 
     #[test]
-    fn string_resize_callback_updates_buffer_pointer() {
+    fn string_callback_router_skips_user_code_but_resizes_after_panic() {
+        struct PanicOnCharacter(usize);
+
+        impl InputTextCallbackHandler for PanicOnCharacter {
+            fn char_filter(&mut self, _: char) -> Option<char> {
+                self.0 += 1;
+                panic!("character filter panicked");
+            }
+        }
+
         let mut buffer = b"abc\0".to_vec();
-        let mut callback_state = StringResizeCallbackState::new(&mut buffer);
-        let mut data = callback_data_for_buffer(&mut buffer);
-        data.UserData = callback_state.user_ptr();
+        let mut state = StringCallbackState {
+            buffer: &raw mut buffer,
+            handler: PanicOnCharacter(0),
+            panic: None,
+        };
+        let mut data = sys::ImGuiInputTextCallbackData {
+            Buf: buffer.as_mut_ptr().cast(),
+            BufTextLen: 3,
+            BufSize: 4,
+            UserData: (&raw mut state).cast(),
+            EventFlag: sys::ImGuiInputTextFlags_CallbackCharFilter as i32,
+            EventChar: 'a' as sys::ImWchar,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            unsafe { string_callback_router::<PanicOnCharacter>(&mut data) },
+            1
+        );
+        assert_eq!(
+            unsafe { string_callback_router::<PanicOnCharacter>(&mut data) },
+            1
+        );
+        assert_eq!(state.handler.0, 1);
+
         data.EventFlag = sys::ImGuiInputTextFlags_CallbackResize as i32;
         data.BufSize = 32;
-
-        assert_eq!(string_multiline_resize_callback(&mut data), 0);
-
+        assert_eq!(
+            unsafe { string_callback_router::<PanicOnCharacter>(&mut data) },
+            0
+        );
         assert_eq!(buffer.len(), 32);
         assert_eq!(data.Buf, buffer.as_mut_ptr().cast());
-        assert!(data.BufDirty);
+        assert_eq!(
+            state.panic.unwrap().downcast_ref::<&str>().copied(),
+            Some("character filter panicked")
+        );
     }
 }

@@ -22,19 +22,11 @@ pub enum ImGuiError {
     #[error("Failed to create Dear ImGui context: {reason}")]
     ContextCreation { reason: String },
 
-    /// Context is already active
-    #[error("A Dear ImGui context is already active")]
-    ContextAlreadyActive,
-
     /// Another OS thread holds a lease for Dear ImGui's process-global native state.
     #[error(
         "another OS thread owns Dear ImGui native state. Drop all contexts, native owners, and remaining thread leases there before acquiring ownership here"
     )]
     ContextThreadConflict,
-
-    /// A restorable binding scope cannot admit a replacement Context.
-    #[error("Cannot create a Dear ImGui context from inside a Context binding scope")]
-    ContextBindingScopeActive,
 
     /// A managed renderer exclusively owns the shared font atlas.
     #[error(

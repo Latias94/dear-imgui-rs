@@ -65,9 +65,9 @@ impl<T: AsRef<str>> ListBox<T> {
             x: self.size[0],
             y: self.size[1],
         };
-        let label_ptr = ui.scratch_txt(self.label);
-        let should_render =
-            ui.run_with_bound_context(|| unsafe { sys::igBeginListBox(label_ptr, size_vec) });
+        let should_render = ui.with_scratch_txt(self.label, |label_ptr| unsafe {
+            sys::igBeginListBox(label_ptr, size_vec)
+        });
         if should_render {
             Some(ListBoxToken::new(ui))
         } else {

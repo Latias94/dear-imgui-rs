@@ -6,7 +6,7 @@ use std::ffi::c_void;
 use std::io;
 use std::num::NonZeroU64;
 #[cfg(feature = "capture")]
-use std::panic::panic_any;
+use std::panic::{AssertUnwindSafe, catch_unwind, panic_any};
 use std::rc::Rc;
 #[cfg(feature = "capture")]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -453,6 +453,7 @@ impl CapturingTestFrameDriver for CapturingDriver {
         let origin = request.origin();
         let size = request.size();
         let pixels = request.pixels_mut();
+        assert!(pixels.iter().all(|pixel| *pixel == Rgba8::default()));
         for pixel in &mut *pixels {
             *pixel = Rgba8 {
                 r: 0x12,
@@ -633,6 +634,38 @@ fn scripts_make_visible_reports_missing_items_without_crashing() {
         .expect("missing item is a product failure");
     assert_eq!(report.outcome(), RunOutcome::Failed);
     engine.shutdown().expect("missing item shutdown");
+}
+
+#[test]
+fn script_float_equality_rejects_nan() {
+    let _guard = test_lock();
+    let mut context = context();
+    let mut engine = attached_engine(&mut context);
+    engine
+        .add_script_test("runner", "float-equality", |script| {
+            script.set_ref("Float assertion host")?;
+            script.yield_frames(ScriptCount::new(2)?)?;
+            script.assert_item_read_float_eq("Value", 1.25, 0.01)
+        })
+        .expect("float assertion script");
+
+    for (mut value, expected) in [(1.25, RunOutcome::Passed), (f32::NAN, RunOutcome::Failed)] {
+        let report = TestRunner::new(&mut engine)
+            .filter("float-equality")
+            .frame_budget(nonzero(600))
+            .run_headless(&mut context, |ui, _| {
+                ui.window("Float assertion host")
+                    .position([0.0, 0.0], dear_imgui_rs::Condition::Always)
+                    .size([128.0, 96.0], dear_imgui_rs::Condition::Always)
+                    .build(|| {
+                        ui.input_float("Value", &mut value);
+                    });
+                Ok::<_, Infallible>(RunnerControl::Continue)
+            })
+            .expect("float assertion produces a product outcome");
+        assert_eq!(report.outcome(), expected);
+    }
+    engine.shutdown().expect("float assertion shutdown");
 }
 
 #[test]
@@ -1265,9 +1298,7 @@ fn runner_rejects_wrong_or_open_context_and_restores_nested_current_context() {
     let _guard = test_lock();
 
     let foreign = Context::create();
-    let foreign_binding = foreign.binding();
     let foreign_raw = foreign.as_raw();
-    let foreign_suspended = foreign.suspend_or_panic();
 
     let mut owner_context = context();
     let owner_raw = owner_context.as_raw();
@@ -1287,12 +1318,8 @@ fn runner_rejects_wrong_or_open_context_and_restores_nested_current_context() {
     drop(owner_context.render_legacy());
     assert_eq!(engine.run_state(), RunState::Ready);
 
-    foreign_binding
-        .try_with_bound_context(|| {
-            assert_eq!(
-                unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
-                foreign_raw
-            );
+    owner_context.binding().with_bound_context(|| {
+        foreign.binding().with_bound_context(|| {
             let report = TestRunner::new(&mut engine)
                 .filter("context")
                 .run_headless(&mut owner_context, no_error)
@@ -1302,20 +1329,19 @@ fn runner_rejects_wrong_or_open_context_and_restores_nested_current_context() {
                 unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
                 foreign_raw
             );
-        })
-        .expect("foreign binding");
-    assert_eq!(
-        unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
-        owner_raw
-    );
-    drop(foreign_suspended);
+        });
+        assert_eq!(
+            unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+            owner_raw
+        );
+    });
+    drop(foreign);
 
     engine.shutdown().expect("context shutdown");
     drop(owner_context);
 
     let mut attached_context = context();
     let mut mismatch_engine = attached_engine(&mut attached_context);
-    let suspended_attached = attached_context.suspend_or_panic();
     let mut wrong_context = context();
     let mismatch = TestRunner::new(&mut mismatch_engine)
         .run_headless(&mut wrong_context, no_error)
@@ -1323,7 +1349,6 @@ fn runner_rejects_wrong_or_open_context_and_restores_nested_current_context() {
     assert!(matches!(mismatch, RunnerError::ContextMismatch { .. }));
     assert_eq!(mismatch_engine.run_state(), RunState::Ready);
     drop(wrong_context);
-    let attached_context = suspended_attached.activate().expect("reactivate owner");
     mismatch_engine.shutdown().expect("mismatch shutdown");
     drop(attached_context);
 }
@@ -1453,6 +1478,43 @@ fn capture_provider_errors_and_panics_do_not_cross_the_ffi_boundary() {
         engine.shutdown().expect("shutdown after capture failure");
     }
     assert_eq!(PANICKING_PAYLOAD_DROP_COUNT.load(Ordering::Acquire), 1);
+}
+
+#[cfg(feature = "capture")]
+#[test]
+fn application_panic_resumes_after_stopping_the_run_and_clearing_capture() {
+    let _guard = test_lock();
+    let mut context = context();
+    let mut engine = attached_engine(&mut context);
+    register_capture_script(&mut engine, "unwind");
+    let mut driver = CapturingDriver {
+        captures: Rc::new(RefCell::new(Vec::new())),
+        last_presented: Rc::new(Cell::new(0)),
+        frame_fault: DriverFault::None,
+        fault: CaptureFault::None,
+        fault_armed: false,
+    };
+
+    let payload = catch_unwind(AssertUnwindSafe(|| {
+        TestRunner::new(&mut engine)
+            .filter("unwind")
+            .run_graphical_with_capture(
+                &mut context,
+                |_, _| -> Result<RunnerControl, Infallible> {
+                    panic_any("application panic");
+                },
+                &mut driver,
+            )
+    }))
+    .expect_err("application panic must resume");
+    assert_eq!(payload.downcast_ref::<&str>(), Some(&"application panic"));
+    assert_eq!(engine.run_state(), RunState::Inactive);
+    assert_ne!(
+        context.frame_lifecycle_state(),
+        FrameLifecycleState::InFrame
+    );
+    assert_capture_provider_cleared(&engine);
+    engine.shutdown().expect("shutdown after panic");
 }
 
 #[cfg(feature = "capture")]

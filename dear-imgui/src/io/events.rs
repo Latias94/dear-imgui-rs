@@ -30,11 +30,34 @@ impl Io {
         }
     }
 
-    /// Add one UTF-16 code unit, preserving Dear ImGui's surrogate-pair state.
+    /// Add one UTF-16 code unit, combining surrogate pairs across calls.
+    ///
+    /// Malformed surrogate sequences emit U+FFFD. When input events are paused,
+    /// the code unit is ignored and any pending high surrogate is preserved.
+    /// Pending state lives in the native IO object and follows its lifetime.
     #[doc(alias = "AddInputCharacterUTF16")]
     pub fn add_input_character_utf16(&mut self, code_unit: u16) {
-        unsafe {
-            sys::ImGuiIO_AddInputCharacterUTF16(self.inner_mut() as *mut _, code_unit);
+        let io = self.inner_mut();
+        if !io.AppAcceptingEvents {
+            return;
+        }
+
+        let pending = std::mem::take(&mut io.InputQueueSurrogate);
+        if (0xd800..=0xdbff).contains(&code_unit) {
+            io.InputQueueSurrogate = code_unit;
+            if pending != 0 {
+                self.add_input_character(char::REPLACEMENT_CHARACTER);
+            }
+            return;
+        }
+
+        let units = [pending, code_unit];
+        let start = usize::from(pending == 0);
+        for decoded in char::decode_utf16(units[start..].iter().copied()) {
+            let character = decoded.unwrap_or(char::REPLACEMENT_CHARACTER);
+            if character != '\0' {
+                self.add_input_character(character);
+            }
         }
     }
 
@@ -210,6 +233,75 @@ fn is_non_modifier_key(key: sys::ImGuiKey) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::sys;
+
+    #[test]
+    fn utf16_input_queues_only_scalars_and_replaces_unpaired_surrogates() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let mut context = crate::Context::create();
+        for unit in [
+            0xdc00, 0xd800, 0x0041, 0xd800, 0xd83d, 0xde00, 0xdbff, 0xdfff, 0xd800, 0, 0,
+        ] {
+            context.io_mut().add_input_character_utf16(unit);
+        }
+
+        let queue = unsafe {
+            crate::internal::imvector_cast_ref::<sys::ImGuiInputEvent, _>(
+                &(*context.as_raw()).InputEventsQueue,
+            )
+        };
+        let characters: Vec<_> = queue
+            .as_slice()
+            .iter()
+            .map(|event| {
+                assert_eq!(event.Type, sys::ImGuiInputEventType_Text);
+                unsafe { event.__bindgen_anon_1.Text.Char }
+            })
+            .collect();
+        assert_eq!(
+            characters,
+            [0xfffd, 0xfffd, 0x0041, 0xfffd, 0x1f600, 0x10ffff, 0xfffd]
+        );
+        assert_eq!(context.io().inner().InputQueueSurrogate, 0);
+    }
+
+    #[test]
+    fn pending_utf16_input_follows_native_pause_focus_and_clear_behavior() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let mut context = crate::Context::create();
+        context
+            .set_ini_filename::<std::path::PathBuf>(None)
+            .unwrap();
+        context.io_mut().set_display_size([128.0, 128.0]);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+
+        let io = context.io_mut();
+        io.add_input_character_utf16(0xd83d);
+        io.set_app_accepting_events(false);
+        io.add_input_character_utf16(0xd800);
+        io.set_app_accepting_events(true);
+        io.clear_events_queue();
+        io.clear_input_keys();
+        io.add_focus_event(false);
+
+        let io = context.frame().io().inner();
+        assert!(io.AppFocusLost);
+        assert_eq!(io.InputQueueSurrogate, 0xd83d);
+        assert_eq!(io.InputQueueCharacters.Size, 0);
+        let _ = context.render_legacy();
+
+        let io = context.io_mut();
+        io.add_focus_event(true);
+        io.add_input_character_utf16(0xde00);
+        let io = context.frame().io().inner();
+        assert_eq!(io.InputQueueSurrogate, 0);
+        assert_eq!(io.InputQueueCharacters.Size, 1);
+        assert_eq!(unsafe { *io.InputQueueCharacters.Data }, 0x1f600);
+        let _ = context.render_legacy();
+    }
 
     #[test]
     fn non_modifier_key_reset_preserves_text_mouse_and_native_modifiers() {

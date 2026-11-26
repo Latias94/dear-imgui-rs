@@ -50,21 +50,21 @@ impl<'ui> ColorButton<'ui> {
         self.flags.validate("ColorButton::build()");
         assert_finite_color4("ColorButton::build()", "color", &self.color);
         assert_non_negative_finite_vec2("ColorButton::build()", "size", self.size);
-        let desc_id_ptr = self.ui.scratch_txt(self.desc_id.as_ref());
         let size_vec: sys::ImVec2 = self.size.into();
 
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igColorButton(
-                desc_id_ptr,
-                sys::ImVec4 {
-                    x: self.color[0],
-                    y: self.color[1],
-                    z: self.color[2],
-                    w: self.color[3],
-                },
-                self.flags.bits() as i32,
-                size_vec,
-            )
-        })
+        self.ui
+            .with_scratch_txt(self.desc_id.as_ref(), |desc_id_ptr| unsafe {
+                sys::igColorButton(
+                    desc_id_ptr,
+                    sys::ImVec4 {
+                        x: self.color[0],
+                        y: self.color[1],
+                        z: self.color[2],
+                        w: self.color[3],
+                    },
+                    self.flags.bits() as i32,
+                    size_vec,
+                )
+            })
     }
 }

@@ -88,7 +88,7 @@ pub(crate) struct ValidatedImguiDriverSchedulePlacement {
     insertion_index: usize,
 }
 
-/// Private exclusive schedule that serially activates every registered Context.
+/// Private exclusive schedule that serially drives every registered Context.
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ImguiContextDriver;
 

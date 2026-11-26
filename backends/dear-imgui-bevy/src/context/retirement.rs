@@ -302,7 +302,7 @@ mod retirement_tests {
         let context = context_with_retirement_probe(&destroyed);
 
         let retirements = ImguiContextRetirements::default();
-        let mut owner = ContextOwner::new(context.suspend_or_panic());
+        let mut owner = ContextOwner::new(context);
         owner
             .attach_backend(&headless_backend_attachment(), &primary_config())
             .unwrap();
@@ -320,7 +320,7 @@ mod retirement_tests {
     #[test]
     fn requeued_managed_retirement_preserves_its_completion_ticket() {
         let _guard = context_guard();
-        let context = dear_imgui_rs::SuspendedContext::create();
+        let context = dear_imgui_rs::Context::create();
         let retirement = super::super::ImguiContextRetirementId::new(context.id(), NonZeroU64::MIN);
         let retirements = ImguiContextRetirements::default();
         let sink = retirements.sink();
@@ -345,15 +345,26 @@ mod retirement_tests {
         drop(owner);
     }
 
-    #[cfg(feature = "render")]
+    #[cfg(all(feature = "render", not(target_arch = "wasm32")))]
     #[test]
     fn vanished_retirement_sink_leaks_renderer_ownership_awaiting_acknowledgement() {
+        crate::test_util::run_isolated_test(
+            concat!(
+                module_path!(),
+                "::vanished_retirement_sink_leaks_renderer_ownership_awaiting_acknowledgement"
+            ),
+            assert_vanished_retirement_sink_leaks_owner,
+        );
+    }
+
+    #[cfg(all(feature = "render", not(target_arch = "wasm32")))]
+    fn assert_vanished_retirement_sink_leaks_owner() {
         let _guard = context_guard();
         let destroyed = Rc::new(Cell::new(false));
         let context = context_with_retirement_probe(&destroyed);
 
         let retirements = ImguiContextRetirements::default();
-        let mut owner = ContextOwner::new(context.suspend_or_panic());
+        let mut owner = ContextOwner::new(context);
         owner
             .attach_backend(
                 &BackendAttachment {

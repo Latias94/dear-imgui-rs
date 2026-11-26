@@ -16,10 +16,18 @@ pub(super) fn assert_finite_f64_slice(caller: &str, name: &str, values: &[f64]) 
     );
 }
 
+pub(crate) fn is_valid_axis_range(min: f64, max: f64) -> bool {
+    let width = max - min;
+    width > 0.0 && width.is_finite()
+}
+
 pub(super) fn assert_axis_limit_range(caller: &str, min: f64, max: f64) {
     assert_finite_f64(caller, "min", min);
     assert_finite_f64(caller, "max", max);
-    assert!(min != max, "{caller} min and max must differ");
+    assert!(
+        is_valid_axis_range(min, max),
+        "{caller} min must be less than max with a finite range width"
+    );
 }
 
 pub(super) fn assert_axis_constraint_range(caller: &str, min: f64, max: f64) {

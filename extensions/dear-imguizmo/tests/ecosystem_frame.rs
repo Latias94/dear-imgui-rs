@@ -1,6 +1,6 @@
 use dear_imgui_rs::{Context, FramePrepareOptions};
 use dear_imguizmo::{DrawListTarget, GuizmoExt, Mat4Like};
-use dear_imnodes::ImNodesExt;
+use dear_imnodes::{ImNodesContext, ImNodesExt};
 use dear_implot::ImPlotExt;
 use dear_node_editor::NodeEditorUiExt;
 use std::sync::{Mutex, OnceLock};
@@ -24,7 +24,7 @@ fn extensions_compose_inside_one_engine_managed_imgui_frame() {
     let consumer = imgui.create_detached_renderer_consumer().unwrap();
 
     let plot_ctx = dear_implot::PlotContext::create(&imgui);
-    let imnodes_ctx = dear_imnodes::Context::create(&imgui);
+    let imnodes_ctx = ImNodesContext::create(&imgui);
     let imnodes_editor = imnodes_ctx.create_editor_context();
     let node_editor_ctx = dear_node_editor::EditorContext::create(&imgui);
 

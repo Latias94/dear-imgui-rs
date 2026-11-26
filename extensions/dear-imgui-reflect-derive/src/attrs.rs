@@ -1,296 +1,236 @@
-use syn::{Expr, Field, Ident, LitStr, Result};
+use std::collections::HashSet;
 
-/// Parsed `#[imgui(...)]` attributes for a single struct field.
+use syn::{Attribute, Error, Expr, Field, LitStr, Result};
+
 #[derive(Default)]
 pub struct FieldAttrs {
     pub skip: bool,
-    pub label_override: Option<LitStr>,
-    // Numeric configuration
+    pub name: Option<LitStr>,
+    pub read_only: bool,
+    pub numeric: NumericAttrs,
+    pub text: TextAttrs,
+    pub tuple: TupleAttrs,
+    pub boolean: BoolAttrs,
+}
+
+#[derive(Default)]
+pub struct NumericAttrs {
     pub slider: bool,
     pub slider_default_range: bool,
     pub as_input: bool,
     pub as_drag: bool,
-    pub min_expr: Option<Expr>,
-    pub max_expr: Option<Expr>,
-    pub format_str: Option<LitStr>,
-    pub fmt_hex: bool,
-    pub fmt_percentage: bool,
-    pub fmt_scientific: bool,
-    pub fmt_prefix: Option<LitStr>,
-    pub fmt_suffix: Option<LitStr>,
-    pub step_expr: Option<Expr>,
-    pub step_fast_expr: Option<Expr>,
-    pub speed_expr: Option<Expr>,
-    pub log_scale: bool,
-    pub clamp_manual: bool,
-    pub always_clamp_flag: bool,
-    pub wrap_around_flag: bool,
+    pub min: Option<Expr>,
+    pub max: Option<Expr>,
+    pub format: Option<LitStr>,
+    pub hex: bool,
+    pub percentage: bool,
+    pub scientific: bool,
+    pub prefix: Option<LitStr>,
+    pub suffix: Option<LitStr>,
+    pub step: Option<Expr>,
+    pub step_fast: Option<Expr>,
+    pub speed: Option<Expr>,
+    pub log: bool,
+    pub clamp: bool,
+    pub always_clamp: bool,
+    pub wrap_around: bool,
     pub no_round_to_format: bool,
     pub no_input: bool,
     pub clamp_on_input: bool,
     pub clamp_zero_range: bool,
     pub no_speed_tweaks: bool,
-    // Text configuration
+}
+
+impl NumericAttrs {
+    pub fn has_attrs(&self) -> bool {
+        self.slider
+            || self.slider_default_range
+            || self.as_input
+            || self.as_drag
+            || self.min.is_some()
+            || self.max.is_some()
+            || self.step.is_some()
+            || self.step_fast.is_some()
+            || self.speed.is_some()
+            || self.format.is_some()
+            || self.has_format_helpers()
+            || self.clamp
+            || self.has_flags()
+    }
+
+    pub fn has_format_helpers(&self) -> bool {
+        self.hex
+            || self.percentage
+            || self.scientific
+            || self.prefix.is_some()
+            || self.suffix.is_some()
+    }
+
+    pub fn has_flags(&self) -> bool {
+        self.log
+            || self.always_clamp
+            || self.wrap_around
+            || self.no_round_to_format
+            || self.no_input
+            || self.clamp_on_input
+            || self.clamp_zero_range
+            || self.no_speed_tweaks
+    }
+}
+
+#[derive(Default)]
+pub struct TextAttrs {
     pub multiline: bool,
-    pub lines_expr: Option<Expr>,
-    pub hint_str: Option<LitStr>,
-    pub read_only: bool,
+    pub lines: Option<Expr>,
+    pub hint: Option<LitStr>,
     pub display_only: bool,
     pub auto_resize: bool,
-    pub min_width_expr: Option<Expr>,
-    // Tuple layout configuration
-    pub tuple_render: Option<String>,
-    pub tuple_dropdown: bool,
-    pub tuple_columns_expr: Option<Expr>,
-    pub tuple_min_width_expr: Option<Expr>,
-    // Bool configuration
-    pub bool_style: Option<String>,
+    pub min_width: Option<Expr>,
+}
+
+impl TextAttrs {
+    pub fn has_attrs(&self) -> bool {
+        self.multiline
+            || self.lines.is_some()
+            || self.hint.is_some()
+            || self.display_only
+            || self.auto_resize
+            || self.min_width.is_some()
+    }
+}
+
+#[derive(Default)]
+pub struct TupleAttrs {
+    pub render: Option<LitStr>,
+    pub dropdown: bool,
+    pub columns: Option<Expr>,
+    pub min_width: Option<Expr>,
+}
+
+impl TupleAttrs {
+    pub fn has_attrs(&self) -> bool {
+        self.render.is_some() || self.dropdown || self.columns.is_some() || self.min_width.is_some()
+    }
+}
+
+#[derive(Default)]
+pub struct BoolAttrs {
+    pub style: Option<LitStr>,
     pub true_text: Option<LitStr>,
     pub false_text: Option<LitStr>,
 }
 
-/// Parses all `#[imgui(...)]` attributes on a field into a `FieldAttrs` struct.
-///
-/// This keeps attribute parsing separate from type-based validation and
-/// code generation, which remain in `lib.rs`.
-pub fn parse_field_attrs(_field_ident: &Ident, field: &Field) -> Result<FieldAttrs> {
-    let mut attrs = FieldAttrs::default();
-
-    for attr in field.attrs.iter().filter(|a| a.path().is_ident("imgui")) {
-        let res = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("skip") {
-                attrs.skip = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("name") {
-                let lit: LitStr = meta.value()?.parse()?;
-                attrs.label_override = Some(lit);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("slider") {
-                attrs.slider = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("slider_default_range") {
-                attrs.slider_default_range = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("as_input") {
-                attrs.as_input = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("as_drag") {
-                attrs.as_drag = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("min") {
-                let expr: Expr = meta.value()?.parse()?;
-                attrs.min_expr = Some(expr);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("max") {
-                let expr: Expr = meta.value()?.parse()?;
-                attrs.max_expr = Some(expr);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("format") {
-                let lit: LitStr = meta.value()?.parse()?;
-                attrs.format_str = Some(lit);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("hex") {
-                attrs.fmt_hex = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("percentage") {
-                attrs.fmt_percentage = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("scientific") {
-                attrs.fmt_scientific = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("prefix") {
-                let lit: LitStr = meta.value()?.parse()?;
-                attrs.fmt_prefix = Some(lit);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("suffix") {
-                let lit: LitStr = meta.value()?.parse()?;
-                attrs.fmt_suffix = Some(lit);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("step") {
-                let expr: Expr = meta.value()?.parse()?;
-                attrs.step_expr = Some(expr);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("step_fast") {
-                let expr: Expr = meta.value()?.parse()?;
-                attrs.step_fast_expr = Some(expr);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("speed") {
-                let expr: Expr = meta.value()?.parse()?;
-                attrs.speed_expr = Some(expr);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("log") {
-                attrs.log_scale = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("clamp") {
-                attrs.clamp_manual = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("always_clamp") {
-                attrs.always_clamp_flag = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("wrap_around") {
-                attrs.wrap_around_flag = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("no_round_to_format") {
-                attrs.no_round_to_format = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("no_input") {
-                attrs.no_input = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("clamp_on_input") {
-                attrs.clamp_on_input = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("clamp_zero_range") {
-                attrs.clamp_zero_range = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("no_speed_tweaks") {
-                attrs.no_speed_tweaks = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("multiline") {
-                attrs.multiline = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("lines") {
-                let expr: Expr = meta.value()?.parse()?;
-                attrs.lines_expr = Some(expr);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("hint") {
-                let lit: LitStr = meta.value()?.parse()?;
-                attrs.hint_str = Some(lit);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("read_only") {
-                attrs.read_only = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("display_only") {
-                attrs.display_only = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("auto_resize") {
-                attrs.auto_resize = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("min_width") {
-                let expr: Expr = meta.value()?.parse()?;
-                attrs.min_width_expr = Some(expr);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("bool_style") {
-                let lit: LitStr = meta.value()?.parse()?;
-                attrs.bool_style = Some(lit.value());
-                return Ok(());
-            }
-
-            if meta.path.is_ident("tuple_render") {
-                let lit: LitStr = meta.value()?.parse()?;
-                let v = lit.value();
-                if v != "line" && v != "grid" {
-                    return Err(
-                        meta.error("imgui(tuple_render = ...) must be \"line\" or \"grid\"")
-                    );
-                }
-                attrs.tuple_render = Some(v);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("tuple_dropdown") {
-                attrs.tuple_dropdown = true;
-                return Ok(());
-            }
-
-            if meta.path.is_ident("tuple_columns") {
-                let expr: Expr = meta.value()?.parse()?;
-                attrs.tuple_columns_expr = Some(expr);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("tuple_min_width") {
-                let expr: Expr = meta.value()?.parse()?;
-                attrs.tuple_min_width_expr = Some(expr);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("true_text") {
-                let lit: LitStr = meta.value()?.parse()?;
-                attrs.true_text = Some(lit);
-                return Ok(());
-            }
-
-            if meta.path.is_ident("false_text") {
-                let lit: LitStr = meta.value()?.parse()?;
-                attrs.false_text = Some(lit);
-                return Ok(());
-            }
-
-            // Ignore unknown keys for forward compatibility.
-            Ok(())
-        });
-
-        res?;
+impl BoolAttrs {
+    pub fn has_attrs(&self) -> bool {
+        self.style.is_some() || self.true_text.is_some() || self.false_text.is_some()
     }
+}
 
-    // For now there is no additional validation that depends only on attributes
-    // and not on the Rust field type; type-based validation remains in lib.rs.
-
+pub fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
+    let mut attrs = FieldAttrs::default();
+    let mut seen = HashSet::new();
+    for attr in imgui_attrs(&field.attrs) {
+        attr.parse_nested_meta(|meta| {
+            let Some(key) = meta.path.get_ident().map(ToString::to_string) else {
+                return Err(meta.error("unknown imgui field attribute"));
+            };
+            if !seen.insert(key.clone()) {
+                return Err(meta.error("duplicate imgui field attribute"));
+            }
+            match key.as_str() {
+                "skip" => attrs.skip = true,
+                "name" => attrs.name = Some(meta.value()?.parse()?),
+                "read_only" => attrs.read_only = true,
+                "slider" => attrs.numeric.slider = true,
+                "slider_default_range" => attrs.numeric.slider_default_range = true,
+                "as_input" => attrs.numeric.as_input = true,
+                "as_drag" => attrs.numeric.as_drag = true,
+                "min" => attrs.numeric.min = Some(meta.value()?.parse()?),
+                "max" => attrs.numeric.max = Some(meta.value()?.parse()?),
+                "format" => attrs.numeric.format = Some(meta.value()?.parse()?),
+                "hex" => attrs.numeric.hex = true,
+                "percentage" => attrs.numeric.percentage = true,
+                "scientific" => attrs.numeric.scientific = true,
+                "prefix" => attrs.numeric.prefix = Some(meta.value()?.parse()?),
+                "suffix" => attrs.numeric.suffix = Some(meta.value()?.parse()?),
+                "step" => attrs.numeric.step = Some(meta.value()?.parse()?),
+                "step_fast" => attrs.numeric.step_fast = Some(meta.value()?.parse()?),
+                "speed" => attrs.numeric.speed = Some(meta.value()?.parse()?),
+                "log" => attrs.numeric.log = true,
+                "clamp" => attrs.numeric.clamp = true,
+                "always_clamp" => attrs.numeric.always_clamp = true,
+                "wrap_around" => attrs.numeric.wrap_around = true,
+                "no_round_to_format" => attrs.numeric.no_round_to_format = true,
+                "no_input" => attrs.numeric.no_input = true,
+                "clamp_on_input" => attrs.numeric.clamp_on_input = true,
+                "clamp_zero_range" => attrs.numeric.clamp_zero_range = true,
+                "no_speed_tweaks" => attrs.numeric.no_speed_tweaks = true,
+                "multiline" => attrs.text.multiline = true,
+                "lines" => attrs.text.lines = Some(meta.value()?.parse()?),
+                "hint" => attrs.text.hint = Some(meta.value()?.parse()?),
+                "display_only" => attrs.text.display_only = true,
+                "auto_resize" => attrs.text.auto_resize = true,
+                "min_width" => attrs.text.min_width = Some(meta.value()?.parse()?),
+                "tuple_render" => attrs.tuple.render = Some(meta.value()?.parse()?),
+                "tuple_dropdown" => attrs.tuple.dropdown = true,
+                "tuple_columns" => attrs.tuple.columns = Some(meta.value()?.parse()?),
+                "tuple_min_width" => attrs.tuple.min_width = Some(meta.value()?.parse()?),
+                "bool_style" => attrs.boolean.style = Some(meta.value()?.parse()?),
+                "true_text" => attrs.boolean.true_text = Some(meta.value()?.parse()?),
+                "false_text" => attrs.boolean.false_text = Some(meta.value()?.parse()?),
+                _ => return Err(meta.error("unknown imgui field attribute")),
+            }
+            Ok(())
+        })?;
+    }
+    if attrs.skip && seen.len() > 1 {
+        return Err(Error::new_spanned(
+            &field.ty,
+            "imgui(skip) cannot be combined with other field attributes",
+        ));
+    }
     Ok(attrs)
+}
+
+pub fn reject_struct_attrs(attrs: &[Attribute]) -> Result<()> {
+    for attr in imgui_attrs(attrs) {
+        attr.parse_nested_meta(|meta| Err(meta.error("unknown imgui struct attribute")))?;
+    }
+    Ok(())
+}
+
+pub fn parse_enum_style(attrs: &[Attribute]) -> Result<bool> {
+    match parse_scope_attr(attrs, "enum_style", "enum")? {
+        Some(style) if style.value() == "radio" => Ok(true),
+        Some(style) if style.value() != "dropdown" => Err(Error::new(
+            style.span(),
+            "imgui(enum_style) must be \"dropdown\" or \"radio\"",
+        )),
+        _ => Ok(false),
+    }
+}
+
+pub fn parse_variant_name(attrs: &[Attribute]) -> Result<Option<LitStr>> {
+    parse_scope_attr(attrs, "name", "variant")
+}
+
+fn parse_scope_attr(attrs: &[Attribute], key: &str, scope: &str) -> Result<Option<LitStr>> {
+    let mut value = None;
+    for attr in imgui_attrs(attrs) {
+        attr.parse_nested_meta(|meta| {
+            if !meta.path.is_ident(key) {
+                return Err(meta.error(format!("unknown imgui {scope} attribute")));
+            }
+            if value.is_some() {
+                return Err(meta.error(format!("duplicate imgui {scope} attribute")));
+            }
+            value = Some(meta.value()?.parse()?);
+            Ok(())
+        })?;
+    }
+    Ok(value)
+}
+
+fn imgui_attrs(attrs: &[Attribute]) -> impl Iterator<Item = &Attribute> {
+    attrs.iter().filter(|attr| attr.path().is_ident("imgui"))
 }

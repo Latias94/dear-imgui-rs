@@ -477,12 +477,18 @@ impl PlotContext {
 
     /// Return a colormap name, or an empty string if the index is invalid for this context.
     pub fn colormap_name(&self, index: impl Into<ColormapIndex>) -> String {
+        let index = index.into().raw();
         self.with_bound_context("dear-implot: PlotContext::colormap_name()", || unsafe {
-            let p = sys::ImPlot_GetColormapName(index.into().raw());
-            if p.is_null() {
+            if !(0..sys::ImPlot_GetColormapCount()).contains(&index) {
                 return String::new();
             }
-            std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
+            let name = sys::ImPlot_GetColormapName(index);
+            if name.is_null() {
+                return String::new();
+            }
+            std::ffi::CStr::from_ptr(name)
+                .to_string_lossy()
+                .into_owned()
         })
     }
 

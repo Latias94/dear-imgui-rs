@@ -52,13 +52,14 @@ pub trait ImguiAppExt {
     /// Retrieve the private pass owned by the primary Dear ImGui Context.
     fn imgui_primary_pass(&mut self) -> Result<ImguiPass<ImguiPrimaryPass>, ImguiPassError>;
 
-    /// Adopt a custom suspended Context as this App's initial primary Context.
+    /// Take ownership of a custom Context as this App's initial primary Context.
     ///
     /// Call this before adding [`crate::ImguiPlugin`]. Admission is App-scoped so an explicitly
-    /// shut down App cannot construct a fresh, unattached Context registry.
+    /// shut down App cannot construct a fresh, unattached Context registry. A Context with an
+    /// open frame is returned without ending that frame.
     fn adopt_imgui_primary_context(
         &mut self,
-        context: dear_imgui_rs::SuspendedContext,
+        context: dear_imgui_rs::Context,
     ) -> Result<&mut Self, ImguiContextAdmissionError>;
 
     /// Register configured unit-input systems in `pass`'s private runner.
@@ -174,7 +175,7 @@ impl ImguiAppExt for App {
 
     fn adopt_imgui_primary_context(
         &mut self,
-        context: dear_imgui_rs::SuspendedContext,
+        context: dear_imgui_rs::Context,
     ) -> Result<&mut Self, ImguiContextAdmissionError> {
         if self
             .world()
@@ -201,6 +202,7 @@ impl ImguiAppExt for App {
                 context,
             ));
         }
+        let context = ImguiContextAdmissionError::require_idle(context)?;
         let primary_pass = match super::pass::primary_pass(self) {
             Ok(pass) => pass,
             Err(error) => {

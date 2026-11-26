@@ -1,4 +1,4 @@
-use super::buffers::{StringInputBuffer, finish_string_input_buffer, resize_string_input_buffer};
+use super::buffers::{StringInputBuffer, finish_string_input_buffer};
 use super::validation::{
     validate_input_multiline_flags, validate_input_scalar_flags, validate_input_text_flags,
 };
@@ -39,6 +39,7 @@ fn growing_input_amortizes_the_capacity_hint_across_edits() {
 
 #[test]
 fn input_widget_retains_its_labels_across_callback_scratch_queries() {
+    let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = crate::Context::create();
     ctx.set_ini_filename::<std::path::PathBuf>(None).unwrap();
     ctx.io_mut().set_display_size([320.0, 240.0]);
@@ -47,14 +48,18 @@ fn input_widget_retains_its_labels_across_callback_scratch_queries() {
         .unwrap()
         .build();
     let ui = ctx.frame();
-    let (label, _) = ui.scratch_txt_with_opt("name", Some("hint"));
-    let scratch_allocation = || ui.with_scratch_buffer(|scratch| scratch.buffer.as_ptr());
-    let labels = scratch_allocation();
-    ui.run_input_widget(label, || {
-        ui.get_id("callback item");
-        assert_ne!(scratch_allocation(), labels);
+    ui.with_scratch_buffer(|scratch| {
+        let (label, hint) = scratch.scratch_txt_two("name", "hint");
+        ui.run_input_widget(label, || {
+            ui.with_scratch_buffer(|nested| {
+                let query = nested.scratch_txt("callback query".repeat(1024));
+                assert_ne!(nested.buffer.as_ptr(), scratch.buffer.as_ptr());
+                assert_ne!(query, label);
+            });
+            assert_eq!(unsafe { std::ffi::CStr::from_ptr(label) }, c"name");
+            assert_eq!(unsafe { std::ffi::CStr::from_ptr(hint) }, c"hint");
+        });
     });
-    assert_eq!(scratch_allocation(), labels);
 }
 
 #[test]
@@ -94,21 +99,6 @@ fn string_input_buffer_finish_keeps_input_capacity() {
 
     assert_eq!(out, "new");
     assert!(out.capacity() >= cap);
-}
-
-#[test]
-fn string_input_buffer_resize_updates_imgui_buffer_pointer() {
-    let mut buffer = b"abc\0".to_vec();
-    let mut data = sys::ImGuiInputTextCallbackData::default();
-    data.Buf = buffer.as_mut_ptr().cast();
-    data.BufSize = 32;
-
-    let result = unsafe { resize_string_input_buffer(&mut buffer, data.BufSize, &mut data) };
-
-    assert_eq!(result, 0);
-    assert!(buffer.len() >= 32);
-    assert_eq!(data.Buf, buffer.as_mut_ptr().cast());
-    assert!(data.BufDirty);
 }
 
 #[test]

@@ -6,8 +6,7 @@ use std::error::Error;
 use std::ffi::c_void;
 use std::fmt;
 use std::num::NonZeroU64;
-#[cfg(feature = "capture")]
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 use dear_imgui_rs::render::ReconciledFrame;
 use dear_imgui_rs::{
@@ -18,7 +17,7 @@ use crate::results::RunCompletion;
 use crate::{
     AttachmentState, FrameDriverError, FrameDriverPhase, MainRenderOutcome, ResultSummary,
     RunFlags, RunMode, RunOutcome, RunReport, RunState, TestEngine, TestEngineError,
-    TestFrameDriver, TestGroup,
+    TestEngineUiExt, TestFrameDriver, TestGroup,
 };
 #[cfg(feature = "capture")]
 use crate::{
@@ -109,7 +108,7 @@ impl TestFrameDriver for VirtualFrameDriver {
 /// driver therefore cannot be both an ordinary `&mut TestFrameDriver` and callback user data.
 /// Runtime borrow checking makes every driver access exclusive and rejects callback re-entry.
 #[cfg(feature = "capture")]
-struct CaptureDriverSlot<'driver, Driver>
+struct CaptureDriverState<'driver, Driver>
 where
     Driver: CapturingTestFrameDriver,
 {
@@ -146,7 +145,7 @@ fn dispose_panic_payload_without_unwinding(mut payload: Box<dyn std::any::Any + 
 }
 
 #[cfg(feature = "capture")]
-impl<'driver, Driver> CaptureDriverSlot<'driver, Driver>
+impl<'driver, Driver> CaptureDriverState<'driver, Driver>
 where
     Driver: CapturingTestFrameDriver,
 {
@@ -162,8 +161,8 @@ where
         self.current_frame.set(frame_index);
     }
 
-    fn take_failure(&mut self) -> Option<(u64, CaptureProviderError<Driver::CaptureError>)> {
-        self.failure.get_mut().take()
+    fn take_failure(&self) -> Option<(u64, CaptureProviderError<Driver::CaptureError>)> {
+        self.failure.borrow_mut().take()
     }
 
     fn record_failure(&self, failure: CaptureProviderError<Driver::CaptureError>) {
@@ -174,15 +173,7 @@ where
         }
     }
 
-    fn capture(
-        &self,
-        viewport_id: u32,
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-        pixels: *mut u32,
-    ) -> bool {
+    fn capture(&self, request: NativeCaptureRequest) -> bool {
         if self
             .failure
             .try_borrow()
@@ -197,25 +188,10 @@ where
             return false;
         };
 
-        let request = NativeCaptureRequest {
-            viewport_id,
-            origin: [x, y],
-            size: [width, height],
-            pixels,
-        };
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            Self::capture_inner(&mut **driver, request)
-        }));
-
-        match result {
-            Ok(Ok(())) => true,
-            Ok(Err(failure)) => {
+        match Self::capture_inner(&mut **driver, request) {
+            Ok(()) => true,
+            Err(failure) => {
                 self.record_failure(failure);
-                false
-            }
-            Err(payload) => {
-                dispose_panic_payload_without_unwinding(payload);
-                self.record_failure(CaptureProviderError::Panicked);
                 false
             }
         }
@@ -254,8 +230,11 @@ where
             });
         }
 
-        let pixels =
-            unsafe { std::slice::from_raw_parts_mut(request.pixels.cast::<Rgba8>(), pixel_count) };
+        let pixels = unsafe {
+            let pixels = request.pixels.cast::<Rgba8>();
+            pixels.write_bytes(0, pixel_count);
+            std::slice::from_raw_parts_mut(pixels, pixel_count)
+        };
         let request =
             CaptureRequest::new(request.viewport_id, request.origin, [width, height], pixels);
         driver
@@ -265,11 +244,11 @@ where
 }
 
 #[cfg(feature = "capture")]
-struct CaptureDriverAdapter<'slot, 'driver, Driver>
+struct CaptureDriverAdapter<'state, 'driver, Driver>
 where
     Driver: CapturingTestFrameDriver,
 {
-    slot: &'slot CaptureDriverSlot<'driver, Driver>,
+    state: &'state CaptureDriverState<'driver, Driver>,
 }
 
 #[cfg(feature = "capture")]
@@ -287,7 +266,7 @@ where
         frame: FrameToken<'frame>,
         frame_index: u64,
     ) -> Result<Self::PreparedFrame<'frame>, Self::PrepareError> {
-        self.slot.driver.borrow_mut().prepare(frame, frame_index)
+        self.state.driver.borrow_mut().prepare(frame, frame_index)
     }
 
     fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> ContextId {
@@ -300,18 +279,18 @@ where
         frame_index: u64,
     ) -> Result<MainRenderOutcome, Self::RenderError> {
         let outcome = self
-            .slot
+            .state
             .driver
             .borrow_mut()
             .render_main(frame, frame_index)?;
         if outcome == MainRenderOutcome::ReadyToPresent {
-            self.slot.set_current_frame(frame_index);
+            self.state.set_current_frame(frame_index);
         }
         Ok(outcome)
     }
 
     fn present(&mut self, frame_index: u64) -> Result<(), Self::PresentError> {
-        self.slot.driver.borrow_mut().present(frame_index)
+        self.state.driver.borrow_mut().present(frame_index)
     }
 }
 
@@ -328,10 +307,28 @@ unsafe extern "C" fn capture_driver_trampoline<Driver>(
 where
     Driver: CapturingTestFrameDriver,
 {
-    let Some(slot) = (unsafe { user_data.cast::<CaptureDriverSlot<'_, Driver>>().as_ref() }) else {
+    let slot = unsafe {
+        user_data
+            .cast::<Cell<Option<&CaptureDriverState<'_, Driver>>>>()
+            .as_ref()
+    };
+    let Some(state) = slot.and_then(Cell::get) else {
         return false;
     };
-    slot.capture(viewport_id, x, y, width, height, pixels)
+    let request = NativeCaptureRequest {
+        viewport_id,
+        origin: [x, y],
+        size: [width, height],
+        pixels,
+    };
+    match catch_unwind(AssertUnwindSafe(|| state.capture(request))) {
+        Ok(captured) => captured,
+        Err(payload) => {
+            state.record_failure(CaptureProviderError::Panicked);
+            dispose_panic_payload_without_unwinding(payload);
+            false
+        }
+    }
 }
 
 /// Infrastructure failure produced by [`TestRunner`].
@@ -376,7 +373,7 @@ pub enum RunnerError<
         phase: Option<FrameDriverPhase>,
         source: CaptureError,
     },
-    /// Stopping after another infrastructure failure also failed.
+    /// Cleanup after another infrastructure failure also failed.
     Teardown {
         primary: Box<Self>,
         source: TestEngineError,
@@ -391,6 +388,8 @@ pub enum RunnerError<
         requested: RunOutcome,
         cleanup_frames: u64,
     },
+    /// Cleanup would require a frame index beyond `u64::MAX`.
+    FrameIndexOverflow,
 }
 
 /// Infrastructure failure produced by [`TestRunner::run_headless`].
@@ -493,7 +492,7 @@ where
             }
             Self::Teardown { primary, source } => write!(
                 formatter,
-                "{primary}; stopping the Test Engine after that failure also failed: {source}"
+                "{primary}. Test Engine cleanup also failed: {source}"
             ),
             Self::InvalidTerminalSummary { summary, detail } => write!(
                 formatter,
@@ -506,6 +505,7 @@ where
                 formatter,
                 "{requested:?} cleanup did not settle after {cleanup_frames} frame(s)"
             ),
+            Self::FrameIndexOverflow => formatter.write_str("cleanup frame index overflowed u64"),
         }
     }
 }
@@ -566,6 +566,9 @@ struct FramePump<'run, ApplicationUi, Driver> {
 /// The runner owns application UI, preparation, main-target rendering, pre-swap, presentation, and
 /// post-swap ordering. A single [`TestFrameDriver`] owns all backend phases without
 /// shared-mutability workarounds.
+///
+/// If application UI or a frame-driver phase panics, the runner attempts to stop the engine and
+/// then resumes the original panic. Capture callback panics return a structured error instead.
 pub struct TestRunner<'engine> {
     engine: &'engine mut TestEngine,
     group: TestGroup,
@@ -652,9 +655,9 @@ impl<'engine> TestRunner<'engine> {
 
     /// Runs with an external-surface driver that owns framebuffer readback capability.
     ///
-    /// The provider is installed for the complete native queue lifetime and is removed before this
-    /// method releases its mutable borrow of `driver`. Driver errors and panics are contained at the
-    /// callback boundary and returned as [`RunnerError::Capture`].
+    /// The provider is installed for the complete native queue lifetime and loses access to
+    /// `driver` before this method returns or unwinds, even if native unregistration fails. Driver
+    /// errors and panics during capture are returned as [`RunnerError::Capture`].
     #[cfg(feature = "capture")]
     pub fn run_graphical_with_capture<ApplicationError, ApplicationUi, Driver>(
         self,
@@ -667,13 +670,13 @@ impl<'engine> TestRunner<'engine> {
         Driver: CapturingTestFrameDriver,
     {
         self.validate_request(context)?;
-        let mut slot = Box::new(CaptureDriverSlot::new(driver));
-        let user_data = (&mut *slot as *mut CaptureDriverSlot<'_, Driver>).cast();
-        let mut provider = self
-            .engine
-            .install_capture_provider(Some(capture_driver_trampoline::<Driver>), user_data)?;
+        let state = CaptureDriverState::new(driver);
+        let mut provider = unsafe {
+            self.engine
+                .install_capture_provider(Some(capture_driver_trampoline::<Driver>), &state)?
+        };
         let result = {
-            let mut adapter = CaptureDriverAdapter { slot: &slot };
+            let mut adapter = CaptureDriverAdapter { state: &state };
             self.run_impl(
                 context,
                 RunMode::GraphicalWithCapture,
@@ -681,7 +684,8 @@ impl<'engine> TestRunner<'engine> {
                 &mut adapter,
             )
         };
-        let result = match (result, slot.take_failure()) {
+        let clear_result = provider.clear();
+        let result = match (result, state.take_failure()) {
             (Ok(_), Some((frame, source))) => Err(RunnerError::Capture {
                 frame,
                 phase: None,
@@ -692,7 +696,7 @@ impl<'engine> TestRunner<'engine> {
             }
             (result, None) => result,
         };
-        match (result, provider.clear()) {
+        match (result, clear_result) {
             (Ok(report), Ok(())) => Ok(report),
             (Err(error), Ok(())) => Err(error),
             (Ok(_), Err(source)) => Err(RunnerError::TestEngine(source)),
@@ -774,9 +778,20 @@ impl<'engine> TestRunner<'engine> {
         Driver: TestFrameDriver,
     {
         let binding = context.binding();
-        match binding
-            .try_with_bound_context(|| self.run_bound(context, mode, &mut application_ui, driver))
-        {
+        let result = match catch_unwind(AssertUnwindSafe(|| {
+            binding.try_with_bound_context(|| {
+                self.run_bound(context, mode, &mut application_ui, driver)
+            })
+        })) {
+            Ok(result) => result,
+            Err(payload) => {
+                if self.stop_after_failure().is_err() {
+                    let _ = self.stop_after_failure();
+                }
+                resume_unwind(payload);
+            }
+        };
+        match result {
             Ok(Ok(report)) => Ok(report),
             Ok(Err(error)) if matches!(error, RunnerError::FrameAlreadyOpen) => Err(error),
             Ok(Err(error)) => match self.stop_after_failure() {
@@ -866,7 +881,7 @@ impl<'engine> TestRunner<'engine> {
                 source,
             }
         })?;
-        self.engine.show_windows(frame.ui(), None)?;
+        frame.ui().show_test_engine_windows(self.engine, None)?;
         self.engine
             .drive_frame(frame, frame_index, pump.driver)
             .map_err(|source| RunnerError::FrameDriver {
@@ -900,13 +915,14 @@ impl<'engine> TestRunner<'engine> {
             RunOutcome::TimedOut | RunOutcome::Aborted
         ));
         let mut cleanup_frames = 0;
+        let mut frame_index = frames;
 
         for _ in 0..self.cleanup_frame_budget.get() {
             if let Some(completion) = self.take_terminal_run()? {
                 return self.requested_report(
                     requested,
                     completion,
-                    frames,
+                    frame_index,
                     cleanup_frames,
                     pump.mode,
                 );
@@ -918,13 +934,15 @@ impl<'engine> TestRunner<'engine> {
                 return self.requested_report(
                     requested,
                     completion,
-                    frames,
+                    frame_index,
                     cleanup_frames,
                     pump.mode,
                 );
             }
 
-            let frame_index = frames + cleanup_frames + 1;
+            frame_index = frame_index
+                .checked_add(1)
+                .ok_or(RunnerError::FrameIndexOverflow)?;
             self.pump_frame(frame_index, pump)?;
             cleanup_frames += 1;
 
@@ -932,7 +950,7 @@ impl<'engine> TestRunner<'engine> {
                 return self.requested_report(
                     requested,
                     completion,
-                    frames,
+                    frame_index,
                     cleanup_frames,
                     pump.mode,
                 );
@@ -949,7 +967,7 @@ impl<'engine> TestRunner<'engine> {
         &self,
         outcome: RunOutcome,
         completion: RunCompletion,
-        frames: u64,
+        total_frames: u64,
         cleanup_frames: u64,
         mode: RunMode,
     ) -> Result<
@@ -960,7 +978,7 @@ impl<'engine> TestRunner<'engine> {
         Ok(RunReport::new(
             completion,
             outcome,
-            frames + cleanup_frames,
+            total_frames,
             cleanup_frames,
             mode,
         ))

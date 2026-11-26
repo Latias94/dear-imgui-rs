@@ -169,13 +169,7 @@ impl Drop for WindowBoundaryGuard<'_> {
                 .last()
                 .expect("active native window scope")
                 .first_id;
-            for entry in tracker
-                .entries
-                .values_mut()
-                .filter(|entry| entry.id >= first)
-            {
-                entry.abandoned = true;
-            }
+            tracker.abandon_since(first);
             tracker.refresh_pending_recovery();
         }
         ui.finish_abandoned_native_scopes();

@@ -806,7 +806,6 @@ mod tests {
 
         let mut owner = Context::create();
         let mut renderer = renderer_for_test(&mut owner);
-        let owner = owner.suspend_or_panic();
 
         let mut foreign = Context::create();
         foreign.prepare_frame(
@@ -837,7 +836,6 @@ mod tests {
 
         drop(consumer);
         drop(foreign);
-        let owner = owner.activate().expect("owner Context should reactivate");
         renderer.destroyed = true;
         drop(renderer);
         drop(owner);

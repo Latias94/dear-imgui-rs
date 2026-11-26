@@ -6,7 +6,7 @@
 Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes) via the [cimnodes](https://github.com/cimgui/cimnodes) C API, aligned with our dear-imgui workspace and BEST_PRACTICES.
 
 - `ui.imnodes(&ctx)` provides access to ImNodes during a Dear ImGui frame.
-- Each `Context` owns a default editor and can create independent `EditorContext` instances.
+- Each `ImNodesContext` owns a default editor and can create independent `EditorContext` instances.
 - Configure a `NodeEditorSetup`, draw nodes and attributes in closures, and read interactions from `PostEditor`.
 - Scoped style tokens restore colors, style variables, and attribute flags.
 
@@ -38,15 +38,15 @@ Create the ImNodes context and editor once. Call `draw` inside the window that h
 
 ```rust
 use dear_imgui_rs::Ui;
-use dear_imnodes::{Context, EditorContext, ImNodesExt, LinkId, MiniMapLocation, NodeId, PinId, PinShape};
+use dear_imnodes::{EditorContext, ImNodesContext, ImNodesExt, LinkId, MiniMapLocation, NodeId, PinId, PinShape};
 
-fn init(imgui: &dear_imgui_rs::Context) -> (Context, EditorContext) {
-    let nodes = Context::create(imgui);
+fn init(imgui: &dear_imgui_rs::Context) -> (ImNodesContext, EditorContext) {
+    let nodes = ImNodesContext::create(imgui);
     let graph = nodes.create_editor_context();
     (nodes, graph)
 }
 
-fn draw(ui: &Ui, nodes: &Context, graph: &EditorContext, first_frame: bool) {
+fn draw(ui: &Ui, nodes: &ImNodesContext, graph: &EditorContext, first_frame: bool) {
     let source = NodeId::new(1);
     let target = NodeId::new(2);
     let output = PinId::new(10);

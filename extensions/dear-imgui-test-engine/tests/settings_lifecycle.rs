@@ -6,12 +6,12 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use dear_imgui_rs::{
     Condition, Context, ContextLifecycle, ContextThreadLease, FrameToken, ImGuiError,
-    SuspendedContext, TableColumnIndex, TableFlags, render::ReconciledFrame,
+    TableColumnIndex, TableFlags, render::ReconciledFrame,
 };
 use dear_imgui_test_engine::{
     AttachmentState, BuiltInTestSuite, CaptureOutput, FrameDriverError, MainRenderOutcome,
     RunFlags, RunSpeed, RunState, ScriptCount, TestEngine, TestEngineError, TestEngineResult,
-    TestEngineStatus, TestFrameDriver, TestGroup, TestRunner, VerboseLevel, raw,
+    TestEngineStatus, TestEngineUiExt, TestFrameDriver, TestGroup, TestRunner, VerboseLevel, raw,
 };
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -612,41 +612,28 @@ fn show_windows_validates_context_identity_and_native_frame_scope() {
     let mut engine = TestEngine::create().expect("engine");
     engine.start(&mut context_a).expect("start");
 
-    let stale_ui = {
-        let ui = context_a.frame();
-        engine.show_windows(ui, None).expect("valid attached Ui");
-        ui as *const dear_imgui_rs::Ui
-    };
-    drop(context_a.render_legacy());
-    // Ui is stable storage owned by the still-live Context. This intentionally bypasses only the
-    // frame borrow so the safe wrapper can prove native WithinFrameScope is checked at runtime.
-    let error = unsafe { engine.show_windows(&*stale_ui, None) }
-        .expect_err("rendered frame is outside native WithinFrameScope");
+    let binding = context_a.binding();
+    let frame = context_a.begin_frame();
+    let ui_a = frame.ui();
+    ui_a.show_test_engine_windows(&mut engine, None)
+        .expect("valid attached Ui");
+    binding.with_bound_context(|| unsafe { dear_imgui_rs::sys::igEndFrame() });
+    let error = ui_a
+        .show_test_engine_windows(&mut engine, None)
+        .expect_err("the native frame has already ended");
     assert!(matches!(error, TestEngineError::FrameNotActive { .. }));
+    drop(frame);
 
-    let suspended_a = context_a.suspend_or_panic();
-    let mut context_b = SuspendedContext::create()
-        .activate()
-        .expect("Context B activation");
-    context_b
-        .font_atlas()
-        .try_claim_legacy_renderer()
-        .expect("headless test requires the legacy font-atlas capability")
-        .build();
-    context_b.io_mut().set_display_size([128.0, 128.0]);
-    context_b.io_mut().set_delta_time(1.0 / 60.0);
+    let mut context_b = context();
     let ui_b = context_b.frame();
-    let error = engine
-        .show_windows(ui_b, None)
+    let error = ui_b
+        .show_test_engine_windows(&mut engine, None)
         .expect_err("foreign Ui must be rejected before binding");
     assert!(matches!(error, TestEngineError::ContextMismatch { .. }));
     drop(context_b.render_legacy());
-    let suspended_b = context_b.suspend_or_panic();
-    let context_a = suspended_a.activate().expect("Context A activation");
-
     engine.shutdown().expect("shutdown");
     drop(context_a);
-    drop(suspended_b);
+    drop(context_b);
 }
 
 #[test]
@@ -865,15 +852,10 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     // The stopped engine retains hooks on `stopped_context`. Do not open another native frame on
     // that Context after stopping solely to manufacture a rejected driver capability; use an
     // unattached probe so this assertion exercises only the engine state gate.
-    let suspended_stopped_context = stopped_context.suspend_or_panic();
     let mut inactive_probe = context();
     let inactive_frame = inactive_probe.begin_frame();
     inactive_frame.ui().text("inactive driver state probe");
     assert_frame_driver_invalid_state(&mut detached, inactive_frame);
-    let suspended_inactive_probe = inactive_probe.suspend_or_panic();
-    let stopped_context = suspended_stopped_context
-        .activate()
-        .expect("reactivate stopped Context for shutdown");
     assert_invalid_state(detached.stop());
     assert_invalid_state(detached.is_test_queue_empty());
     assert_invalid_state(detached.is_running_tests());
@@ -885,7 +867,7 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
         .shutdown()
         .expect("Destroyed shutdown is idempotent");
     drop(stopped_context);
-    drop(suspended_inactive_probe);
+    drop(inactive_probe);
 
     let mut terminal_context = context();
     let mut terminal = TestEngine::create().expect("terminal engine");
@@ -919,57 +901,45 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
 }
 
 #[test]
-fn process_binding_rejects_a_second_suspended_context_until_unbind() {
+fn process_binding_rejects_a_second_live_context_until_unbind() {
     let _guard = test_lock();
     let mut context_a = context();
     let mut engine_a = TestEngine::create().expect("engine A");
     engine_a.start(&mut context_a).expect("start A");
-    let suspended_a = context_a.suspend_or_panic();
-
-    let mut context_b = SuspendedContext::create().activate().expect("activate B");
+    let mut context_b = context();
     let mut engine_b = TestEngine::create().expect("engine B");
     let occupied = engine_b
         .start(&mut context_b)
         .expect_err("the process lease must reject B");
     assert_eq!(occupied.status(), Some(TestEngineStatus::BindingOccupied));
 
-    let suspended_b = context_b.suspend_or_panic();
-    let context_a = suspended_a.activate().expect("reactivate A");
     engine_a.stop().expect("stop A");
-    let suspended_a = context_a.suspend_or_panic();
-    let mut context_b = suspended_b.activate().expect("reactivate B");
     let occupied = engine_b
         .start(&mut context_b)
         .expect_err("stop must retain the process lease");
     assert_eq!(occupied.status(), Some(TestEngineStatus::BindingOccupied));
 
-    let suspended_b = context_b.suspend_or_panic();
-    let context_a = suspended_a.activate().expect("activate A for shutdown");
     engine_a.shutdown().expect("unbind A");
-    let suspended_a = context_a.suspend_or_panic();
-    let mut context_b = suspended_b.activate().expect("activate B after unbind");
     engine_b.start(&mut context_b).expect("start B");
     engine_b.shutdown().expect("shutdown B");
     drop(context_b);
-    drop(suspended_a);
+    drop(context_a);
 }
 
 #[test]
-fn suspended_context_destruction_releases_the_process_binding() {
+fn context_destruction_releases_the_process_binding_while_another_context_is_live() {
     let _guard = test_lock();
     let mut context_a = context();
     let mut engine_a = TestEngine::create().expect("engine A");
     engine_a.start(&mut context_a).expect("start A");
-    let suspended_a = context_a.suspend_or_panic();
-
-    let mut context_b = SuspendedContext::create().activate().expect("activate B");
+    let mut context_b = context();
     let mut engine_b = TestEngine::create().expect("engine B");
     let occupied = engine_b
         .start(&mut context_b)
         .expect_err("A still owns the process binding");
     assert_eq!(occupied.status(), Some(TestEngineStatus::BindingOccupied));
 
-    drop(suspended_a);
+    drop(context_a);
     assert_eq!(
         engine_a.attachment_state(),
         AttachmentState::ContextDestroyed
@@ -1284,4 +1254,31 @@ fn drop_retries_one_shot_native_failures_without_losing_the_engine() {
     assert_eq!(detached.EnginesStopped, 1);
     assert_eq!(detached.EnginesUnbound, 1);
     assert_eq!(detached.EnginesDestroyed, 1);
+}
+
+#[test]
+fn drop_defers_to_context_when_unbind_cannot_complete() {
+    let _guard = test_lock();
+    reset_counters();
+    let mut context = context();
+    let mut engine = TestEngine::create().expect("engine");
+    engine.start(&mut context).expect("start");
+    engine.stop().expect("stop");
+
+    let context_raw = context.as_raw();
+    context.binding().with_bound_context(|| {
+        let engine_link =
+            unsafe { std::ptr::replace(&raw mut (*context_raw).TestEngine, std::ptr::null_mut()) };
+        drop(engine);
+        unsafe { (*context_raw).TestEngine = engine_link };
+    });
+    assert_eq!(counters().EnginesUnbound, 0);
+    assert_eq!(counters().EnginesDestroyed, 0);
+
+    drop(context);
+    assert_eq!(counters().EnginesUnbound, 1);
+    assert_eq!(counters().EnginesDestroyed, 1);
+    std::thread::spawn(|| drop(ContextThreadLease::acquire().expect("thread lease was released")))
+        .join()
+        .expect("thread probe");
 }

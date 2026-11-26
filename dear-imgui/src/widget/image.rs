@@ -344,27 +344,29 @@ impl<'ui, 'tex> ImageButton<'ui, 'tex> {
         assert_finite_vec4("ImageButton::build()", "bg_color", self.bg_color);
         assert_finite_vec4("ImageButton::build()", "tint_color", self.tint_color);
 
-        let str_id_ptr = self.ui.scratch_txt(self.str_id.as_ref());
         let size_vec: sys::ImVec2 = self.size.into();
         let uv0_vec: sys::ImVec2 = self.uv0.into();
         let uv1_vec: sys::ImVec2 = self.uv1.into();
 
-        self.ui.run_with_bound_context(|| {
-            let texture = self
-                .ui
-                .resolve_texture_ref(self.texture)
-                .unwrap_or_else(|error| panic!("ImageButton::build() rejected texture: {error}"));
-            unsafe {
-                sys::igImageButton(
-                    str_id_ptr,
-                    texture,
-                    size_vec,
-                    uv0_vec,
-                    uv1_vec,
-                    im_vec4(self.bg_color),
-                    im_vec4(self.tint_color),
-                )
-            }
-        })
+        self.ui
+            .with_scratch_txt(self.str_id.as_ref(), |str_id_ptr| {
+                let texture = self
+                    .ui
+                    .resolve_texture_ref(self.texture)
+                    .unwrap_or_else(|error| {
+                        panic!("ImageButton::build() rejected texture: {error}")
+                    });
+                unsafe {
+                    sys::igImageButton(
+                        str_id_ptr,
+                        texture,
+                        size_vec,
+                        uv0_vec,
+                        uv1_vec,
+                        im_vec4(self.bg_color),
+                        im_vec4(self.tint_color),
+                    )
+                }
+            })
     }
 }

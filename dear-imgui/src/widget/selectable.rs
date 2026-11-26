@@ -165,13 +165,8 @@ impl<'ui, T: AsRef<str>> Selectable<'ui, T> {
             x: self.size[0],
             y: self.size[1],
         };
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igSelectable_Bool(
-                self.ui.scratch_txt(self.label),
-                self.selected,
-                self.flags.bits(),
-                size_vec,
-            )
+        self.ui.with_scratch_txt(self.label, |label_ptr| unsafe {
+            sys::igSelectable_Bool(label_ptr, self.selected, self.flags.bits(), size_vec)
         })
     }
 
@@ -183,9 +178,9 @@ impl<'ui, T: AsRef<str>> Selectable<'ui, T> {
             x: self.size[0],
             y: self.size[1],
         };
-        self.ui.run_with_bound_context(|| unsafe {
+        self.ui.with_scratch_txt(self.label, |label_ptr| unsafe {
             sys::igSelectable_BoolPtr(
-                self.ui.scratch_txt(self.label),
+                label_ptr,
                 selected as *mut bool,
                 self.flags.bits(),
                 size_vec,

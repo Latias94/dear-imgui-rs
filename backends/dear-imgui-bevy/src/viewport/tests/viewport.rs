@@ -1,7 +1,7 @@
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 use crate::context::ImguiFrameMailbox;
 #[cfg(feature = "multi-viewport")]
-use crate::test_util::imgui_context_guard;
+use crate::test_util::{RenderTestApp, imgui_context_guard};
 #[cfg(feature = "multi-viewport")]
 use bevy_app::App;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
@@ -63,7 +63,7 @@ use std::{cell::Cell, rc::Rc};
 mod geometry_tests;
 
 #[cfg(feature = "multi-viewport")]
-static FOREIGN_DESTROY_SAW_BEVY_BACKEND_USER_DATA: std::sync::atomic::AtomicBool =
+static FOREIGN_DESTROY_CALLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(feature = "multi-viewport")]
@@ -205,7 +205,7 @@ fn with_primary_context<T>(app: &mut App, operation: impl FnOnce(&mut imgui::Con
 }
 
 #[cfg(feature = "multi-viewport")]
-fn remove_primary_context(app: &mut App) -> Result<imgui::SuspendedContext, ImguiContextError> {
+fn remove_primary_context(app: &mut App) -> Result<imgui::Context, ImguiContextError> {
     let primary_id = primary_context_id(app);
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
@@ -214,13 +214,21 @@ fn remove_primary_context(app: &mut App) -> Result<imgui::SuspendedContext, Imgu
 }
 
 #[cfg(feature = "multi-viewport")]
-fn app_with_multi_viewport_bridge() -> App {
+fn app_with_multi_viewport_bridge() -> RenderTestApp {
     app_with_multi_viewport_window_config(ImguiViewportWindowConfig::default())
 }
 
 #[cfg(feature = "multi-viewport")]
-fn app_with_multi_viewport_window_config(viewport_window: ImguiViewportWindowConfig) -> App {
-    let mut app = App::new();
+fn app_with_multi_viewport_window_config(
+    viewport_window: ImguiViewportWindowConfig,
+) -> RenderTestApp {
+    let mut app = RenderTestApp::new();
+    configure_multi_viewport_app(&mut app, viewport_window);
+    app
+}
+
+#[cfg(feature = "multi-viewport")]
+fn configure_multi_viewport_app(app: &mut App, viewport_window: ImguiViewportWindowConfig) {
     app.insert_resource(
         crate::viewport::native_window::DesktopPositionSupportOverride(
             crate::viewport::native_window::DesktopPositionSupport::Available,
@@ -237,7 +245,6 @@ fn app_with_multi_viewport_window_config(viewport_window: ImguiViewportWindowCon
             .with_multi_viewport(true)
             .with_viewport_window(viewport_window),
     ));
-    app
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -552,12 +559,12 @@ fn create_callback_viewport(
         .get_non_send_mut::<ImguiContexts>()
         .expect("plugin should install the Context registry")
         .configure(context_id, |context| {
-            let raw_viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
-            assert!(
-                !raw_viewport.is_null(),
-                "ImGuiViewport_ImGuiViewport() returned null"
-            );
-            unsafe {
+            context.binding().with_bound_context(|| unsafe {
+                let raw_viewport = sys::ImGuiViewport_ImGuiViewport();
+                assert!(
+                    !raw_viewport.is_null(),
+                    "ImGuiViewport_ImGuiViewport() returned null"
+                );
                 let viewport = imgui::Viewport::from_raw_mut(raw_viewport);
                 (*raw_viewport).ID = snapshot.id.raw();
                 viewport.set_pos(snapshot.pos);
@@ -570,8 +577,8 @@ fn create_callback_viewport(
                     .expect("the Context should own Platform_CreateWindow")(
                     raw_viewport
                 );
-            }
-            raw_viewport
+                raw_viewport
+            })
         })
         .unwrap_or_else(|error| panic!("Context callback fixture could not be configured: {error}"))
 }
@@ -586,23 +593,27 @@ fn update_callback_viewport(
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .expect("plugin should install the Context registry")
-        .configure(context_id, |context| unsafe {
-            let platform_io = context.platform_io().as_raw();
-            let pos = sys::ImVec2 {
-                x: pos[0],
-                y: pos[1],
-            };
-            assert!(sys::ImGuiPlatformIO_InvokePlatformSetWindowPos(
-                platform_io,
-                raw_viewport,
-                &pos,
-            ));
-            (*platform_io)
-                .Platform_ShowWindow
-                .expect("the Context should own Platform_ShowWindow")(raw_viewport);
-            (*platform_io)
-                .Platform_SetWindowFocus
-                .expect("the Context should own Platform_SetWindowFocus")(raw_viewport);
+        .configure(context_id, |context| {
+            context.binding().with_bound_context(|| unsafe {
+                let platform_io = context.platform_io().as_raw();
+                let pos = sys::ImVec2 {
+                    x: pos[0],
+                    y: pos[1],
+                };
+                assert!(sys::ImGuiPlatformIO_InvokePlatformSetWindowPos(
+                    platform_io,
+                    raw_viewport,
+                    &pos,
+                ));
+                let show_window = (*platform_io)
+                    .Platform_ShowWindow
+                    .expect("the Context should own Platform_ShowWindow");
+                let set_window_focus = (*platform_io)
+                    .Platform_SetWindowFocus
+                    .expect("the Context should own Platform_SetWindowFocus");
+                show_window(raw_viewport);
+                set_window_focus(raw_viewport);
+            });
         })
         .unwrap_or_else(|error| panic!("Context callback fixture could not be updated: {error}"));
 }
@@ -617,11 +628,14 @@ fn destroy_callback_viewport(
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .expect("plugin should install the Context registry")
-        .configure(context_id, |context| unsafe {
-            let platform_io = context.platform_io().as_raw();
-            (*platform_io)
-                .Platform_DestroyWindow
-                .expect("the Context should own Platform_DestroyWindow")(raw_viewport);
+        .configure(context_id, |context| {
+            context.binding().with_bound_context(|| unsafe {
+                let platform_io = context.platform_io().as_raw();
+                let destroy_window = (*platform_io)
+                    .Platform_DestroyWindow
+                    .expect("the Context should own Platform_DestroyWindow");
+                destroy_window(raw_viewport);
+            });
         })
         .unwrap_or_else(|error| panic!("Context callback fixture could not be destroyed: {error}"));
     unsafe {
@@ -752,13 +766,14 @@ fn viewport_prepare_rejects_replaced_main_platform_user_data() {
     app.update();
 
     let foreign = std::ptr::dangling_mut::<u16>().cast::<std::ffi::c_void>();
-    with_primary_context(&mut app, |context| {
+    let (backend_flags, config_flags) = with_primary_context(&mut app, |context| {
         let main_viewport = context.main_viewport();
         assert_eq!(
             main_viewport.platform_user_data(),
             main_viewport.platform_handle()
         );
         unsafe { main_viewport.set_platform_user_data(foreign) };
+        (context.io().backend_flags(), context.io().config_flags())
     });
 
     app.update();
@@ -787,7 +802,9 @@ fn viewport_prepare_rejects_replaced_main_platform_user_data() {
             foreign,
             "frame preparation must not overwrite a foreign PlatformUserData claim"
         );
-        unsafe { main_viewport.set_platform_user_data(std::ptr::null_mut()) };
+        unsafe { main_viewport.set_platform_user_data(main_viewport.platform_handle()) };
+        context.io_mut().set_backend_flags(backend_flags);
+        context.io_mut().set_config_flags(config_flags);
     });
     assert_eq!(
         app.world()
@@ -857,8 +874,15 @@ fn temporary_host_loss_preserves_sticky_callback_fault() {
     app.update();
 
     let foreign = std::ptr::dangling_mut::<u16>().cast::<std::ffi::c_void>();
-    with_primary_context(&mut app, |context| unsafe {
-        context.main_viewport().set_platform_user_data(foreign);
+    let (original, backend_flags, config_flags) = with_primary_context(&mut app, |context| {
+        let viewport = context.main_viewport();
+        let original = viewport.platform_user_data();
+        unsafe { viewport.set_platform_user_data(foreign) };
+        (
+            original,
+            context.io().backend_flags(),
+            context.io().config_flags(),
+        )
     });
     app.update();
 
@@ -876,6 +900,12 @@ fn temporary_host_loss_preserves_sticky_callback_fault() {
         Some(expected)
     );
 
+    with_primary_context(&mut app, |context| {
+        unsafe { context.main_viewport().set_platform_user_data(original) };
+        context.io_mut().set_backend_flags(backend_flags);
+        context.io_mut().set_config_flags(config_flags);
+    });
+
     app.world_mut()
         .resource_mut::<Messages<WindowCloseRequested>>()
         .write(WindowCloseRequested { window: primary });
@@ -889,12 +919,6 @@ fn temporary_host_loss_preserves_sticky_callback_fault() {
         Some(expected),
         "temporary host cleanup must not erase a callback fault before bridge teardown"
     );
-
-    with_primary_context(&mut app, |context| unsafe {
-        context
-            .main_viewport()
-            .set_platform_user_data(std::ptr::null_mut());
-    });
 }
 
 #[test]
@@ -961,7 +985,7 @@ fn viewport_window_factory_sanitizes_non_finite_platform_values() {
 #[test]
 fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them() {
     let _guard = imgui_context_guard();
-    let mut app = App::new();
+    let mut app = RenderTestApp::new();
     app.add_plugins(ImguiPlugin::new(
         ImguiPluginConfig::default().with_multi_viewport(true),
     ));
@@ -986,7 +1010,7 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
     with_primary_context(&mut app, |context| {
         let platform_io = context.platform_io().as_raw();
         let backend_platform_user_data = context.io().backend_platform_user_data();
-        unsafe {
+        context.binding().with_bound_context(|| unsafe {
             (*platform_io)
                 .Platform_CreateWindow
                 .expect("bridge should install Platform_CreateWindow")(raw_viewport);
@@ -1006,24 +1030,26 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
                 backend_platform_user_data,
                 "each Dear ImGui viewport needs its own platform handle; backend userdata only identifies the owning Context bridge"
             );
-        }
+        });
     });
 
     app.update();
 
-    with_primary_context(&mut app, |context| unsafe {
-        let platform_io = context.platform_io().as_raw();
-        imgui::Viewport::from_raw_mut(raw_viewport).set_raw_flags_unchecked(
-            (imgui::ViewportFlags::IS_PLATFORM_WINDOW
-                | imgui::ViewportFlags::NO_DECORATION
-                | imgui::ViewportFlags::NO_TASK_BAR_ICON
-                | imgui::ViewportFlags::TOP_MOST
-                | imgui::ViewportFlags::NO_INPUTS)
-                .bits(),
-        );
-        (*platform_io)
-            .Platform_UpdateWindow
-            .expect("bridge should install Platform_UpdateWindow")(raw_viewport);
+    with_primary_context(&mut app, |context| {
+        context.binding().with_bound_context(|| unsafe {
+            let platform_io = context.platform_io().as_raw();
+            imgui::Viewport::from_raw_mut(raw_viewport).set_raw_flags_unchecked(
+                (imgui::ViewportFlags::IS_PLATFORM_WINDOW
+                    | imgui::ViewportFlags::NO_DECORATION
+                    | imgui::ViewportFlags::NO_TASK_BAR_ICON
+                    | imgui::ViewportFlags::TOP_MOST
+                    | imgui::ViewportFlags::NO_INPUTS)
+                    .bits(),
+            );
+            (*platform_io)
+                .Platform_UpdateWindow
+                .expect("bridge should install Platform_UpdateWindow")(raw_viewport);
+        });
     });
     app.update();
 
@@ -1054,13 +1080,15 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
         !crate::viewport::native_window::supports_pointer_passthrough()
     );
 
-    with_primary_context(&mut app, |context| unsafe {
-        let platform_io = context.platform_io().as_raw();
-        imgui::Viewport::from_raw_mut(raw_viewport)
-            .set_raw_flags_unchecked(imgui::ViewportFlags::IS_PLATFORM_WINDOW.bits());
-        (*platform_io)
-            .Platform_UpdateWindow
-            .expect("bridge should install Platform_UpdateWindow")(raw_viewport);
+    with_primary_context(&mut app, |context| {
+        context.binding().with_bound_context(|| unsafe {
+            let platform_io = context.platform_io().as_raw();
+            imgui::Viewport::from_raw_mut(raw_viewport)
+                .set_raw_flags_unchecked(imgui::ViewportFlags::IS_PLATFORM_WINDOW.bits());
+            (*platform_io)
+                .Platform_UpdateWindow
+                .expect("bridge should install Platform_UpdateWindow")(raw_viewport);
+        });
     });
     app.update();
 
@@ -1078,11 +1106,13 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
             .hit_test
     );
 
-    with_primary_context(&mut app, |context| unsafe {
-        let platform_io = context.platform_io().as_raw();
-        (*platform_io)
-            .Platform_DestroyWindow
-            .expect("bridge should install Platform_DestroyWindow")(raw_viewport);
+    with_primary_context(&mut app, |context| {
+        context.binding().with_bound_context(|| unsafe {
+            let platform_io = context.platform_io().as_raw();
+            (*platform_io)
+                .Platform_DestroyWindow
+                .expect("bridge should install Platform_DestroyWindow")(raw_viewport);
+        });
     });
     unsafe { sys::ImGuiViewport_destroy(raw_viewport) };
 }
@@ -1375,11 +1405,11 @@ fn viewport_destroy_callback_ignores_owned_by_app_main_viewport() {
     });
 
     with_primary_context(&mut app, |context| {
-        let main_viewport = context.main_viewport();
-        unsafe {
+        context.binding().with_bound_context(|| unsafe {
+            let main_viewport = context.main_viewport();
             (*main_viewport.as_raw_mut()).Flags = imgui::ViewportFlags::OWNED_BY_APP.bits();
             destroy_window(main_viewport.as_raw_mut());
-        }
+        });
     });
 
     app.update();
@@ -1393,23 +1423,33 @@ fn viewport_destroy_callback_ignores_owned_by_app_main_viewport() {
     );
 }
 
-#[cfg(feature = "multi-viewport")]
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[test]
-fn context_drop_sanitizes_owned_state_before_foreign_destroy_callbacks_run() {
+fn app_drop_with_partial_takeover_does_not_call_foreign_destroy() {
+    crate::test_util::run_isolated_test(
+        concat!(
+            module_path!(),
+            "::app_drop_with_partial_takeover_does_not_call_foreign_destroy"
+        ),
+        assert_partial_takeover_keeps_the_owner_alive,
+    );
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn assert_partial_takeover_keeps_the_owner_alive() {
     let _guard = imgui_context_guard();
 
-    unsafe extern "C" fn observe_live_backend_user_data(viewport: *mut sys::ImGuiViewport) {
-        let io = unsafe { sys::igGetIO_Nil() };
-        let live = !io.is_null() && unsafe { !(*io).BackendPlatformUserData.is_null() };
-        FOREIGN_DESTROY_SAW_BEVY_BACKEND_USER_DATA.store(live, std::sync::atomic::Ordering::SeqCst);
+    unsafe extern "C" fn record_foreign_destroy(viewport: *mut sys::ImGuiViewport) {
+        FOREIGN_DESTROY_CALLED.store(true, std::sync::atomic::Ordering::SeqCst);
         if let Some(viewport) = unsafe { viewport.as_mut() } {
             viewport.PlatformUserData = std::ptr::null_mut();
             viewport.PlatformHandle = std::ptr::null_mut();
         }
     }
 
-    FOREIGN_DESTROY_SAW_BEVY_BACKEND_USER_DATA.store(false, std::sync::atomic::Ordering::SeqCst);
-    let mut app = app_with_multi_viewport_bridge();
+    FOREIGN_DESTROY_CALLED.store(false, std::sync::atomic::Ordering::SeqCst);
+    let mut app = App::new();
+    configure_multi_viewport_app(&mut app, ImguiViewportWindowConfig::default());
     app.world_mut().spawn((Window::default(), PrimaryWindow));
     app.update();
     with_primary_context(&mut app, |context| {
@@ -1418,7 +1458,7 @@ fn context_drop_sanitizes_owned_state_before_foreign_destroy_callbacks_run() {
             assert!(!main_viewport.platform_user_data().is_null());
             assert!(!main_viewport.platform_handle().is_null());
             let platform_io = context.platform_io_mut().as_raw_mut();
-            (*platform_io).Platform_DestroyWindow = Some(observe_live_backend_user_data);
+            (*platform_io).Platform_DestroyWindow = Some(record_foreign_destroy);
         }
     });
 
@@ -1444,8 +1484,8 @@ fn context_drop_sanitizes_owned_state_before_foreign_destroy_callbacks_run() {
     drop(app);
 
     assert!(
-        !FOREIGN_DESTROY_SAW_BEVY_BACKEND_USER_DATA.load(std::sync::atomic::Ordering::SeqCst),
-        "foreign destroy callbacks must never observe Bevy-owned BackendPlatformUserData"
+        !FOREIGN_DESTROY_CALLED.load(std::sync::atomic::Ordering::SeqCst),
+        "ordinary app drop must not call a foreign callback under partial ownership takeover"
     );
 }
 
@@ -1583,7 +1623,7 @@ fn context_extraction_releases_secondary_entities_before_returning_context() {
 #[test]
 fn viewport_and_render_release_converge_without_pausing_another_context() {
     let _guard = imgui_context_guard();
-    let mut app = App::new();
+    let mut app = RenderTestApp::new();
     app.insert_resource(
         crate::viewport::native_window::DesktopPositionSupportOverride(
             crate::viewport::native_window::DesktopPositionSupport::Available,
@@ -1937,17 +1977,12 @@ fn context_extraction_clears_owned_platform_monitors() {
     ));
     app.update();
 
-    let mut context = remove_primary_context(&mut app)
+    let context = remove_primary_context(&mut app)
         .expect("renderer acknowledgement should finish Context removal");
-    context
-        .try_with_active(|context| {
-            let monitors = unsafe { (*context.platform_io().as_raw()).Monitors };
-            assert_eq!(monitors.Size, 0);
-            assert_eq!(monitors.Capacity, 0);
-            assert!(monitors.Data.is_null());
-            Ok::<_, ()>(())
-        })
-        .unwrap();
+    let monitors = unsafe { (*context.platform_io().as_raw()).Monitors };
+    assert_eq!(monitors.Size, 0);
+    assert_eq!(monitors.Capacity, 0);
+    assert!(monitors.Data.is_null());
 }
 
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
@@ -1984,15 +2019,10 @@ fn context_extraction_preserves_replaced_platform_monitors() {
     app.update();
     let mut context = remove_primary_context(&mut app)
         .expect("monitor drift should remain retryable after renderer acknowledgement");
-    context
-        .try_with_active(|context| {
-            let preserved = unsafe { (*context.platform_io().as_raw()).Monitors };
-            assert_eq!(preserved, foreign_storage);
-            assert_eq!(unsafe { *preserved.Data }, foreign_monitor);
-            unsafe { context.platform_io_mut().set_monitors(&[]) };
-            Ok::<_, ()>(())
-        })
-        .unwrap();
+    let preserved = unsafe { (*context.platform_io().as_raw()).Monitors };
+    assert_eq!(preserved, foreign_storage);
+    assert_eq!(unsafe { *preserved.Data }, foreign_monitor);
+    unsafe { context.platform_io_mut().set_monitors(&[]) };
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -2004,10 +2034,18 @@ fn frame_preparation_rejects_replaced_platform_monitors_without_overwriting_them
     app.update();
 
     let foreign_monitor = foreign_platform_monitor();
-    let expected = with_primary_context(&mut app, |context| unsafe {
-        context.platform_io_mut().set_monitors(&[foreign_monitor]);
-        (*context.platform_io().as_raw()).Monitors
-    });
+    let (original, expected, backend_flags, config_flags) =
+        with_primary_context(&mut app, |context| unsafe {
+            let platform_io = context.platform_io_mut();
+            let original = std::mem::take(&mut (*platform_io.as_raw_mut()).Monitors);
+            platform_io.set_monitors(&[foreign_monitor]);
+            (
+                original,
+                (*platform_io.as_raw()).Monitors,
+                context.io().backend_flags(),
+                context.io().config_flags(),
+            )
+        });
     app.update();
     let primary_id = primary_context_id(&app);
     assert!(matches!(
@@ -2042,6 +2080,13 @@ fn frame_preparation_rejects_replaced_platform_monitors_without_overwriting_them
             )
         )
     );
+    with_primary_context(&mut app, |context| unsafe {
+        let platform_io = context.platform_io_mut();
+        platform_io.set_monitors(&[]);
+        (*platform_io.as_raw_mut()).Monitors = original;
+        context.io_mut().set_backend_flags(backend_flags);
+        context.io_mut().set_config_flags(config_flags);
+    });
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -2052,13 +2097,21 @@ fn frame_preparation_rejects_in_place_platform_monitor_tampering() {
     ensure_primary_window(&mut app);
     app.update();
 
-    let (data, tampered_scale) = with_primary_context(&mut app, |context| {
-        let monitors = unsafe { (*context.platform_io().as_raw()).Monitors };
-        assert!(monitors.Size > 0);
-        let tampered_scale = unsafe { (*monitors.Data).DpiScale + 0.5 };
-        unsafe { (*monitors.Data).DpiScale = tampered_scale };
-        (monitors.Data, tampered_scale)
-    });
+    let (data, original_scale, tampered_scale, backend_flags, config_flags) =
+        with_primary_context(&mut app, |context| {
+            let monitors = unsafe { (*context.platform_io().as_raw()).Monitors };
+            assert!(monitors.Size > 0);
+            let original_scale = unsafe { (*monitors.Data).DpiScale };
+            let tampered_scale = original_scale + 0.5;
+            unsafe { (*monitors.Data).DpiScale = tampered_scale };
+            (
+                monitors.Data,
+                original_scale,
+                tampered_scale,
+                context.io().backend_flags(),
+                context.io().config_flags(),
+            )
+        });
     app.update();
     let primary_id = primary_context_id(&app);
     assert!(matches!(
@@ -2093,6 +2146,11 @@ fn frame_preparation_rejects_in_place_platform_monitor_tampering() {
             )
         )
     );
+    with_primary_context(&mut app, |context| {
+        unsafe { (*monitors.Data).DpiScale = original_scale };
+        context.io_mut().set_backend_flags(backend_flags);
+        context.io_mut().set_config_flags(config_flags);
+    });
 }
 
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
@@ -2140,16 +2198,11 @@ fn callback_drift_is_reported_before_world_release_pending() {
 
     let mut context = remove_primary_context(&mut app)
         .expect("World cleanup should make callback-drift removal retryable");
-    context
-        .try_with_active(|context| {
-            unsafe {
-                context
-                    .platform_io_mut()
-                    .set_platform_destroy_window_raw(None);
-            }
-            Ok::<_, ()>(())
-        })
-        .unwrap();
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_platform_destroy_window_raw(None);
+    }
 }
 
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
@@ -2184,17 +2237,19 @@ fn invalid_window_config_is_rejected_before_backend_attachment() {
 #[test]
 fn callback_userdata_drift_fails_before_platform_window_update() {
     let _guard = imgui_context_guard();
-    let mut app = App::new();
+    let mut app = RenderTestApp::new();
     app.add_plugins(crate::test_util::render_extraction_plugin());
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
     app.add_plugins(ImguiPlugin::new(
         ImguiPluginConfig::default().with_multi_viewport(true),
     ));
     ensure_primary_window(&mut app);
-    with_primary_context(&mut app, |context| unsafe {
+    let original = with_primary_context(&mut app, |context| unsafe {
+        let original = context.io().backend_platform_user_data();
         context
             .io_mut()
             .set_backend_platform_user_data(std::ptr::null_mut());
+        original
     });
 
     app.update();
@@ -2213,6 +2268,9 @@ fn callback_userdata_drift_fails_before_platform_window_update() {
             ..
         }))
     ));
+    with_primary_context(&mut app, |context| unsafe {
+        context.io_mut().set_backend_platform_user_data(original);
+    });
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -2325,7 +2383,7 @@ fn viewport_platform_feedback_queries_return_mapped_bevy_window_state() {
         minimized,
     ) = with_primary_context(&mut app, |context| {
         let platform_io = context.platform_io().as_raw();
-        unsafe {
+        context.binding().with_bound_context(|| unsafe {
             (
                 (*platform_io).Platform_GetWindowPos.is_some(),
                 (*platform_io).Platform_GetWindowSize.is_some(),
@@ -2346,7 +2404,7 @@ fn viewport_platform_feedback_queries_return_mapped_bevy_window_state() {
                     raw_viewport
                 ),
             )
-        }
+        })
     });
 
     assert!(has_window_pos);
@@ -2406,13 +2464,13 @@ fn viewport_occlusion_events_update_imgui_minimized_feedback() {
     let raw_viewport = resolve_live_viewport(&mut app, id);
     let minimized = with_primary_context(&mut app, |context| {
         let platform_io = context.platform_io().as_raw();
-        unsafe {
+        context.binding().with_bound_context(|| unsafe {
             (*platform_io)
                 .Platform_GetWindowMinimized
                 .expect("bridge should install Platform_GetWindowMinimized")(
                 raw_viewport
             )
-        }
+        })
     });
     assert!(
         minimized,
@@ -2431,13 +2489,13 @@ fn viewport_occlusion_events_update_imgui_minimized_feedback() {
     let raw_viewport = resolve_live_viewport(&mut app, id);
     let minimized = with_primary_context(&mut app, |context| {
         let platform_io = context.platform_io().as_raw();
-        unsafe {
+        context.binding().with_bound_context(|| unsafe {
             (*platform_io)
                 .Platform_GetWindowMinimized
                 .expect("bridge should install Platform_GetWindowMinimized")(
                 raw_viewport
             )
-        }
+        })
     });
     assert!(
         !minimized,
@@ -2576,14 +2634,17 @@ fn viewport_update_synchronizes_existing_camera_clear_policy() {
         .and_then(|bridge| bridge.viewport_camera(context_id, snapshot.id))
         .expect("the callback-created viewport should own a camera");
 
-    with_primary_context(&mut app, |context| unsafe {
-        imgui::Viewport::from_raw_mut(raw_viewport).set_raw_flags_unchecked(
-            (imgui::ViewportFlags::IS_PLATFORM_WINDOW | imgui::ViewportFlags::NO_RENDERER_CLEAR)
-                .bits(),
-        );
-        (*context.platform_io().as_raw())
-            .Platform_UpdateWindow
-            .expect("the Context should own Platform_UpdateWindow")(raw_viewport);
+    with_primary_context(&mut app, |context| {
+        context.binding().with_bound_context(|| unsafe {
+            imgui::Viewport::from_raw_mut(raw_viewport).set_raw_flags_unchecked(
+                (imgui::ViewportFlags::IS_PLATFORM_WINDOW
+                    | imgui::ViewportFlags::NO_RENDERER_CLEAR)
+                    .bits(),
+            );
+            (*context.platform_io().as_raw())
+                .Platform_UpdateWindow
+                .expect("the Context should own Platform_UpdateWindow")(raw_viewport);
+        });
     });
     app.update();
     assert!(matches!(
@@ -2597,12 +2658,14 @@ fn viewport_update_synchronizes_existing_camera_clear_policy() {
         }
     ));
 
-    with_primary_context(&mut app, |context| unsafe {
-        imgui::Viewport::from_raw_mut(raw_viewport)
-            .set_raw_flags_unchecked(imgui::ViewportFlags::IS_PLATFORM_WINDOW.bits());
-        (*context.platform_io().as_raw())
-            .Platform_UpdateWindow
-            .expect("the Context should own Platform_UpdateWindow")(raw_viewport);
+    with_primary_context(&mut app, |context| {
+        context.binding().with_bound_context(|| unsafe {
+            imgui::Viewport::from_raw_mut(raw_viewport)
+                .set_raw_flags_unchecked(imgui::ViewportFlags::IS_PLATFORM_WINDOW.bits());
+            (*context.platform_io().as_raw())
+                .Platform_UpdateWindow
+                .expect("the Context should own Platform_UpdateWindow")(raw_viewport);
+        });
     });
     app.update();
     assert!(matches!(
@@ -2658,24 +2721,26 @@ fn viewport_id_change_preserves_the_native_instance_and_bevy_entities() {
     assert_eq!(platform_user_data, platform_handle);
 
     let replacement_id = imgui::Id::from(0x253);
-    with_primary_context(&mut app, |context| unsafe {
-        (*raw_viewport).ID = replacement_id.raw();
-        let platform_io = context.platform_io().as_raw();
-        (*platform_io)
-            .Platform_UpdateWindow
-            .expect("the Context should own Platform_UpdateWindow")(raw_viewport);
-        (*platform_io)
-            .Platform_SetWindowTitle
-            .expect("the Context should own Platform_SetWindowTitle")(
-            raw_viewport,
-            c"docking-rebound".as_ptr(),
-        );
-        (*platform_io)
-            .Platform_ShowWindow
-            .expect("the Context should own Platform_ShowWindow")(raw_viewport);
-        (*platform_io)
-            .Platform_SetWindowFocus
-            .expect("the Context should own Platform_SetWindowFocus")(raw_viewport);
+    with_primary_context(&mut app, |context| {
+        context.binding().with_bound_context(|| unsafe {
+            (*raw_viewport).ID = replacement_id.raw();
+            let platform_io = context.platform_io().as_raw();
+            (*platform_io)
+                .Platform_UpdateWindow
+                .expect("the Context should own Platform_UpdateWindow")(raw_viewport);
+            (*platform_io)
+                .Platform_SetWindowTitle
+                .expect("the Context should own Platform_SetWindowTitle")(
+                raw_viewport,
+                c"docking-rebound".as_ptr(),
+            );
+            (*platform_io)
+                .Platform_ShowWindow
+                .expect("the Context should own Platform_ShowWindow")(raw_viewport);
+            (*platform_io)
+                .Platform_SetWindowFocus
+                .expect("the Context should own Platform_SetWindowFocus")(raw_viewport);
+        });
     });
     app.update();
     app.update();

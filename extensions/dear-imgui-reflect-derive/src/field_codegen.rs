@@ -1,387 +1,331 @@
-use proc_macro2::TokenStream as TokenStream2;
-use quote::quote;
-use syn::{Expr, Ident, LitStr};
+use proc_macro2::{Span, TokenStream};
+use quote::{quote, quote_spanned};
+use syn::spanned::Spanned;
+use syn::{Error, Field, Generics, Ident, Index, LitStr, Result, Type, parse_quote};
 
-/// Generates code for a boolean field, including support for type-level
-/// defaults and per-field bool_style / true_text / false_text overrides.
-pub fn gen_bool_field(
-    reflect_settings_ident: &Ident,
-    field_ident: &Ident,
-    field_name_lit: &LitStr,
-    label: &TokenStream2,
-    bool_style: &Option<String>,
-    true_text: &Option<LitStr>,
-    false_text: &Option<LitStr>,
-) -> syn::Result<TokenStream2> {
-    let tokens = if bool_style.is_none() && true_text.is_none() && false_text.is_none() {
-        quote! {
-            {
-                let settings = &#reflect_settings_ident;
-                let bool_settings: ::dear_imgui_reflect::BoolSettings = {
-                    if let Some(member) = settings.member::<Self>(#field_name_lit) {
-                        if let Some(ref override_settings) = member.bools {
-                            override_settings.clone()
-                        } else {
-                            settings.bools().clone()
-                        }
-                    } else {
-                        settings.bools().clone()
-                    }
-                };
-                match bool_settings.style {
-                    ::dear_imgui_reflect::BoolStyle::Checkbox => {
-                        __changed |= ui.checkbox(#label, __field);
-                    }
-                    ::dear_imgui_reflect::BoolStyle::Button => {
-                        let state_label = if *__field { "On" } else { "Off" };
-                        let button_label = format!("{label}: {}", state_label);
-                        if ui.button(&button_label) {
-                            *__field = !*__field;
-                            __changed = true;
-                        }
-                    }
-                    ::dear_imgui_reflect::BoolStyle::Dropdown => {
-                        let true_label = "True";
-                        let false_label = "False";
-                        let mut index: usize = if *__field { 1 } else { 0 };
-                        let items = [false_label, true_label];
-                        let local_changed =
-                            ui.combo_simple_string(#label, &mut index, &items);
-                        if local_changed {
-                            *__field = index == 1;
-                        }
-                        __changed |= local_changed;
-                    }
-                    ::dear_imgui_reflect::BoolStyle::Radio => {
-                        let true_label = "True";
-                        let false_label = "False";
-                        let mut local_changed = false;
-                        let current = *__field;
-                        if ui.radio_button_bool(true_label, current) {
-                            *__field = true;
-                            local_changed = true;
-                        }
-                        if ui.radio_button_bool(false_label, !current) {
-                            *__field = false;
-                            local_changed = true;
-                        }
-                        __changed |= local_changed;
-                    }
-                }
-            }
-        }
-    } else {
-        let style = bool_style.as_deref().unwrap_or("checkbox");
+use crate::attrs::{BoolAttrs, FieldAttrs, TextAttrs, TupleAttrs, parse_field_attrs};
+use crate::internal::type_name;
+use crate::numeric_codegen::render_numeric;
+use crate::option_tokens;
 
-        if style == "checkbox" {
-            quote! {
-                __changed |= ui.checkbox(#label, __field);
-            }
-        } else if style == "button" {
-            let true_label = true_text
-                .clone()
-                .unwrap_or_else(|| LitStr::new("On", field_ident.span()));
-            let false_label = false_text
-                .clone()
-                .unwrap_or_else(|| LitStr::new("Off", field_ident.span()));
-
-            quote! {
-                {
-                    let state_label = if *__field {
-                        #true_label
-                    } else {
-                        #false_label
-                    };
-                    let button_label = format!("{label}: {}", state_label);
-                    if ui.button(&button_label) {
-                        *__field = !*__field;
-                        __changed = true;
-                    }
-                }
-            }
-        } else if style == "dropdown" {
-            let true_label = true_text
-                .clone()
-                .unwrap_or_else(|| LitStr::new("True", field_ident.span()));
-            let false_label = false_text
-                .clone()
-                .unwrap_or_else(|| LitStr::new("False", field_ident.span()));
-
-            quote! {
-                {
-                    let mut index: usize = if *__field { 1 } else { 0 };
-                    let items = [#false_label, #true_label];
-                    let local_changed = ui.combo_simple_string(#label, &mut index, &items);
-                    if local_changed {
-                        *__field = index == 1;
-                    }
-                    __changed |= local_changed;
-                }
-            }
-        } else {
-            // "radio"
-            let true_label = true_text
-                .clone()
-                .unwrap_or_else(|| LitStr::new("True", field_ident.span()));
-            let false_label = false_text
-                .clone()
-                .unwrap_or_else(|| LitStr::new("False", field_ident.span()));
-
-            quote! {
-                {
-                    let mut local_changed = false;
-                    let current = *__field;
-                    if ui.radio_button_bool(#true_label, current) {
-                        *__field = true;
-                        local_changed = true;
-                    }
-                    if ui.radio_button_bool(#false_label, !current) {
-                        *__field = false;
-                        local_changed = true;
-                    }
-                    __changed |= local_changed;
-                }
-            }
-        }
-    };
-
-    Ok(tokens)
+pub struct FieldEditor<'a> {
+    field: &'a Field,
+    attrs: FieldAttrs,
+    segment: LitStr,
+    key: LitStr,
 }
 
-/// Generates code for `String` fields, including multiline, hints, read-only,
-/// display-only, and auto-resize behavior.
-#[allow(clippy::too_many_arguments)]
-pub fn gen_string_field(
-    field_ident: &Ident,
-    label: &TokenStream2,
-    multiline: bool,
-    display_only: bool,
-    read_only: bool,
-    auto_resize: bool,
-    min_width_expr: &Option<Expr>,
-    lines_expr: &Option<Expr>,
-    hint_str: &Option<LitStr>,
-) -> syn::Result<TokenStream2> {
-    let width_prefix = if let Some(width) = min_width_expr.clone() {
-        quote! {
-            let __imgui_reflect_width = ui.push_item_width(#width as f32);
-            let _ = &__imgui_reflect_width;
-        }
-    } else if auto_resize {
-        quote! {
-            let __imgui_reflect_width = ui.push_item_width_text(__field.as_str());
-            let _ = &__imgui_reflect_width;
-        }
-    } else {
-        quote! {}
-    };
+impl<'a> FieldEditor<'a> {
+    pub fn parse(field: &'a Field, index: usize, variant: Option<&Ident>) -> Result<Self> {
+        let attrs = parse_field_attrs(field)?;
+        let name = field
+            .ident
+            .as_ref()
+            .map_or_else(|| index.to_string(), ToString::to_string);
+        let key = variant.map_or_else(|| name.clone(), |variant| format!("{variant}.{name}"));
+        Ok(Self {
+            field,
+            attrs,
+            segment: LitStr::new(&name, field.span()),
+            key: LitStr::new(&key, field.span()),
+        })
+    }
 
-    let tokens = if display_only {
-        quote! {
-            {
-                let text = __field.as_str();
-                let display = format!("{}: {}", #label, text);
-                ui.text_wrapped(&display);
-                if ui.is_item_hovered() {
-                    ui.set_item_tooltip(text);
-                }
-            }
+    pub fn skip(&self) -> bool {
+        self.attrs.skip
+    }
+
+    pub fn render(&self, generics: &mut Generics, value: TokenStream) -> Result<TokenStream> {
+        let ty = &self.field.ty;
+        let label = self.attrs.name.as_ref().unwrap_or(&self.segment);
+        let typed =
+            generics.lifetimes().next().is_none() && generics.type_params().next().is_none();
+        let mut tuple = ty;
+        while let Type::Paren(paren) = tuple {
+            tuple = &paren.elem;
         }
-    } else if multiline {
-        if hint_str.is_some() {
-            return Err(syn::Error::new(
-                field_ident.span(),
-                "imgui(hint) is not supported together with multiline",
+
+        let body = if self.attrs.numeric.has_attrs() {
+            render_numeric(&self.attrs.numeric, ty, label, &value)?
+        } else if self.attrs.text.has_attrs() {
+            if !type_name(ty).is_some_and(|name| name == "String") {
+                return Err(Error::new_spanned(
+                    ty,
+                    "imgui text attributes require a String field",
+                ));
+            }
+            render_text(&self.attrs.text, ty, label, &value)?
+        } else if self.attrs.boolean.has_attrs() || type_name(ty).is_some_and(|name| name == "bool")
+        {
+            if !type_name(ty).is_some_and(|name| name == "bool") {
+                return Err(Error::new_spanned(
+                    ty,
+                    "imgui boolean attributes require a bool field",
+                ));
+            }
+            render_bool(&self.attrs.boolean, &self.segment, label, &value)?
+        } else if let Type::Tuple(tuple) = tuple {
+            for elem in &tuple.elems {
+                add_value_bound(generics, elem);
+            }
+            render_tuple(&self.attrs.tuple, &self.key, label, &value, tuple, typed)?
+        } else {
+            add_value_bound(generics, ty);
+            render_value(label, &value)
+        };
+        if self.attrs.tuple.has_attrs() && !matches!(tuple, Type::Tuple(_)) {
+            return Err(Error::new_spanned(
+                ty,
+                "imgui tuple attributes require a tuple field",
+            ));
+        }
+        let groups = [
+            self.attrs.numeric.has_attrs(),
+            self.attrs.text.has_attrs(),
+            self.attrs.boolean.has_attrs(),
+            self.attrs.tuple.has_attrs(),
+        ];
+        if groups.into_iter().filter(|enabled| *enabled).count() > 1 {
+            return Err(Error::new_spanned(
+                ty,
+                "imgui widget attributes from different groups cannot be combined",
             ));
         }
 
-        let ro_stmt = if read_only {
-            quote! { builder = builder.read_only(true); }
-        } else {
-            quote! {}
-        };
-
-        let size_expr = if auto_resize {
-            quote!({
-                let text = __field.as_str();
-                let mut lines: usize = 1;
-                for ch in text.chars() {
-                    if ch == '\n' {
-                        lines += 1;
-                    }
-                }
-                let height = ui.text_line_height_with_spacing() * (lines as f32);
-                [0.0, height]
-            })
-        } else if let Some(lines) = lines_expr.clone() {
-            quote!({
-                let height = ui.text_line_height_with_spacing() * (#lines as f32);
-                [0.0, height]
-            })
-        } else {
-            quote!([0.0, 0.0])
-        };
-
-        quote! {
-            {
-                #width_prefix
-                let size: [f32; 2] = #size_expr;
-                let mut builder = ui.input_text_multiline(#label, __field, size);
-                #ro_stmt
-                __changed |= builder.build();
-            }
-        }
-    } else if hint_str.is_some() || read_only {
-        let hint = hint_str.clone();
-        let ro = read_only;
-        let hint_stmt = if let Some(h) = hint {
-            quote! { builder = builder.hint(::std::string::String::from(#h)); }
-        } else {
-            quote! {}
-        };
-        let ro_stmt = if ro {
-            quote! { builder = builder.read_only(true); }
-        } else {
-            quote! {}
-        };
-
-        quote! {
-            {
-                #width_prefix
-                let mut builder = ui.input_text(#label, __field);
-                #hint_stmt
-                #ro_stmt
-                __changed |= builder.build();
-            }
-        }
-    } else {
-        quote! {
-            __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                inspector,
-                #label,
-                __field,
-            );
-        }
-    };
-
-    Ok(tokens)
+        let segment = &self.segment;
+        let render = with_member(&self.key, typed, self.attrs.read_only, &body);
+        Ok(quote_spanned! {Span::mixed_site()=> {
+            let __dear_imgui_reflect_path =
+                __dear_imgui_reflect_inspector.push_path_static(#segment);
+            __dear_imgui_reflect_changed |= #render;
+        }})
+    }
 }
 
-/// Generates code for `ImString` fields, mirroring the behavior of `String`
-/// but using ImString-specific input widgets.
-#[allow(clippy::too_many_arguments)]
-pub fn gen_imstring_field(
-    field_ident: &Ident,
-    label: &TokenStream2,
-    multiline: bool,
-    display_only: bool,
-    read_only: bool,
-    auto_resize: bool,
-    min_width_expr: &Option<Expr>,
-    lines_expr: &Option<Expr>,
-    hint_str: &Option<LitStr>,
-) -> syn::Result<TokenStream2> {
-    let width_prefix = if let Some(width) = min_width_expr.clone() {
-        quote! {
-            let __imgui_reflect_width = ui.push_item_width(#width as f32);
-            let _ = &__imgui_reflect_width;
-        }
-    } else if auto_resize {
-        quote! {
-            let __imgui_reflect_width = ui.push_item_width_text(__field.as_ref());
-            let _ = &__imgui_reflect_width;
+fn add_value_bound(generics: &mut Generics, ty: &Type) {
+    if !generics.params.is_empty() {
+        generics
+            .make_where_clause()
+            .predicates
+            .push(parse_quote!(#ty: ::dear_imgui_reflect::ImGuiValue));
+    }
+}
+
+fn with_member(key: &LitStr, typed: bool, read_only: bool, body: &TokenStream) -> TokenStream {
+    let member = if typed {
+        quote_spanned! {Span::mixed_site()=>
+            __dear_imgui_reflect_inspector.settings().member::<Self>(#key)
         }
     } else {
-        quote! {}
+        option_tokens::<TokenStream>(None)
     };
+    quote_spanned! {Span::mixed_site()=>
+        __dear_imgui_reflect_inspector.with_member(
+            #member,
+            #read_only,
+            |__dear_imgui_reflect_inspector, __dear_imgui_reflect_member| #body,
+        )
+    }
+}
 
-    let tokens = if display_only {
-        quote! {
-            {
-                let text = __field.as_ref();
-                let display = format!("{}: {}", #label, text);
-                ui.text_wrapped(&display);
-                if ui.is_item_hovered() {
-                    ui.set_item_tooltip(text);
-                }
+fn render_value(label: &LitStr, value: &TokenStream) -> TokenStream {
+    quote_spanned! {Span::mixed_site()=>
+        ::dear_imgui_reflect::ImGuiValue::imgui_value_with_member(
+            __dear_imgui_reflect_inspector,
+            #label,
+            #value,
+            __dear_imgui_reflect_member,
+        )
+    }
+}
+
+fn render_bool(
+    attrs: &BoolAttrs,
+    segment: &LitStr,
+    label: &LitStr,
+    value: &TokenStream,
+) -> Result<TokenStream> {
+    let style = if let Some(literal) = &attrs.style {
+        Some(match literal.value().as_str() {
+            "checkbox" if attrs.true_text.is_some() || attrs.false_text.is_some() => {
+                return Err(Error::new(
+                    literal.span(),
+                    "imgui true_text and false_text do not apply to checkboxes",
+                ));
             }
-        }
-    } else if multiline {
-        if hint_str.is_some() {
-            return Err(syn::Error::new(
-                field_ident.span(),
-                "imgui(hint) is not supported together with multiline",
-            ));
-        }
-
-        let ro_stmt = if read_only {
-            quote! { builder = builder.read_only(true); }
-        } else {
-            quote! {}
-        };
-
-        let size_expr = if auto_resize {
-            quote!({
-                let text = __field.as_ref();
-                let mut lines: usize = 1;
-                for ch in text.chars() {
-                    if ch == '\n' {
-                        lines += 1;
-                    }
-                }
-                let height = ui.text_line_height_with_spacing() * (lines as f32);
-                [0.0, height]
-            })
-        } else if let Some(lines) = lines_expr.clone() {
-            quote!({
-                let height = ui.text_line_height_with_spacing() * (#lines as f32);
-                [0.0, height]
-            })
-        } else {
-            quote!([0.0, 0.0])
-        };
-
-        quote! {
-            {
-                #width_prefix
-                let size: [f32; 2] = #size_expr;
-                let mut builder = ui.input_text_multiline_imstr(#label, __field, size);
-                #ro_stmt
-                __changed |= builder.build();
+            "checkbox" => quote!(::dear_imgui_reflect::BoolStyle::Checkbox),
+            "button" => quote!(::dear_imgui_reflect::BoolStyle::Button),
+            "dropdown" => quote!(::dear_imgui_reflect::BoolStyle::Dropdown),
+            "radio" => quote!(::dear_imgui_reflect::BoolStyle::Radio),
+            _ => {
+                return Err(Error::new(
+                    literal.span(),
+                    "imgui(bool_style) must be \"checkbox\", \"button\", \"dropdown\" or \"radio\"",
+                ));
             }
-        }
-    } else if hint_str.is_some() || read_only {
-        let hint = hint_str.clone();
-        let ro = read_only;
-        let hint_stmt = if let Some(h) = hint {
-            quote! { builder = builder.hint(::std::string::String::from(#h)); }
-        } else {
-            quote! {}
-        };
-        let ro_stmt = if ro {
-            quote! { builder = builder.read_only(true); }
-        } else {
-            quote! {}
-        };
+        })
+    } else {
+        None
+    };
+    let style = option_tokens(style);
+    let true_text = option_tokens(attrs.true_text.as_ref());
+    let false_text = option_tokens(attrs.false_text.as_ref());
+    Ok(quote_spanned! {Span::mixed_site()=>
+        ::dear_imgui_reflect::__private::render_bool(
+            __dear_imgui_reflect_inspector,
+            #label,
+            #value,
+            __dear_imgui_reflect_member,
+            #segment,
+            #style,
+            [#false_text, #true_text],
+        )
+    })
+}
 
-        quote! {
-            {
-                #width_prefix
-                let mut builder = ui.input_text_imstr(#label, __field);
-                #hint_stmt
-                #ro_stmt
-                __changed |= builder.build();
+fn render_text(
+    attrs: &TextAttrs,
+    ty: &Type,
+    label: &LitStr,
+    value: &TokenStream,
+) -> Result<TokenStream> {
+    let error = |message| Error::new_spanned(ty, message);
+    if attrs.auto_resize && attrs.min_width.is_some() {
+        return Err(error(
+            "imgui(auto_resize) cannot be combined with min_width",
+        ));
+    }
+    if attrs.auto_resize && attrs.lines.is_some() {
+        return Err(error("imgui(auto_resize) cannot be combined with lines"));
+    }
+    if !attrs.multiline && (attrs.auto_resize || attrs.lines.is_some()) {
+        return Err(error("imgui(auto_resize, lines) require multiline"));
+    }
+    if attrs.multiline && attrs.hint.is_some() {
+        return Err(error("imgui(hint) cannot be combined with multiline"));
+    }
+    if attrs.display_only && (attrs.multiline || attrs.hint.is_some() || attrs.min_width.is_some())
+    {
+        return Err(error(
+            "imgui(display_only) cannot be combined with text input attributes",
+        ));
+    }
+
+    let widget = quote!(::dear_imgui_reflect::__private::TextWidget);
+    let widget = if attrs.display_only {
+        quote!(#widget::Display)
+    } else if attrs.multiline {
+        let lines = option_tokens(attrs.lines.as_ref().map(|lines| quote!((#lines) as f32)));
+        let auto_resize = attrs.auto_resize;
+        quote!(#widget::Multiline { lines: #lines, auto_resize: #auto_resize })
+    } else {
+        let hint = option_tokens(attrs.hint.as_ref());
+        quote!(#widget::Input { hint: #hint })
+    };
+    let width = option_tokens(
+        attrs
+            .min_width
+            .as_ref()
+            .map(|width| quote!((#width) as f32)),
+    );
+    Ok(quote_spanned! {Span::mixed_site()=> {
+        let __dear_imgui_reflect_widget = #widget;
+        let __dear_imgui_reflect_width = #width;
+        ::dear_imgui_reflect::__private::render_text(
+            __dear_imgui_reflect_inspector,
+            #label,
+            #value,
+            __dear_imgui_reflect_widget,
+            __dear_imgui_reflect_width,
+        )
+    }})
+}
+
+fn render_tuple(
+    attrs: &TupleAttrs,
+    key: &LitStr,
+    label: &LitStr,
+    value: &TokenStream,
+    tuple: &syn::TypeTuple,
+    typed: bool,
+) -> Result<TokenStream> {
+    let len = tuple.elems.len();
+    let arms = (0..len).map(|index| {
+        let element_label = LitStr::new(&format!("##{index}"), label.span());
+        let element_key = LitStr::new(&format!("{}[{index}]", key.value()), key.span());
+        let element_index = Index::from(index);
+        let element_value = quote_spanned! {Span::mixed_site()=>
+            &mut __dear_imgui_reflect_tuple.#element_index
+        };
+        let body = render_value(&element_label, &element_value);
+        let render = with_member(&element_key, typed, false, &body);
+        quote!(#index => #render,)
+    });
+
+    let render_mode = if let Some(style) = &attrs.render {
+        let mode = match style.value().as_str() {
+            "line" if attrs.columns.is_some() || attrs.min_width.is_some() => {
+                return Err(Error::new(
+                    style.span(),
+                    "imgui tuple_columns and tuple_min_width do not apply in line mode",
+                ));
             }
+            "line" => quote!(::dear_imgui_reflect::TupleRenderMode::Line),
+            "grid" => quote!(::dear_imgui_reflect::TupleRenderMode::Grid),
+            _ => {
+                return Err(Error::new(
+                    style.span(),
+                    "imgui(tuple_render) must be \"line\" or \"grid\"",
+                ));
+            }
+        };
+        quote_spanned! {Span::mixed_site()=> __dear_imgui_reflect_tuple_settings.render_mode = #mode; }
+    } else {
+        TokenStream::new()
+    };
+    let dropdown = attrs.dropdown.then(|| {
+        quote_spanned! {Span::mixed_site()=>
+            __dear_imgui_reflect_tuple_settings.dropdown = true;
+        }
+    });
+    let columns = attrs.columns.as_ref().map(|columns| {
+        quote_spanned! {Span::mixed_site()=>
+            __dear_imgui_reflect_tuple_settings.columns = (#columns) as usize;
+        }
+    });
+    let width = attrs.min_width.as_ref().map(|width| quote_spanned! {Span::mixed_site()=>
+        __dear_imgui_reflect_tuple_settings.min_width = ::core::option::Option::Some((#width) as f32);
+    });
+    let settings = if attrs.has_attrs() {
+        quote_spanned! {Span::mixed_site()=>
+            let mut __dear_imgui_reflect_tuple_settings = __dear_imgui_reflect_tuple_settings.clone();
+            #render_mode
+            #dropdown
+            #columns
+            #width
+            let __dear_imgui_reflect_tuple_settings = &__dear_imgui_reflect_tuple_settings;
         }
     } else {
-        quote! {
-            __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                inspector,
-                #label,
-                __field,
-            );
-        }
+        TokenStream::new()
     };
 
-    Ok(tokens)
+    Ok(quote_spanned! {Span::mixed_site()=> {
+        let __dear_imgui_reflect_tuple_settings = __dear_imgui_reflect_member
+            .and_then(|__dear_imgui_reflect_member| __dear_imgui_reflect_member.tuples.as_ref())
+            .unwrap_or_else(|| __dear_imgui_reflect_inspector.settings().tuples());
+        #settings
+        let __dear_imgui_reflect_tuple = #value;
+        ::dear_imgui_reflect::imgui_tuple_body(
+            __dear_imgui_reflect_inspector,
+            #label,
+            #len,
+            __dear_imgui_reflect_tuple_settings,
+            |__dear_imgui_reflect_inspector, __dear_imgui_reflect_index| {
+                match __dear_imgui_reflect_index {
+                    #(#arms)*
+                    _ => false,
+                }
+            },
+        )
+    }})
 }

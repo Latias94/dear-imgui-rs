@@ -177,6 +177,20 @@ fn set_framebuffer_srgb(gl: &Context, enabled: bool) {
     }
 }
 
+pub(crate) type BindProgramPipeline = unsafe extern "system" fn(u32);
+
+fn supports_program_pipeline(gl: &Context) -> bool {
+    let version = gl.version();
+    let extensions = gl.supported_extensions();
+    if version.is_embedded {
+        (version.major, version.minor) >= (3, 1)
+            || extensions.contains("GL_EXT_separate_shader_objects")
+    } else {
+        (version.major, version.minor) >= (4, 1)
+            || extensions.contains("GL_ARB_separate_shader_objects")
+    }
+}
+
 /// OpenGL state backup for proper state restoration
 #[derive(Clone, Default)]
 struct GlStateBackup {
@@ -206,8 +220,9 @@ struct GlStateBackup {
     active_texture: u32,
     texture_2d_binding_unit_0: Option<GlTexture>,
 
-    // Shader program
+    // Shader program and optional separable program pipeline
     current_program: Option<GlProgram>,
+    program_pipeline: Option<(BindProgramPipeline, u32)>,
 
     // Other state
     cull_face_enabled: bool,
@@ -232,6 +247,7 @@ impl GlStateBackup {
         gl_version: GlVersion,
         separate_polygon_modes: bool,
         supports_sampler_objects: bool,
+        bind_program_pipeline: Option<BindProgramPipeline>,
     ) {
         unsafe {
             // Blend state
@@ -273,8 +289,16 @@ impl GlStateBackup {
             }
             gl.active_texture(self.active_texture);
 
-            // Shader program
+            // Shader program and separable program pipeline
             self.current_program = gl.get_parameter_program(glow::CURRENT_PROGRAM);
+            self.program_pipeline = bind_program_pipeline
+                .filter(|_| supports_program_pipeline(gl))
+                .map(|bind| {
+                    (
+                        bind,
+                        gl.get_parameter_i32(glow::PROGRAM_PIPELINE_BINDING) as u32,
+                    )
+                });
 
             // Other state
             self.cull_face_enabled = gl.is_enabled(glow::CULL_FACE);
@@ -373,6 +397,9 @@ impl GlStateBackup {
             {
                 gl.use_program(self.current_program);
             }
+            if let Some((bind, pipeline)) = self.program_pipeline {
+                bind(pipeline);
+            }
 
             // Restore other state
             if self.cull_face_enabled {
@@ -428,6 +455,7 @@ impl<'a> GlStateGuard<'a> {
         gl_version: GlVersion,
         separate_polygon_modes: bool,
         supports_sampler_objects: bool,
+        bind_program_pipeline: Option<BindProgramPipeline>,
     ) -> Self {
         let mut backup = GlStateBackup::default();
         backup.backup(
@@ -435,6 +463,7 @@ impl<'a> GlStateGuard<'a> {
             gl_version,
             separate_polygon_modes,
             supports_sampler_objects,
+            bind_program_pipeline,
         );
         Self {
             gl,
@@ -460,6 +489,7 @@ impl Drop for GlStateGuard<'_> {
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
+    use std::ffi::CStr;
     use std::sync::Mutex;
 
     use glow::HasContext;
@@ -479,6 +509,9 @@ mod tests {
     thread_local! {
         static FRAMEBUFFER_SRGB_ENABLED: Cell<bool> = const { Cell::new(false) };
         static GL_EVENTS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+        static PIPELINE_BINDING: Cell<u32> = const { Cell::new(0) };
+        static PIPELINE_QUERIES: Cell<u32> = const { Cell::new(0) };
+        static STATEFUL_GL_VERSION: Cell<&'static CStr> = const { Cell::new(c"4.1") };
     }
 
     unsafe extern "system" fn get_string(_name: u32) -> *const u8 {
@@ -620,6 +653,7 @@ mod tests {
     }
 
     static STATEFUL_GL: Mutex<StatefulGl> = Mutex::new(StatefulGl::ORIGINAL);
+    static STATEFUL_GL_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     unsafe extern "system" fn stateful_get_integer(name: u32, value: *mut i32) {
         if value.is_null() {
@@ -649,6 +683,10 @@ mod tests {
                 *value = state.texture_bindings[state.active_unit_index()] as i32
             },
             glow::SAMPLER_BINDING => unsafe { *value = state.sampler_binding_unit_0 as i32 },
+            glow::PROGRAM_PIPELINE_BINDING => unsafe {
+                PIPELINE_QUERIES.set(PIPELINE_QUERIES.get() + 1);
+                *value = PIPELINE_BINDING.get() as i32;
+            },
             _ => unsafe { *value = 0 },
         }
     }
@@ -710,6 +748,10 @@ mod tests {
         STATEFUL_GL.lock().unwrap().scissor_box = [x, y, width, height];
     }
 
+    unsafe extern "system" fn stateful_bind_program_pipeline(pipeline: u32) {
+        PIPELINE_BINDING.set(pipeline);
+    }
+
     unsafe extern "system" fn noop_blend_func_separate(_: u32, _: u32, _: u32, _: u32) {}
     unsafe extern "system" fn noop_blend_equation_separate(_: u32, _: u32) {}
     unsafe extern "system" fn noop_viewport(_: i32, _: i32, _: i32, _: i32) {}
@@ -718,12 +760,17 @@ mod tests {
     unsafe extern "system" fn noop_use_program(_: u32) {}
     unsafe extern "system" fn noop_polygon_mode(_: u32, _: u32) {}
 
-    fn stateful_fake_gl() -> glow::Context {
+    unsafe extern "system" fn stateful_get_string(_name: u32) -> *const u8 {
+        STATEFUL_GL_VERSION.get().as_ptr().cast()
+    }
+
+    fn stateful_fake_gl(version: &'static CStr) -> glow::Context {
         *STATEFUL_GL.lock().unwrap() = StatefulGl::ORIGINAL;
+        STATEFUL_GL_VERSION.set(version);
         unsafe {
             glow::Context::from_loader_function(|name| {
                 match name {
-                    "glGetString" => get_string as *const (),
+                    "glGetString" => stateful_get_string as *const (),
                     "glGetStringi" => get_string_i as *const (),
                     "glGetIntegerv" => stateful_get_integer as *const (),
                     "glGetFloatv" => stateful_get_float as *const (),
@@ -753,15 +800,20 @@ mod tests {
 
     #[test]
     fn gl_state_guard_restores_unit_zero_sampler_and_clear_state_after_panic() {
-        let gl = stateful_fake_gl();
-        let version = GlVersion {
-            major: 3,
-            minor: 3,
-            is_es: false,
-        };
+        let _test_lock = STATEFUL_GL_TEST_LOCK.lock().unwrap();
+        let gl = stateful_fake_gl(c"4.1");
+        let version = GlVersion::read(&gl);
+        PIPELINE_BINDING.set(23);
+        PIPELINE_QUERIES.set(0);
 
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _guard = GlStateGuard::capture(&gl, version, false, true);
+            let _guard = GlStateGuard::capture(
+                &gl,
+                version,
+                false,
+                true,
+                Some(stateful_bind_program_pipeline),
+            );
             unsafe {
                 gl.active_texture(glow::TEXTURE0);
                 gl.bind_texture(
@@ -773,12 +825,38 @@ mod tests {
                 gl.scissor(0, 0, 1, 1);
                 gl.clear_color(1.0, 1.0, 1.0, 1.0);
                 gl.color_mask(true, true, true, true);
+                stateful_bind_program_pipeline(99);
             }
             panic!("injected render panic");
         }));
 
         assert!(panic.is_err());
         assert_eq!(*STATEFUL_GL.lock().unwrap(), StatefulGl::ORIGINAL);
+        assert_eq!(PIPELINE_BINDING.get(), 23);
+        assert_eq!(PIPELINE_QUERIES.get(), 1);
+    }
+
+    #[test]
+    fn gl_state_guard_captures_pipeline_only_with_context_and_loader_support() {
+        let _test_lock = STATEFUL_GL_TEST_LOCK.lock().unwrap();
+        let bind = Some(stateful_bind_program_pipeline as super::BindProgramPipeline);
+        for (version, binding_function, expected_binding, queries) in [
+            (c"4.0", bind, 99, 0),
+            (c"WebGL 2.0 (OpenGL ES 3.0)", bind, 99, 0),
+            (c"OpenGL ES 3.1", None, 99, 0),
+            (c"OpenGL ES 3.1", bind, 0, 1),
+        ] {
+            let gl = stateful_fake_gl(version);
+            PIPELINE_BINDING.set(0);
+            PIPELINE_QUERIES.set(0);
+            {
+                let _guard =
+                    GlStateGuard::capture(&gl, GlVersion::read(&gl), false, true, binding_function);
+                unsafe { stateful_bind_program_pipeline(99) };
+            }
+            assert_eq!(PIPELINE_BINDING.get(), expected_binding, "{version:?}");
+            assert_eq!(PIPELINE_QUERIES.get(), queries, "{version:?}");
+        }
     }
 
     #[test]

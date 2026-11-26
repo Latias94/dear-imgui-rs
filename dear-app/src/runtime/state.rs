@@ -371,7 +371,7 @@ pub(crate) struct UiState {
     #[cfg(feature = "implot")]
     pub(crate) implot: Option<implot::PlotContext>,
     #[cfg(feature = "imnodes")]
-    pub(crate) imnodes: Option<imnodes::Context>,
+    pub(crate) imnodes: Option<imnodes::ImNodesContext>,
     #[cfg(feature = "implot3d")]
     pub(crate) implot3d: Option<implot3d::Plot3DContext>,
     pub(crate) docking: DockingController,
@@ -440,7 +440,7 @@ impl UiState {
         let imnodes = config
             .addons
             .with_imnodes
-            .then(|| imnodes::Context::create(&context));
+            .then(|| imnodes::ImNodesContext::create(&context));
         #[cfg(feature = "implot3d")]
         let implot3d = config
             .addons

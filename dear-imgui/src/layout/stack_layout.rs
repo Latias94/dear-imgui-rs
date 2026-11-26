@@ -91,11 +91,41 @@ impl From<Id> for StackLayoutId<'_> {
 }
 
 impl Ui {
+    fn begin_stack_layout(
+        &self,
+        id: StackLayoutId<'_>,
+        size: [f32; 2],
+        align: f32,
+        caller: &'static str,
+        begin: unsafe fn(sys::ImGuiID, sys::ImVec2, f32),
+    ) {
+        assert_finite_vec2(caller, "size", size);
+        assert!(align.is_finite(), "{caller} align must be finite");
+        self.run_with_bound_context(|| unsafe {
+            let window = (*self.context_raw()).CurrentWindow;
+            assert!(!window.is_null(), "{caller} requires a current window");
+            let id = match id {
+                StackLayoutId::Str(value) => self.with_scratch_buffer(|scratch| {
+                    let label = scratch.scratch_txt(value);
+                    sys::ImGuiWindow_GetID_Str(window, label, std::ptr::null())
+                }),
+                StackLayoutId::Ptr(value) => sys::ImGuiWindow_GetID_Ptr(window, value),
+                StackLayoutId::Int(value) => {
+                    sys::ImGuiWindow_GetID_Ptr(window, value as isize as *const c_void)
+                }
+                StackLayoutId::Raw(value) => value.raw(),
+            };
+            self.claim_stack_layout_id(window, id);
+            begin(id, sys::ImVec2::from(size), align);
+        });
+    }
+
     /// Starts a stack-layout horizontal group.
     ///
     /// This is a compatibility helper for examples and utilities that follow
     /// `imgui-node-editor`'s blueprint builder. It is backed by a local shim,
     /// because Dear ImGui itself does not ship `BeginHorizontal`.
+    /// Panics if the resolved ID has already been used in the current window and frame.
     #[doc(alias = "BeginHorizontal")]
     pub fn begin_horizontal_stack_layout<'ui, 'id>(
         &'ui self,
@@ -103,29 +133,13 @@ impl Ui {
         size: impl Into<[f32; 2]>,
         align: f32,
     ) -> HorizontalStackLayoutToken<'ui> {
-        let size = size.into();
-        assert_finite_vec2("Ui::begin_horizontal_stack_layout()", "size", size);
-        assert!(
-            align.is_finite(),
-            "Ui::begin_horizontal_stack_layout() align must be finite"
+        self.begin_stack_layout(
+            id.into(),
+            size.into(),
+            align,
+            "Ui::begin_horizontal_stack_layout()",
+            sys::ImGuiStack_BeginHorizontal_Id,
         );
-        let size = sys::ImVec2::from(size);
-        self.run_with_bound_context(|| unsafe {
-            match id.into() {
-                StackLayoutId::Str(value) => {
-                    sys::ImGuiStack_BeginHorizontal_Str(self.scratch_txt(value), size, align);
-                }
-                StackLayoutId::Ptr(value) => {
-                    sys::ImGuiStack_BeginHorizontal_Ptr(value, size, align);
-                }
-                StackLayoutId::Int(value) => {
-                    sys::ImGuiStack_BeginHorizontal_Int(value, size, align);
-                }
-                StackLayoutId::Raw(value) => {
-                    sys::ImGuiStack_BeginHorizontal_Id(value.raw(), size, align);
-                }
-            }
-        });
         HorizontalStackLayoutToken::new(self)
     }
 
@@ -177,6 +191,7 @@ impl Ui {
     /// This is a compatibility helper for examples and utilities that follow
     /// `imgui-node-editor`'s blueprint builder. It is backed by a local shim,
     /// because Dear ImGui itself does not ship `BeginVertical`.
+    /// Panics if the resolved ID has already been used in the current window and frame.
     #[doc(alias = "BeginVertical")]
     pub fn begin_vertical_stack_layout<'ui, 'id>(
         &'ui self,
@@ -184,29 +199,13 @@ impl Ui {
         size: impl Into<[f32; 2]>,
         align: f32,
     ) -> VerticalStackLayoutToken<'ui> {
-        let size = size.into();
-        assert_finite_vec2("Ui::begin_vertical_stack_layout()", "size", size);
-        assert!(
-            align.is_finite(),
-            "Ui::begin_vertical_stack_layout() align must be finite"
+        self.begin_stack_layout(
+            id.into(),
+            size.into(),
+            align,
+            "Ui::begin_vertical_stack_layout()",
+            sys::ImGuiStack_BeginVertical_Id,
         );
-        let size = sys::ImVec2::from(size);
-        self.run_with_bound_context(|| unsafe {
-            match id.into() {
-                StackLayoutId::Str(value) => {
-                    sys::ImGuiStack_BeginVertical_Str(self.scratch_txt(value), size, align);
-                }
-                StackLayoutId::Ptr(value) => {
-                    sys::ImGuiStack_BeginVertical_Ptr(value, size, align);
-                }
-                StackLayoutId::Int(value) => {
-                    sys::ImGuiStack_BeginVertical_Int(value, size, align);
-                }
-                StackLayoutId::Raw(value) => {
-                    sys::ImGuiStack_BeginVertical_Id(value.raw(), size, align);
-                }
-            }
-        });
         VerticalStackLayoutToken::new(self)
     }
 
@@ -258,6 +257,7 @@ impl Ui {
     /// `weight <= 0.0` reserves only spacing. `spacing < 0.0` uses the current
     /// style item spacing along the layout axis, matching the upstream stack
     /// layout extension semantics.
+    /// Panics if the current window has no active, unsuspended stack layout.
     #[doc(alias = "Spring")]
     pub fn stack_layout_spring(&self, weight: f32, spacing: f32) {
         assert!(
@@ -268,7 +268,10 @@ impl Ui {
             spacing.is_finite(),
             "Ui::stack_layout_spring() spacing must be finite"
         );
-        self.run_with_bound_context(|| unsafe { sys::ImGuiStack_Spring(weight, spacing) });
+        self.run_with_bound_context(|| {
+            self.assert_stack_layout_active();
+            unsafe { sys::ImGuiStack_Spring(weight, spacing) };
+        });
     }
 
     /// Inserts a spring into the current stack layout.

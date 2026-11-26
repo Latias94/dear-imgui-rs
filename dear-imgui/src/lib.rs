@@ -228,31 +228,11 @@
 //! For draw-list helpers you can continue to pass `[f32;4]` or use `draw::ImColor32` which
 //! represents the same ABGR packed value in a convenient wrapper.
 //!
-//! ## Text Input (String vs ImString)
+//! ## Text input
 //!
-//! This crate offers two ways to edit text:
-//! - String-backed builders: `ui.input_text(label, &mut String)` and
-//!   `ui.input_text_multiline(label, &mut String, size)`.
-//!   - Internally stage a growable UTF-8 buffer for the call and copy the
-//!     edited bytes back into your `String` afterwards.
-//!   - For very large fields, use `.capacity_hint(bytes)` on the builder to
-//!     reduce reallocations, e.g.:
-//!     ```no_run
-//!     # use dear_imgui_rs::*;
-//!     # fn demo(ui: &Ui, big: &mut String) {
-//!     ui.input_text("Big", big)
-//!         .capacity_hint(64 * 1024)
-//!         .build();
-//!     # }
-//!     ```
-//! - ImString-backed builders: `ui.input_text_imstr(label, &mut ImString)` and
-//!   `ui.input_text_multiline_imstr(label, &mut ImString, size)`.
-//!   - Zero‑copy: pass your `ImString` buffer directly to ImGui.
-//!   - Uses ImGui's `CallbackResize` under the hood to grow the same buffer the
-//!     widget edits, without copying before or after the call.
-//!
-//! Choose String for convenience (especially for small/medium inputs). Prefer
-//! ImString when you want to avoid copies for large or frequently edited text.
+//! Use `ui.input_text(label, &mut String)` or `ui.input_text_multiline(label, &mut String, size)`.
+//! The widget stages a growable UTF-8 buffer and writes the edited text back to the `String`.
+//! Use `.capacity_hint(bytes)` to reduce reallocations when editing large fields.
 
 //! ## Low-level Draw APIs
 //!
@@ -397,12 +377,14 @@ mod dock_layout;
 mod dock_space;
 mod draw;
 mod error;
+pub mod ffi;
 pub mod fonts;
 mod ini_settings;
 pub mod input;
 pub mod internal;
 mod io;
 mod list_clipper;
+pub mod math;
 mod numeric_format;
 pub mod platform_io;
 pub mod render;

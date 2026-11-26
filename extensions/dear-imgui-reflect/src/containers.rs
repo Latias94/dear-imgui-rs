@@ -21,3 +21,12 @@ pub use self::vec::imgui_vec_with_settings;
 pub(super) fn escape_field_path_key(key: &str) -> String {
     key.replace('\\', "\\\\").replace('"', "\\\"")
 }
+
+fn container_header(label: &str, len: usize) -> String {
+    let visible = label.split("##").next().unwrap_or_default();
+    if visible.is_empty() {
+        format!("[{len}]")
+    } else {
+        format!("{visible} [{len}]")
+    }
+}

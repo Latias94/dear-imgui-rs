@@ -988,7 +988,9 @@ impl RendererRuntime {
     ) -> Result<PreparedRendererFrame<'ctx>, Box<dyn std::error::Error>> {
         Ok(match self {
             Self::Single(renderer) => {
-                let pending_frame = frame.try_render(renderer.renderer_consumer()?)?;
+                let pending_frame = frame
+                    .try_render(renderer.renderer_consumer()?)
+                    .map_err(|(_frame, error)| error)?;
                 let (frame, retirement) = renderer.prepare_frame(pending_frame)?;
                 PreparedRendererFrame::Single { frame, retirement }
             }

@@ -23,7 +23,7 @@ mod tests;
 pub use config::CaptureFlags;
 pub use config::{CaptureOutput, InputMode, RunFlags, RunSpeed, TestGroup, VerboseLevel};
 pub use counts::{ScriptCount, ScriptLimit};
-pub use engine::TestEngine;
+pub use engine::{TestEngine, TestEngineUiExt};
 pub use error::{TestEngineError, TestEngineResult, TestEngineStatus};
 pub use frame_driver::{
     CaptureProviderError, FrameDriveOutcome, FrameDriverError, FrameDriverPhase, MainRenderOutcome,

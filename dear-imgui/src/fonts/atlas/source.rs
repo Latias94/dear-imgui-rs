@@ -14,7 +14,7 @@ use super::validated::StbTrueTypeFontData;
 /// External font parsers used by Dear ImGui do not receive a reliable input
 /// boundary for every format. Consequently, raw, compressed, and custom-loader
 /// sources can only be created through the `unsafe` constructors on this type.
-/// The embedded defaults and [`StbTrueTypeFontData`] path are safe.
+/// The embedded defaults, [`Self::ttf_bytes`], and [`StbTrueTypeFontData`] path are safe.
 #[derive(Clone, Debug)]
 pub struct FontSource<'a> {
     pub(super) kind: FontSourceKind<'a>,
@@ -28,6 +28,7 @@ pub(super) enum FontSourceKind<'a> {
     DefaultVector,
     DefaultBitmap,
     StbTrueType(StbTrueTypeFontData),
+    TtfBytes { data: &'a [u8], font_index: u32 },
     TtfData(&'a [u8]),
     CompressedTtfData(&'a [u8]),
     CompressedTtfBase85(&'a str),
@@ -106,7 +107,51 @@ impl<'a> FontSource<'a> {
         }
     }
 
+    /// Creates a checked memory font source using the atlas's built-in font loader.
+    ///
+    /// [`crate::FontAtlas::try_add_font`] validates the selected face and copies the bytes into
+    /// atlas-owned memory. The slice can be dropped after the call returns. Per-source loader
+    /// overrides are not allowed. A new font without an explicit reference size uses a 13 px
+    /// legacy fallback and still supports baking at other runtime sizes.
+    ///
+    /// With the `freetype` feature on native targets, an atlas using the built-in FreeType
+    /// loader accepts outline-based TTF, OTF and TTC faces, including supported outline
+    /// color glyphs with [`crate::FontLoaderFlags::LOAD_COLOR`]. OpenType SVG and embedded
+    /// bitmap tables are not accepted by this path. FreeType is a native parser, not a sandbox.
+    ///
+    /// The built-in stb_truetype path accepts only the standalone TrueType subset described by
+    /// [`StbTrueTypeFontData`]. On wasm32 only this path is available, and
+    /// [`crate::Context::font_atlas`] still requires `wasm-font-atlas-experimental`.
+    pub fn ttf_bytes(data: &'a [u8]) -> Self {
+        Self {
+            kind: FontSourceKind::TtfBytes {
+                data,
+                font_index: 0,
+            },
+            size_pixels: None,
+            config: None,
+        }
+    }
+
+    /// Selects the zero-based face for a [`Self::ttf_bytes`] source.
+    ///
+    /// Nonzero indices require a font collection and the native FreeType loader. This is a
+    /// face index, not a FreeType named-instance selector.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this source was not created with [`Self::ttf_bytes`].
+    pub fn font_index(mut self, index: u32) -> Self {
+        match &mut self.kind {
+            FontSourceKind::TtfBytes { font_index, .. } => *font_index = index,
+            _ => panic!("FontSource::font_index() requires a FontSource::ttf_bytes() source"),
+        }
+        self
+    }
+
     /// Creates a TTF/OTF memory source with dynamic sizing.
+    ///
+    /// Prefer [`Self::ttf_bytes`] for checked font loading.
     ///
     /// # Safety
     ///

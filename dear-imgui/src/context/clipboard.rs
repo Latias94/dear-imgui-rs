@@ -1,4 +1,5 @@
 use crate::clipboard::{ClipboardBackend, ClipboardContext};
+use crate::ffi::RawBox;
 use crate::sys;
 
 use super::Context;
@@ -32,12 +33,8 @@ impl Context {
     /// Interior NUL bytes are sanitized to `?` to match other scratch-string helpers.
     #[doc(alias = "SetClipboardText")]
     pub fn set_clipboard_text(&self, text: impl AsRef<str>) {
-        let _guard = CTX_MUTEX.lock();
-        unsafe {
-            with_bound_context(self.raw, || {
-                sys::igSetClipboardText(self.ui.scratch_txt(text.as_ref()));
-            });
-        }
+        self.ui
+            .with_scratch_txt(text, |text| unsafe { sys::igSetClipboardText(text) });
     }
 
     /// Sets the clipboard backend used for native clipboard operations.
@@ -46,10 +43,7 @@ impl Context {
     pub fn set_clipboard_backend<T: ClipboardBackend>(&mut self, backend: T) {
         let _guard = CTX_MUTEX.lock();
 
-        let clipboard_ctx = Box::new(ClipboardContext::new(
-            backend,
-            self.ui.scratch_buffers.clone(),
-        ));
+        let clipboard_ctx = RawBox::new(ClipboardContext::new(backend));
 
         #[cfg(not(target_arch = "wasm32"))]
         unsafe {
@@ -59,10 +53,10 @@ impl Context {
             }
             (*platform_io).Platform_SetClipboardTextFn = Some(crate::clipboard::set_clipboard_text);
             (*platform_io).Platform_GetClipboardTextFn = Some(crate::clipboard::get_clipboard_text);
-            (*platform_io).Platform_ClipboardUserData =
-                clipboard_ctx.as_ref() as *const ClipboardContext as *mut _;
+            (*platform_io).Platform_ClipboardUserData = clipboard_ctx.as_ptr().cast();
         }
 
-        self.clipboard_ctx = clipboard_ctx;
+        let previous = std::mem::replace(&mut self.clipboard_ctx, clipboard_ctx);
+        drop(previous);
     }
 }

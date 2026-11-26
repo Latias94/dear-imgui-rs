@@ -37,6 +37,50 @@ fn clipboard_helpers_work_with_backend() {
     assert_eq!(shared.lock().unwrap().as_deref(), Some("hello"));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn moving_a_context_preserves_published_strings_and_clipboard() {
+    fn configured_context() -> imgui::Context {
+        let mut context = imgui::Context::create();
+        context
+            .set_ini_filename(Some("moved-settings.ini"))
+            .unwrap();
+        context.set_log_filename(Some("moved-log.txt")).unwrap();
+        context.set_platform_name(Some("moved platform")).unwrap();
+        context.set_renderer_name(Some("moved renderer")).unwrap();
+        context.set_clipboard_backend(TestClipboardBackend {
+            value: Arc::new(Mutex::new(Some("initial".into()))),
+        });
+        context
+    }
+
+    let _guard = test_guard();
+    let mut contexts = Vec::with_capacity(1);
+    contexts.push(configured_context());
+    let mut moved = Box::new(contexts.pop().unwrap());
+    let read_native = |context: &imgui::Context| {
+        let io = unsafe { imgui::sys::igGetIO_ContextPtr(context.as_raw()) };
+        [
+            (unsafe { (*io).IniFilename }, c"moved-settings.ini"),
+            (unsafe { (*io).LogFilename }, c"moved-log.txt"),
+            (unsafe { (*io).BackendPlatformName }, c"moved platform"),
+            (unsafe { (*io).BackendRendererName }, c"moved renderer"),
+        ]
+        .map(|(ptr, expected)| {
+            assert_eq!(unsafe { CStr::from_ptr(ptr) }, expected);
+            ptr
+        })
+    };
+    let published = read_native(&moved);
+    assert_eq!(moved.clipboard_text().as_deref(), Some("initial"));
+    let moved_again = *moved;
+    assert_eq!(read_native(&moved_again), published);
+    moved_again.set_clipboard_text("updated");
+    assert_eq!(moved_again.clipboard_text().as_deref(), Some("updated"));
+    moved = Box::new(moved_again);
+    assert_eq!(read_native(&moved), published);
+}
+
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn clipboard_setter_owns_the_text_passed_to_user_code() {
@@ -94,7 +138,7 @@ fn clipboard_callbacks_use_passed_context_not_current_context() {
             .expect("clipboard getter should be installed");
     }
 
-    let suspended_a = ctx_a.suspend_or_panic();
+    let suspended_a = ctx_a;
 
     let mut ctx_b = imgui::Context::create();
     let shared_b = Arc::new(Mutex::new(Some("b".to_owned())));
@@ -137,7 +181,7 @@ fn clipboard_reentry_into_different_context_is_allowed() {
             .expect("clipboard getter should be installed")
     };
 
-    let suspended_a = ctx_a.suspend_or_panic();
+    let suspended_a = ctx_a;
 
     struct CrossContextReentrantBackend {
         other_ctx: *mut imgui::sys::ImGuiContext,

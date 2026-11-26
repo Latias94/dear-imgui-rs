@@ -61,10 +61,10 @@ impl<'ui, 'p> ColorPicker3<'ui, 'p> {
     pub fn build(self) -> bool {
         self.flags.validate("ColorPicker3::build()");
         assert_finite_color3("ColorPicker3::build()", "color", &*self.color);
-        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igColorPicker3(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32)
-        })
+        self.ui
+            .with_scratch_txt(self.label.as_ref(), |label_ptr| unsafe {
+                sys::igColorPicker3(label_ptr, self.color.as_mut_ptr(), self.flags.bits() as i32)
+            })
     }
 }
 
@@ -134,19 +134,19 @@ impl<'ui, 'p> ColorPicker4<'ui, 'p> {
         if let Some(ref_color) = &self.ref_color {
             assert_finite_color4("ColorPicker4::build()", "reference color", ref_color);
         }
-        let label_ptr = self.ui.scratch_txt(self.label.as_ref());
         let ref_color_ptr = self
             .ref_color
             .as_ref()
             .map_or(std::ptr::null(), |c| c.as_ptr());
 
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igColorPicker4(
-                label_ptr,
-                self.color.as_mut_ptr(),
-                self.flags.bits() as i32,
-                ref_color_ptr,
-            )
-        })
+        self.ui
+            .with_scratch_txt(self.label.as_ref(), |label_ptr| unsafe {
+                sys::igColorPicker4(
+                    label_ptr,
+                    self.color.as_mut_ptr(),
+                    self.flags.bits() as i32,
+                    ref_color_ptr,
+                )
+            })
     }
 }

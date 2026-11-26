@@ -1,6 +1,7 @@
 use super::{ImNodesScope, NodeEditor};
 use crate::{PinId, PinShape, sys};
 use dear_imgui_rs::{NativeWindowScope, Ui};
+use std::cell::Cell;
 use std::collections::btree_map::Entry;
 
 /// A node borrowed for the duration of [`NodeEditor::node`].
@@ -15,15 +16,27 @@ use std::collections::btree_map::Entry;
 pub struct NodeToken<'a> {
     pub(super) editor: &'a NodeEditor<'a>,
     pub(super) host: &'a NativeWindowScope<'a>,
+    pub(super) title_submitted: Cell<bool>,
 }
 
 impl NodeToken<'_> {
+    /// Draws this node's title bar.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the title bar has already been submitted for this node.
     pub fn title_bar<R>(&self, draw: impl FnOnce() -> R) -> R {
         with_child(
             self.editor.ui,
             self.host,
             self.editor.frame.scope,
-            || unsafe { sys::imnodes_BeginNodeTitleBar() },
+            || {
+                assert!(
+                    !self.title_submitted.replace(true),
+                    "dear-imnodes: a node can submit its title bar only once"
+                );
+                unsafe { sys::imnodes_BeginNodeTitleBar() };
+            },
             sys::imnodes_EndNodeTitleBar,
             |_| draw(),
         )

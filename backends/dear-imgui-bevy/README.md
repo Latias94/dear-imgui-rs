@@ -139,6 +139,8 @@ The serial Context driver runs immediately after `PreUpdate` by default. Bevy in
 
 `ImguiContexts::promote_primary(context_id)` selects an existing idle Context as the primary input and fallback-window target. `replace_primary(context, config)` first admits a new Context and changes the primary pointer only after admission succeeds; the previous primary remains registered for explicit asynchronous removal. Neither operation silently moves pass ownership, docking settings, or native viewport ownership between Contexts.
 
+To transfer an existing `dear_imgui_rs::Context` to Bevy, call `ImguiAppExt::adopt_imgui_primary_context` before plugin installation or `ImguiContexts::insert_context` for an additional pass. Admission returns the owner on failure, including when it already has an open frame. The Bevy driver and `configure` temporarily bind their target and restore the previous binding. Registry mutations still require that none of that registry's UI passes are running.
+
 An App claims its `ImguiContexts` registry exactly once. Temporarily removing that non-send value from the World does not reopen admission; reinsert the same value before continuing or call terminal shutdown. This prevents two registries from sharing one set of private passes and backend resources. A retained registry becomes explicitly terminal after shutdown: `primary_id`, `ids`, and `contains` return `ImguiContextError::AppTerminated` instead of disguising that state as `None`, an empty iterator, or `false`.
 
 ### Fonts

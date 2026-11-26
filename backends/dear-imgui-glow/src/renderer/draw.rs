@@ -19,6 +19,9 @@ use crate::{
     texture::TextureRegistry,
 };
 
+const VERTEX_STRIDE: i32 = size_of::<DrawVert>() as i32;
+const VERTEX_COLOR_OFFSET: i32 = std::mem::offset_of!(DrawVert, col) as i32;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SamplerBinding {
     TextureOwned,
@@ -498,6 +501,7 @@ impl GlowRenderer {
             self.gl_version,
             self.has_separate_polygon_modes,
             self.has_sampler_object_support,
+            self.bind_program_pipeline,
         );
         let framebuffer_srgb = self
             .supports_framebuffer_srgb_control()
@@ -636,31 +640,34 @@ impl GlowRenderer {
             }
 
             // Bind vertex/index buffers and setup attributes for ImDrawVert
-            gl.bind_buffer(glow::ARRAY_BUFFER, self.vbo_handle);
             gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, self.ebo_handle);
             gl.enable_vertex_attrib_array(self.shaders.attrib_location_vtx_pos);
             gl.enable_vertex_attrib_array(self.shaders.attrib_location_vtx_uv);
             gl.enable_vertex_attrib_array(self.shaders.attrib_location_vtx_color);
+        }
+        self.set_vertex_attrib_pointers(gl, 0);
 
-            let pos_offset = std::mem::offset_of!(DrawVert, pos) as i32;
-            let uv_offset = std::mem::offset_of!(DrawVert, uv) as i32;
-            let color_offset = std::mem::offset_of!(DrawVert, col) as i32;
+        Ok(())
+    }
 
+    fn set_vertex_attrib_pointers(&self, gl: &Context, base_offset: i32) {
+        unsafe {
+            gl.bind_buffer(glow::ARRAY_BUFFER, self.vbo_handle);
             gl.vertex_attrib_pointer_f32(
                 self.shaders.attrib_location_vtx_pos,
                 2,
                 glow::FLOAT,
                 false,
-                size_of::<DrawVert>() as i32,
-                pos_offset,
+                VERTEX_STRIDE,
+                base_offset + std::mem::offset_of!(DrawVert, pos) as i32,
             );
             gl.vertex_attrib_pointer_f32(
                 self.shaders.attrib_location_vtx_uv,
                 2,
                 glow::FLOAT,
                 false,
-                size_of::<DrawVert>() as i32,
-                uv_offset,
+                VERTEX_STRIDE,
+                base_offset + std::mem::offset_of!(DrawVert, uv) as i32,
             );
             // Color attribute - our DrawVert uses u32 packed color, so we need to handle it as 4 bytes
             // The u32 is stored as RGBA in little-endian format, so we can treat it as 4 unsigned bytes
@@ -669,12 +676,10 @@ impl GlowRenderer {
                 4,
                 glow::UNSIGNED_BYTE,
                 true, // normalized = true, converts [0,255] to [0.0,1.0]
-                size_of::<DrawVert>() as i32,
-                color_offset,
+                VERTEX_STRIDE,
+                base_offset + VERTEX_COLOR_OFFSET,
             );
         }
-
-        Ok(())
     }
 
     /// Render all draw lists
@@ -689,6 +694,7 @@ impl GlowRenderer {
         render_state: &RendererRenderStateGuard<'_, GlowRenderStateStorage<'_>>,
     ) -> RenderResult<()> {
         let mut sampler_binding = SamplerBinding::reset(self.samplers.is_some());
+        let mut bound_vertex_byte_offset = Some(0);
 
         for draw_list in draw_data.draw_lists() {
             // Upload vertex/index buffers
@@ -708,7 +714,13 @@ impl GlowRenderer {
             for command in draw_list.commands() {
                 match command {
                     DrawCmd::Elements { count, cmd_params } => {
-                        self.render_elements(&scope, count, &cmd_params, sampler_binding)?;
+                        self.render_elements(
+                            &scope,
+                            count,
+                            &cmd_params,
+                            sampler_binding,
+                            &mut bound_vertex_byte_offset,
+                        )?;
                     }
                     DrawCmd::ResetRenderState => {
                         self.set_up_render_state(
@@ -719,6 +731,7 @@ impl GlowRenderer {
                             framebuffer_srgb,
                         )?;
                         sampler_binding = SamplerBinding::reset(self.samplers.is_some());
+                        bound_vertex_byte_offset = Some(0);
                     }
                     DrawCmd::SetSamplerLinear => {
                         if let Some(samplers) = &self.samplers {
@@ -740,6 +753,7 @@ impl GlowRenderer {
                     }
                     DrawCmd::RawCallback(callback) => {
                         unsafe { callback.invoke() };
+                        bound_vertex_byte_offset = None;
                         render_state
                             .validate()
                             .map_err(map_renderer_render_state_error)?;
@@ -806,6 +820,7 @@ impl GlowRenderer {
         count: usize,
         cmd_params: &DrawCmdParams,
         sampler_binding: SamplerBinding,
+        bound_vertex_byte_offset: &mut Option<i32>,
     ) -> RenderResult<()> {
         if count == 0 {
             return Ok(());
@@ -865,11 +880,24 @@ impl GlowRenderer {
                 value: cmd_params.vtx_offset,
             }
         })?;
-        if !self.gl_version.supports_vertex_offset() && vertex_offset != 0 {
+        let supports_base_vertex = self.gl_version.supports_vertex_offset();
+        let vertex_byte_offset = if self.gl_version.supports_vertex_offset_emulation() {
+            Some(
+                vertex_offset
+                    .checked_mul(VERTEX_STRIDE)
+                    .filter(|offset| *offset <= i32::MAX - VERTEX_COLOR_OFFSET)
+                    .ok_or(RenderError::DrawParameterOutOfRange {
+                        field: "vertex offset",
+                        value: cmd_params.vtx_offset,
+                    })?,
+            )
+        } else if !supports_base_vertex && vertex_offset != 0 {
             return Err(RenderError::VertexOffsetUnsupported {
                 offset: cmd_params.vtx_offset,
             });
-        }
+        } else {
+            None
+        };
 
         let Some(scissor) = project_scissor_rect(
             cmd_params.clip_rect,
@@ -907,7 +935,7 @@ impl GlowRenderer {
                 glow::UNSIGNED_INT
             };
 
-            if self.gl_version.supports_vertex_offset() {
+            if supports_base_vertex {
                 scope.gl.draw_elements_base_vertex(
                     glow::TRIANGLES,
                     draw_count,
@@ -916,6 +944,12 @@ impl GlowRenderer {
                     vertex_offset,
                 );
             } else {
+                if let Some(offset) = vertex_byte_offset
+                    && *bound_vertex_byte_offset != Some(offset)
+                {
+                    self.set_vertex_attrib_pointers(scope.gl, offset);
+                    *bound_vertex_byte_offset = Some(offset);
+                }
                 scope
                     .gl
                     .draw_elements(glow::TRIANGLES, draw_count, index_type, index_byte_offset);

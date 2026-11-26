@@ -1,4 +1,7 @@
-use crate::{GlBuffer, shaders::Shaders, texture::TextureRegistry, versions::GlVersion};
+use crate::{
+    GlBuffer, shaders::Shaders, state::BindProgramPipeline, texture::TextureRegistry,
+    versions::GlVersion,
+};
 use dear_imgui_rs::ContextBinding;
 use dear_imgui_rs::render::{SnapshotTextureId, SynchronousRendererConsumer};
 use std::collections::HashMap;
@@ -59,6 +62,7 @@ pub struct GlowRenderer {
     pub(super) clip_origin: GlowClipOrigin,
     pub(super) has_separate_polygon_modes: bool,
     pub(super) has_sampler_object_support: bool,
+    pub(super) bind_program_pipeline: Option<BindProgramPipeline>,
 
     // Resource management
     pub(super) gl_context: Option<std::rc::Rc<glow::Context>>, // None = externally managed
@@ -125,6 +129,24 @@ impl GlowRenderer {
     /// Returns whether the live context supports independent sampler objects.
     pub fn supports_sampler_objects(&self) -> bool {
         self.has_sampler_object_support
+    }
+
+    /// Supplies a native OpenGL binding function for preserving program pipeline state.
+    ///
+    /// Use `glBindProgramPipeline` for core or ARB support, or `glBindProgramPipelineEXT` for
+    /// an OpenGL ES context that exposes only `GL_EXT_separate_shader_objects`. Glow does not
+    /// expose this entry point. The renderer uses it only on contexts with pipeline support.
+    ///
+    /// # Safety
+    ///
+    /// `bind` must be the corresponding GL entry point from the application's context loader.
+    /// It must remain valid for all supported contexts used by this renderer, including viewports.
+    #[cfg(any(not(target_family = "wasm"), target_os = "emscripten"))]
+    pub unsafe fn set_bind_program_pipeline(
+        &mut self,
+        bind: Option<unsafe extern "system" fn(u32)>,
+    ) {
+        self.bind_program_pipeline = bind;
     }
 
     pub(super) fn device_objects_ready(&self) -> bool {

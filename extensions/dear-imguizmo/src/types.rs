@@ -167,30 +167,3 @@ pub struct Bounds {
     pub min: [f32; 3],
     pub max: [f32; 3],
 }
-
-/// Simple 3D vector adaptor for glam/mint/[f32;3]/tuples
-pub trait Vec3Like {
-    fn to_array(self) -> [f32; 3];
-}
-impl Vec3Like for [f32; 3] {
-    fn to_array(self) -> [f32; 3] {
-        self
-    }
-}
-impl Vec3Like for (f32, f32, f32) {
-    fn to_array(self) -> [f32; 3] {
-        [self.0, self.1, self.2]
-    }
-}
-#[cfg(feature = "glam")]
-impl Vec3Like for glam::Vec3 {
-    fn to_array(self) -> [f32; 3] {
-        [self.x, self.y, self.z]
-    }
-}
-#[cfg(feature = "mint")]
-impl Vec3Like for mint::Vector3<f32> {
-    fn to_array(self) -> [f32; 3] {
-        [self.x, self.y, self.z]
-    }
-}

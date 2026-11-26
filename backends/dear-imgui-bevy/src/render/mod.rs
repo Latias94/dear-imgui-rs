@@ -399,7 +399,7 @@ mod tests {
     fn driver_skips_teardown_during_device_recovery_and_frames_other_context() {
         struct RecoveryContextPass;
 
-        let mut app = App::new();
+        let mut app = crate::test_util::RenderTestApp::new();
         app.add_plugins(crate::test_util::render_extraction_plugin());
         app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
         app.add_plugins(crate::ImguiPlugin::default());
@@ -726,7 +726,7 @@ mod tests {
     #[test]
     fn context_teardown_waits_for_render_world_release_before_native_mutation() {
         let context = managed_context();
-        let mut owner = crate::context::ContextOwner::new(context.suspend_or_panic());
+        let mut owner = crate::context::ContextOwner::new(context);
         let releases = ImguiRendererReleases::default();
         let backend = crate::context::BackendAttachment {
             render_integration_installed: true,
@@ -738,7 +738,7 @@ mod tests {
         owner.commit_renderer_admission(&backend).unwrap();
         let renderer_texture = imgui::TextureId::new(0xCAFE);
         let texture = owner
-            .try_with_active_renderer_context(false, |context, consumer| {
+            .try_with_current_renderer_context(false, |context, consumer| {
                 let consumer = consumer.expect("renderer admission must install a consumer");
                 let texture = register_test_texture(context);
                 let snapshot = managed_snapshot(context, consumer, Some(texture));
@@ -758,7 +758,7 @@ mod tests {
             crate::context::ImguiContextRemovalPendingReason::RenderWorldReleasePending
         );
         owner
-            .try_with_active_renderer_context(false, |context, _| {
+            .try_with_current_renderer_context(false, |context, _| {
                 context
                     .with_texture(texture, |texture| {
                         assert_eq!(texture.status(), imgui::TextureStatus::OK);
@@ -782,16 +782,11 @@ mod tests {
             .try_detach_backend()
             .expect("acknowledged render-world release should allow teardown");
         assert_eq!(releases.len(), 0);
-        let mut context = owner.into_suspended();
-        context
-            .try_with_active(|context| {
-                context
-                    .with_texture(texture, |texture| {
-                        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
-                        assert!(texture.texture_id().is_null());
-                    })
-                    .unwrap();
-                Ok::<_, ()>(())
+        owner
+            .into_context()
+            .with_texture(texture, |texture| {
+                assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+                assert!(texture.texture_id().is_null());
             })
             .unwrap();
     }
@@ -808,11 +803,11 @@ mod tests {
         let make_owner = || {
             let context = managed_context();
             let context_id = context.id();
-            let mut owner = crate::context::ContextOwner::new(context.suspend_or_panic());
+            let mut owner = crate::context::ContextOwner::new(context);
             owner.preflight_renderer_admission(&backend).unwrap();
             owner.commit_renderer_admission(&backend).unwrap();
             let texture = owner
-                .try_with_active_renderer_context(false, |context, consumer| {
+                .try_with_current_renderer_context(false, |context, consumer| {
                     let consumer = consumer.expect("renderer admission must install a consumer");
                     let texture = register_test_texture(context);
                     let snapshot = managed_snapshot(context, consumer, Some(texture));
@@ -842,7 +837,7 @@ mod tests {
         ] {
             assert!(!releases.recovery_requested(context_id));
             owner
-                .try_with_active_renderer_context(false, |context, consumer| {
+                .try_with_current_renderer_context(false, |context, consumer| {
                     assert!(
                         consumer.is_some(),
                         "device recovery must resume the admitted renderer consumer"
@@ -1070,14 +1065,12 @@ mod tests {
         let second_a = managed_snapshot(&mut context_a, &consumer_a, None);
         let second_a_feedback = retry_texture_feedback(&second_a);
         let context_a_id = context_a.id();
-        let mut context_a = context_a.suspend_or_panic();
 
         let mut context_b = managed_context();
         let consumer_b = context_b.create_detached_renderer_consumer().unwrap();
         let first_b = managed_snapshot(&mut context_b, &consumer_b, None);
         let first_b_feedback = retry_texture_feedback(&first_b);
         let context_b_id = context_b.id();
-        let mut context_b = context_b.suspend_or_panic();
 
         let mailbox = crate::context::ImguiFrameMailbox::default();
         mailbox.publish(context_a_id, pending_frame(1, first_a));
@@ -1098,24 +1091,14 @@ mod tests {
         extracted.extend_texture_feedback(context_b_id, first_b_feedback);
         assert!(extracted.commit_all().is_empty());
 
-        context_a
-            .try_with_active(|context| {
-                let progress = context.poll_snapshot_completions().unwrap();
-                assert_eq!(progress.abandoned(), 1);
-                assert_eq!(progress.committed(), 1);
-                assert_eq!(progress.watermark(), 2);
-                Ok::<_, std::convert::Infallible>(())
-            })
-            .expect("Context A should activate for completion inspection");
-        context_b
-            .try_with_active(|context| {
-                let progress = context.poll_snapshot_completions().unwrap();
-                assert_eq!(progress.abandoned(), 0);
-                assert_eq!(progress.committed(), 1);
-                assert_eq!(progress.watermark(), 1);
-                Ok::<_, std::convert::Infallible>(())
-            })
-            .expect("Context B should activate for completion inspection");
+        let progress_a = context_a.poll_snapshot_completions().unwrap();
+        assert_eq!(progress_a.abandoned(), 1);
+        assert_eq!(progress_a.committed(), 1);
+        assert_eq!(progress_a.watermark(), 2);
+        let progress_b = context_b.poll_snapshot_completions().unwrap();
+        assert_eq!(progress_b.abandoned(), 0);
+        assert_eq!(progress_b.committed(), 1);
+        assert_eq!(progress_b.watermark(), 1);
     }
 
     #[test]
@@ -1123,13 +1106,11 @@ mod tests {
         let mut context_a = managed_context();
         let texture_a =
             imgui::render::SnapshotTextureId::User(register_test_texture(&mut context_a));
-        let context_a = context_a.suspend_or_panic();
         let context_a_id = context_a.id();
 
-        let mut context_b_owner = managed_context();
+        let mut context_b = managed_context();
         let texture_b =
-            imgui::render::SnapshotTextureId::User(register_test_texture(&mut context_b_owner));
-        let context_b = context_b_owner.suspend_or_panic();
+            imgui::render::SnapshotTextureId::User(register_test_texture(&mut context_b));
         let context_b_id = context_b.id();
 
         let mut bindings = ImguiTextureBindGroups::default();
@@ -1252,7 +1233,7 @@ mod tests {
 
     #[test]
     fn render_installation_exposes_standard_sampler_callbacks() {
-        let mut app = App::new();
+        let mut app = crate::test_util::RenderTestApp::new();
         app.add_plugins(crate::test_util::render_extraction_plugin());
         app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
         app.add_plugins(crate::ImguiPlugin::default());
@@ -1416,7 +1397,6 @@ mod tests {
         );
         assert!(!snapshot_a.texture_requests().is_empty());
         let context_a_id = context_a.id();
-        let mut context_a = context_a.suspend_or_panic();
 
         let mut context_b = managed_context();
         let consumer_b = context_b.create_detached_renderer_consumer().unwrap();
@@ -1424,7 +1404,6 @@ mod tests {
         let snapshot_b = managed_snapshot(&mut context_b, &consumer_b, Some(texture_b));
         let feedback_b = retry_texture_feedback(&snapshot_b);
         let context_b_id = context_b.id();
-        let mut context_b = context_b.suspend_or_panic();
 
         let camera = Entity::from_raw_u32(7).unwrap();
         let second_camera = Entity::from_raw_u32(8).unwrap();
@@ -1486,23 +1465,13 @@ mod tests {
                 .is_empty()
         );
 
-        context_a
-            .try_with_active(|context| {
-                let progress = context.poll_snapshot_completions().unwrap();
-                assert_eq!(progress.abandoned(), 1);
-                assert_eq!(progress.committed(), 0);
-                assert_eq!(progress.feedback_applied(), 0);
-                Ok::<_, std::convert::Infallible>(())
-            })
-            .unwrap();
-        context_b
-            .try_with_active(|context| {
-                let progress = context.poll_snapshot_completions().unwrap();
-                assert_eq!(progress.abandoned(), 0);
-                assert_eq!(progress.committed(), 1);
-                Ok::<_, std::convert::Infallible>(())
-            })
-            .unwrap();
+        let progress_a = context_a.poll_snapshot_completions().unwrap();
+        assert_eq!(progress_a.abandoned(), 1);
+        assert_eq!(progress_a.committed(), 0);
+        assert_eq!(progress_a.feedback_applied(), 0);
+        let progress_b = context_b.poll_snapshot_completions().unwrap();
+        assert_eq!(progress_b.abandoned(), 0);
+        assert_eq!(progress_b.committed(), 1);
     }
 
     #[test]
@@ -2562,6 +2531,6 @@ mod tests {
     }
 
     fn test_context_id() -> imgui::ContextId {
-        imgui::SuspendedContext::create().id()
+        imgui::Context::create().id()
     }
 }

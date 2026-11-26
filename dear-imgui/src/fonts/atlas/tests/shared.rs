@@ -72,7 +72,7 @@ fn shared_atlas_updates_once_per_context_frame_and_has_one_owner() {
     let _ = ctx_a.render_legacy();
     assert_eq!(unsafe { (*(*raw).Builder).FrameCount }, 0);
 
-    let suspended_a = ctx_a.suspend_or_panic();
+    let suspended_a = ctx_a;
     let mut ctx_b = crate::Context::create_with_shared_font_atlas(shared_atlas.clone());
     assert_eq!(unsafe { (*raw).RefCount }, 2);
     ctx_b.io_mut().set_display_size([128.0, 128.0]);
@@ -83,9 +83,7 @@ fn shared_atlas_updates_once_per_context_frame_and_has_one_owner() {
 
     drop(ctx_b);
     assert_eq!(unsafe { (*raw).RefCount }, 1);
-    let ctx_a = suspended_a
-        .activate()
-        .expect("the first shared-atlas context should reactivate");
+    let ctx_a = suspended_a;
     drop(ctx_a);
     assert_eq!(unsafe { (*raw).RefCount }, 0);
 
@@ -106,7 +104,7 @@ fn shared_atlas_is_legacy_only_until_one_context_remains() {
     ctx_a.io_mut().set_delta_time(1.0 / 60.0);
     ctx_a.frame().text("legacy context A");
     let _ = ctx_a.render_legacy();
-    let suspended_a = ctx_a.suspend_or_panic();
+    let suspended_a = ctx_a;
 
     let mut ctx_b = crate::Context::create_with_shared_font_atlas(shared_atlas.clone());
     ctx_b.io_mut().set_display_size([128.0, 128.0]);
@@ -132,7 +130,7 @@ fn shared_atlas_is_legacy_only_until_one_context_remains() {
     assert_eq!(unsafe { (*texture).TexID }, texture_id);
 
     drop(ctx_b);
-    let mut ctx_a = suspended_a.activate().expect("context A should reactivate");
+    let mut ctx_a = suspended_a;
     ctx_a.font_atlas().clear();
     let _ = ctx_a.font_atlas().add_font(&[FontSource::default_font()]);
     let consumer = ctx_a
@@ -153,7 +151,7 @@ fn managed_shared_atlas_rejects_a_second_context_before_native_creation() {
     let consumer = first
         .create_synchronous_renderer_consumer()
         .expect("the sole Context should attach");
-    let suspended = first.suspend_or_panic();
+    let suspended = first;
 
     assert!(matches!(
         crate::Context::try_create_with_shared_font_atlas(shared_atlas.clone()),
@@ -161,9 +159,7 @@ fn managed_shared_atlas_rejects_a_second_context_before_native_creation() {
     ));
     assert_eq!(unsafe { (*raw).RefCount }, 1);
 
-    let mut first = suspended
-        .activate()
-        .expect("the first Context remains usable");
+    let mut first = suspended;
     let _ = first.font_atlas().add_font(&[FontSource::default_font()]);
     first.io_mut().set_display_size([128.0, 128.0]);
     first.io_mut().set_delta_time(1.0 / 60.0);
@@ -284,12 +280,14 @@ fn shared_atlas_registration_uses_interior_mutability_not_a_unique_rust_borrow()
     let ctx = crate::Context::create_with_shared_font_atlas(shared_atlas.clone());
     let atlas = ctx.font_atlas();
 
-    let suspended = crate::SuspendedContext::create_with_shared_font_atlas(shared_atlas.clone());
+    let other = ctx
+        .binding()
+        .with_bound_context(|| crate::Context::create_with_shared_font_atlas(shared_atlas.clone()));
     assert_eq!(unsafe { (*raw).RefCount }, 2);
     assert_eq!(unsafe { sys::igGetCurrentContext() }, ctx.as_raw());
 
     let _ = atlas.add_font(&[FontSource::default_font()]);
-    drop(suspended);
+    drop(other);
     assert_eq!(unsafe { (*raw).RefCount }, 1);
     atlas.compact_cache();
 
@@ -335,7 +333,7 @@ fn shared_atlas_rejects_mixed_renderer_texture_capabilities() {
     ctx_a.io_mut().set_delta_time(1.0 / 60.0);
     ctx_a.frame().text("legacy renderer");
     let _ = ctx_a.render_legacy();
-    let suspended_a = ctx_a.suspend_or_panic();
+    let suspended_a = ctx_a;
 
     let mut ctx_b = crate::Context::create_with_shared_font_atlas(shared_atlas);
     ctx_b.io_mut().set_display_size([128.0, 128.0]);

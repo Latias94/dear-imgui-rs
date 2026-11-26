@@ -12,4 +12,4 @@ pub use mat::{Mat4Like, MouseRay, compute_mouse_ray, decompose_matrix, recompose
 pub use op::Manipulate;
 pub use style::Style;
 pub use types::{AxisMask, Color, DrawListTarget, GuizmoId, Mode, MoveType, Operation};
-pub use ui::{GizmoUi, GridColors, GuizmoContext, GuizmoExt, IdToken};
+pub use ui::{GizmoUi, GridColors, GuizmoExt, IdToken};

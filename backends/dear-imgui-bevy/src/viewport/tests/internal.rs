@@ -840,8 +840,10 @@ fn callback_contention_latches_without_unwinding_through_c() {
     }
 
     let state_borrow = bridge.inner.state.borrow_mut();
-    let callback = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-        platform_show_window(viewport.cast::<imgui::Viewport>());
+    let callback = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        context.binding().with_bound_context(|| unsafe {
+            platform_show_window_raw_callback(viewport);
+        });
     }));
     assert!(callback.is_ok(), "the C callback boundary must not unwind");
     drop(state_borrow);
@@ -873,6 +875,21 @@ fn callback_contention_latches_without_unwinding_through_c() {
 }
 
 #[test]
+fn viewport_callback_returns_fallback_after_registry_panic() {
+    let context = imgui::Context::create();
+    context.binding().with_bound_context(|| {
+        let viewport = unsafe { sys::igGetMainViewport() };
+        assert!(!viewport.is_null());
+
+        VIEWPORT_BRIDGE_REGISTRY.with(|registry| {
+            let _borrow = registry.borrow_mut();
+            let dpi_scale = unsafe { platform_get_window_dpi_scale_raw_callback(viewport) };
+            assert_eq!(dpi_scale, 1.0);
+        });
+    });
+}
+
+#[test]
 fn direct_callback_skips_foreign_userdata_without_dereferencing_it() {
     let mut context = imgui::Context::create();
     let bridge = ImguiViewportBridge::default();
@@ -885,8 +902,10 @@ fn direct_callback_skips_foreign_userdata_without_dereferencing_it() {
         context
             .io_mut()
             .set_backend_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
-        platform_show_window(viewport.cast::<imgui::Viewport>());
     }
+    context.binding().with_bound_context(|| unsafe {
+        platform_show_window_raw_callback(viewport);
+    });
     assert_eq!(
         bridge.callback_error(),
         Some(ImguiViewportRuntimeError::CallbackOwnership(
@@ -912,15 +931,16 @@ fn destroy_callback_never_clears_handles_when_dispatch_is_rejected() {
     unsafe { install_owned_platform_callbacks(&mut context, &keepalive).unwrap() };
     let viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
     assert!(!viewport.is_null());
-    unsafe {
+    let binding = context.binding();
+    binding.with_bound_context(|| unsafe {
         (*viewport).ID = 0x445;
         platform_create_window_raw_callback(viewport);
-    }
+    });
     let owned_handle = unsafe { (*viewport).PlatformHandle };
     assert!(!owned_handle.is_null());
 
     let state_borrow = bridge.inner.state.borrow_mut();
-    unsafe { platform_destroy_window_raw_callback(viewport) };
+    binding.with_bound_context(|| unsafe { platform_destroy_window_raw_callback(viewport) });
     assert_eq!(unsafe { (*viewport).PlatformUserData }, owned_handle);
     assert_eq!(unsafe { (*viewport).PlatformHandle }, owned_handle);
     assert_eq!(
@@ -930,7 +950,7 @@ fn destroy_callback_never_clears_handles_when_dispatch_is_rejected() {
     drop(state_borrow);
 
     bridge.inner.callback_fault.set(None);
-    unsafe { platform_destroy_window_raw_callback(viewport) };
+    binding.with_bound_context(|| unsafe { platform_destroy_window_raw_callback(viewport) });
     assert!(unsafe { (*viewport).PlatformUserData.is_null() });
     assert!(unsafe { (*viewport).PlatformHandle.is_null() });
     detach_owned_bridge(&mut context, &keepalive).unwrap();
@@ -992,15 +1012,21 @@ fn destroy_callback_does_not_touch_viewport_for_the_wrong_current_context() {
     unsafe { install_owned_platform_callbacks(&mut context, &keepalive).unwrap() };
     let viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
     assert!(!viewport.is_null());
-    unsafe {
+    let binding = context.binding();
+    binding.with_bound_context(|| unsafe {
         (*viewport).ID = 0x446;
         platform_create_window_raw_callback(viewport);
-    }
+    });
     let owned_handle = unsafe { (*viewport).PlatformHandle };
-    let suspended = context.suspend_or_panic();
+    assert!(!owned_handle.is_null());
     let other_context = imgui::Context::create();
 
-    unsafe { platform_destroy_window_raw_callback(viewport) };
+    binding.with_bound_context(|| {
+        other_context.binding().with_bound_context(|| unsafe {
+            platform_destroy_window_raw_callback(viewport);
+        });
+        assert_eq!(unsafe { sys::igGetCurrentContext() }, raw_context);
+    });
     assert_eq!(unsafe { (*viewport).PlatformUserData }, owned_handle);
     assert_eq!(unsafe { (*viewport).PlatformHandle }, owned_handle);
     assert_eq!(bridge.callback_error(), None);
@@ -1015,7 +1041,7 @@ fn destroy_callback_does_not_touch_viewport_for_the_wrong_current_context() {
         registry.borrow_mut().remove(&(raw_context as usize));
     });
     drop(other_context);
-    drop(suspended);
+    drop(context);
 }
 
 #[test]
@@ -1208,10 +1234,10 @@ fn direct_callback_validates_every_platform_callback_slot_before_dispatch() {
             keepalive.record_runtime_contract(&mut context);
             let viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
             assert!(!viewport.is_null());
-            unsafe {
+            context.binding().with_bound_context(|| unsafe {
                 (*context.platform_io_mut().as_raw_mut()).$slot = None;
                 platform_show_window_raw_callback(viewport);
-            }
+            });
             assert_eq!(
                 bridge.callback_error(),
                 Some(ImguiViewportRuntimeError::CallbackOwnership(
@@ -1257,10 +1283,10 @@ fn direct_callback_validates_every_platform_callback_slot_before_dispatch() {
             keepalive.record_runtime_contract(&mut context);
             let viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
             assert!(!viewport.is_null());
-            unsafe {
+            context.binding().with_bound_context(|| unsafe {
                 (*context.platform_io_mut().as_raw_mut()).$slot = Some($callback);
                 platform_show_window_raw_callback(viewport);
-            }
+            });
             assert_eq!(
                 bridge.callback_error(),
                 Some(ImguiViewportRuntimeError::CallbackOwnership(
@@ -1298,10 +1324,10 @@ fn direct_callback_validates_every_platform_callback_slot_before_dispatch() {
             unsafe { install_owned_platform_callbacks(&mut context, &keepalive).unwrap() };
             let viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
             assert!(!viewport.is_null());
-            unsafe {
+            context.binding().with_bound_context(|| unsafe {
                 (*context.platform_io_mut().as_raw_mut()).$slot = Some($callback);
                 platform_show_window_raw_callback(viewport);
-            }
+            });
             assert_eq!(
                 bridge.callback_error(),
                 Some(ImguiViewportRuntimeError::CallbackOwnership(
@@ -1334,14 +1360,15 @@ fn direct_callback_validates_platform_name_flags_and_monitor_storage() {
     ) {
         let viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
         assert!(!viewport.is_null());
-        unsafe { platform_show_window_raw_callback(viewport) };
+        context
+            .binding()
+            .with_bound_context(|| unsafe { platform_show_window_raw_callback(viewport) });
         assert_eq!(
             bridge.callback_error(),
             Some(ImguiViewportRuntimeError::CallbackOwnership(expected))
         );
         assert!(bridge.commands().is_empty());
         unsafe { sys::ImGuiViewport_destroy(viewport) };
-        let _ = context;
     }
 
     let mut context = imgui::Context::create();
@@ -1477,11 +1504,11 @@ fn callback_ownership_drift_detaches_owned_handles_without_calling_foreign_destr
     );
 
     let main_viewport = context.main_viewport().as_raw_mut();
-    unsafe {
+    context.binding().with_bound_context(|| unsafe {
         platform_create_window_raw_callback(main_viewport);
         (*main_viewport).PlatformHandleRaw = (*main_viewport).PlatformHandle;
         (*main_viewport).PlatformWindowCreated = true;
-    }
+    });
     keepalive.record_runtime_contract(&mut context);
     let owned_handle = unsafe { (*main_viewport).PlatformHandle };
     assert!(!owned_handle.is_null());
@@ -1710,7 +1737,9 @@ fn direct_callback_preserves_complete_foreign_platform_takeover() {
     context.io_mut().set_config_flags(foreign_config_flags);
 
     let main_viewport = context.main_viewport().as_raw_mut();
-    unsafe { platform_show_window_raw_callback(main_viewport) };
+    context
+        .binding()
+        .with_bound_context(|| unsafe { platform_show_window_raw_callback(main_viewport) });
 
     assert_eq!(
         bridge.callback_error(),

@@ -101,8 +101,7 @@ impl<'ui> DragDropTarget<'ui> {
         let name = name.as_ref();
         validate_payload_type_name(name, "DragDropTarget::accept_payload_unchecked()");
         validate_drag_drop_target_flags("DragDropTarget::accept_payload_unchecked()", flags);
-        let name = self.0.scratch_txt(name);
-        let inner = self.0.run_with_bound_context(|| unsafe {
+        let inner = self.0.with_scratch_txt(name, |name| unsafe {
             if self.1.is_finished() {
                 std::ptr::null()
             } else {

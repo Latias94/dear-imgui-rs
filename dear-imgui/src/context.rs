@@ -1,9 +1,7 @@
 //! ImGui context lifecycle
 //!
-//! Creates, manages and destroys the single active Dear ImGui context used by
-//! the crate. Obtain a `Ui` each frame via `Context::frame()` and render using
-//! your chosen backend. See struct-level docs for details and caveats about one
-//! active context at a time.
+//! Owns Dear ImGui contexts and confines them to one OS thread. Obtain a `Ui`
+//! from `Context::frame()` and render using your chosen backend.
 
 mod attachment;
 pub(crate) mod binding;
@@ -16,7 +14,6 @@ pub(crate) mod ime;
 mod platform;
 mod settings;
 mod snapshot_hub;
-mod suspended;
 #[cfg(test)]
 mod tests;
 mod texture_registry;
@@ -34,16 +31,12 @@ pub use self::binding::{
     ContextThreadLease,
 };
 pub use self::core::Context;
-pub use self::error::{
-    ContextActivationError, ContextActivationReason, ContextScopeError, ContextSuspensionError,
-    ContextSuspensionReason, ScopedActivationError,
-};
+pub use self::error::{ContextOperationError, ContextScopeError};
 pub use self::frame::{
     FrameLifecycleStamp, FrameLifecycleState, FramePrepareOptions, FrameResult, FrameToken,
 };
 pub use self::ime::{ImePreedit, ImePreeditError};
 pub use self::snapshot_hub::RendererTextureReset;
-pub use self::suspended::SuspendedContext;
 pub(crate) use self::texture_registry::SharedTextureRegistry;
 
 // Dear ImGui is not thread-safe. Context stays on its owner thread; detached

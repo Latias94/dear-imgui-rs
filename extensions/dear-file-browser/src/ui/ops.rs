@@ -1,23 +1,106 @@
 use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::Ordering;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::background::BackgroundTask;
 use crate::dialog_core::EntryId;
 use crate::dialog_state::{
     ClipboardOp, FileClipboard, FileDialogState, PasteConflictAction, PasteConflictPrompt,
     PendingPasteJob,
 };
 use crate::fs::FileSystem;
-use crate::fs_ops::{PasteError, delete_entry, entry_exists, keep_both_target, paste};
+use crate::fs_ops::{PasteError, delete_entry, entry_exists, keep_both_target, paste_cancellable};
 
-pub(super) fn selected_entry_paths_from_ids(state: &FileDialogState) -> Vec<PathBuf> {
-    state.core.selected_entry_paths()
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+pub(crate) enum FileOperation {
+    Delete(DeleteOutcome),
+    Paste(PasteOutcome),
 }
 
-pub(super) fn selected_entry_counts_from_ids(state: &FileDialogState) -> (usize, usize) {
-    state.core.selected_entry_counts()
+#[derive(Debug)]
+pub(crate) struct DeleteOutcome {
+    cwd: PathBuf,
+    ids: Vec<EntryId>,
+    completed: usize,
+    error: Option<String>,
+}
+
+#[derive(Debug)]
+pub(crate) struct PasteOutcome {
+    job: PendingPasteJob,
+    previous_count: usize,
+    result: Result<bool, String>,
+}
+
+pub(super) fn file_operation_in_progress(_state: &FileDialogState) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        _state.ui.operations.file_task.is_some()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+}
+
+pub(crate) fn cancel_file_operations(state: &mut FileDialogState, replace_filesystem: bool) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(task) = &state.ui.operations.file_task {
+        task.cancel();
+        if replace_filesystem {
+            state.ui.operations.discard_file_result = true;
+        } else {
+            return;
+        }
+    }
+    cancel_paste_job(state);
+    if replace_filesystem {
+        state.ui.operations.paste.clipboard = None;
+        state.ui.operations.delete.target_ids.clear();
+    }
+}
+
+pub(super) fn poll_file_operation(_state: &mut FileDialogState) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(task) = _state.ui.operations.file_task.as_ref()
+        && let Some(outcome) = task.poll()
+    {
+        let cancelled = task.is_cancelled();
+        _state.ui.operations.file_task = None;
+        if std::mem::take(&mut _state.ui.operations.discard_file_result) {
+            return;
+        }
+        match outcome {
+            Ok(FileOperation::Delete(outcome)) => {
+                finish_delete(_state, outcome, true, cancelled);
+            }
+            Ok(FileOperation::Paste(outcome)) => {
+                if let Err(error) = finish_paste(_state, outcome, cancelled) {
+                    _state.ui.runtime.error = Some(error);
+                }
+            }
+            Err(error) => {
+                if _state
+                    .ui
+                    .operations
+                    .paste
+                    .job
+                    .take()
+                    .is_some_and(|job| job.clipboard.op == ClipboardOp::Cut)
+                {
+                    _state.ui.operations.paste.clipboard = None;
+                }
+                _state.core.invalidate_dir_cache();
+                _state.ui.runtime.error = Some(error.to_string());
+            }
+        }
+    }
 }
 
 pub(super) fn open_rename_modal_from_selection(state: &mut FileDialogState) {
-    if state.core.selected_len() != 1 {
+    if file_operation_in_progress(state) || state.core.selected_len() != 1 {
         return;
     }
     let Some(rename_target_id) = state.core.selected_entry_ids().into_iter().next() else {
@@ -40,6 +123,9 @@ pub(super) fn open_rename_modal_from_selection(state: &mut FileDialogState) {
 }
 
 pub(super) fn open_delete_modal_from_selection(state: &mut FileDialogState) {
+    if file_operation_in_progress(state) {
+        return;
+    }
     let delete_target_ids = state.core.selected_entry_ids();
     if delete_target_ids.is_empty() {
         return;
@@ -50,32 +136,118 @@ pub(super) fn open_delete_modal_from_selection(state: &mut FileDialogState) {
 }
 
 pub(super) fn delete_targets(state: &mut FileDialogState, paths: &[PathBuf]) -> bool {
-    let delete = &mut state.ui.operations.delete;
-    let fs = state.filesystem.as_file_system();
-    state.core.invalidate_dir_cache();
-    for (index, path) in paths.iter().enumerate() {
-        if let Err(cause) = delete_entry(fs, path, delete.recursive) {
-            delete.target_ids.drain(..index);
-            state
-                .core
-                .replace_selection_by_ids(delete.target_ids.iter().copied());
-            delete.error = Some(format!("Failed to delete {}: {cause}", path.display()));
-            return false;
-        }
+    if file_operation_in_progress(state) {
+        state.ui.operations.delete.error = Some("Another file operation is in progress".into());
+        return false;
     }
-    state.core.clear_selection();
-    delete.target_ids.clear();
-    delete.error = None;
-    delete.recursive = false;
-    true
+    let recursive = state.ui.operations.delete.recursive;
+    let cwd = state.core.cwd.clone();
+    let ids = state.ui.operations.delete.target_ids.clone();
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(fs) = state.filesystem.background_file_system() {
+        let paths = paths.to_vec();
+        return match BackgroundTask::spawn("dear-file-browser-delete", move |cancelled| {
+            FileOperation::Delete(run_delete(
+                fs.as_ref(),
+                cwd,
+                ids,
+                &paths,
+                recursive,
+                &|| cancelled.load(Ordering::Relaxed),
+            ))
+        }) {
+            Ok(task) => {
+                state.ui.operations.file_task = Some(task);
+                true
+            }
+            Err(error) => {
+                state.ui.operations.delete.error = Some(error.to_string());
+                false
+            }
+        };
+    }
+    let outcome = run_delete(
+        state.filesystem.as_file_system(),
+        cwd,
+        ids,
+        paths,
+        recursive,
+        &|| false,
+    );
+    finish_delete(state, outcome, false, false)
+}
+
+fn run_delete(
+    fs: &dyn FileSystem,
+    cwd: PathBuf,
+    ids: Vec<EntryId>,
+    paths: &[PathBuf],
+    recursive: bool,
+    cancelled: &dyn Fn() -> bool,
+) -> DeleteOutcome {
+    let mut outcome = DeleteOutcome {
+        cwd,
+        ids,
+        completed: 0,
+        error: None,
+    };
+    for path in paths {
+        if cancelled() {
+            break;
+        }
+        if let Err(cause) = delete_entry(fs, path, recursive) {
+            outcome.error = Some(format!("Failed to delete {}: {cause}", path.display()));
+            break;
+        }
+        outcome.completed += 1;
+    }
+    outcome
+}
+
+fn finish_delete(
+    state: &mut FileDialogState,
+    mut outcome: DeleteOutcome,
+    reopen_on_error: bool,
+    cancelled: bool,
+) -> bool {
+    state.core.invalidate_dir_cache();
+    let same_directory = state.core.cwd == outcome.cwd;
+    let selection_unchanged = same_directory && state.core.selected_entry_ids() == outcome.ids;
+    outcome.ids.drain(..outcome.completed);
+    let delete = &mut state.ui.operations.delete;
+    if cancelled || !same_directory {
+        delete.target_ids.clear();
+        delete.recursive = false;
+        if !cancelled {
+            state.ui.runtime.error = outcome.error;
+        }
+        return true;
+    }
+    if selection_unchanged {
+        state
+            .core
+            .replace_selection_by_ids(outcome.ids.iter().copied());
+    }
+    delete.target_ids = outcome.ids;
+    delete.error = outcome.error;
+    if delete.error.is_none() {
+        delete.recursive = false;
+        true
+    } else {
+        delete.open_next = reopen_on_error;
+        false
+    }
 }
 
 pub(super) fn clipboard_set_from_selection(state: &mut FileDialogState, op: ClipboardOp) {
-    if !state.core.has_selection() {
+    if file_operation_in_progress(state)
+        || state.ui.operations.paste.job.is_some()
+        || !state.core.has_selection()
+    {
         return;
     }
 
-    let sources = selected_entry_paths_from_ids(state);
+    let sources = state.core.selected_entry_paths();
     if sources.is_empty() {
         return;
     }
@@ -83,6 +255,9 @@ pub(super) fn clipboard_set_from_selection(state: &mut FileDialogState, op: Clip
 }
 
 pub(super) fn start_paste_into_cwd(state: &mut FileDialogState) -> Result<(), String> {
+    if file_operation_in_progress(state) || state.ui.operations.paste.job.is_some() {
+        return Err("Another file operation is in progress".into());
+    }
     let Some(clipboard) = state.ui.operations.paste.clipboard.clone() else {
         return Ok(());
     };
@@ -115,8 +290,15 @@ pub(super) fn cancel_paste_job(state: &mut FileDialogState) {
     }
 }
 
-fn step_paste_job(fs: &dyn FileSystem, job: &mut PendingPasteJob) -> Result<bool, String> {
+fn step_paste_job(
+    fs: &dyn FileSystem,
+    job: &mut PendingPasteJob,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<bool, String> {
     while job.next_index < job.clipboard.sources.len() {
+        if cancelled() {
+            return Err("File operation cancelled".into());
+        }
         let src = &job.clipboard.sources[job.next_index];
         let name = src
             .file_name()
@@ -158,12 +340,13 @@ fn step_paste_job(fs: &dyn FileSystem, job: &mut PendingPasteJob) -> Result<bool
                 .map_err(|e| format!("Could not choose a name for {}: {e}", dest.display()))?;
         }
 
-        let result = paste(
+        let result = paste_cancellable(
             fs,
             job.clipboard.op,
             src,
             &dest,
             action == Some(PasteConflictAction::Overwrite),
+            cancelled,
         );
         if let Err(PasteError::Transfer(e)) = &result {
             return Err(format!("Failed to paste {}: {e}", src.display()));
@@ -179,17 +362,64 @@ fn step_paste_job(fs: &dyn FileSystem, job: &mut PendingPasteJob) -> Result<bool
 }
 
 pub(super) fn run_paste_job_until_wait_or_done(state: &mut FileDialogState) -> Result<(), String> {
-    let Some(job) = state.ui.operations.paste.job.as_mut() else {
+    let Some(job) = state.ui.operations.paste.job.as_ref() else {
         return Ok(());
     };
-    if job.conflict.is_some() {
+    if job.conflict.is_some() || file_operation_in_progress(state) {
         return Ok(());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(fs) = state.filesystem.background_file_system() {
+        let job = job.clone();
+        return match BackgroundTask::spawn("dear-file-browser-paste", move |cancelled| {
+            FileOperation::Paste(run_paste(fs.as_ref(), job, &|| {
+                cancelled.load(Ordering::Relaxed)
+            }))
+        }) {
+            Ok(task) => {
+                state.ui.operations.file_task = Some(task);
+                Ok(())
+            }
+            Err(error) => {
+                cancel_paste_job(state);
+                Err(error.to_string())
+            }
+        };
+    }
+    let Some(job) = state.ui.operations.paste.job.take() else {
+        return Ok(());
+    };
+    let outcome = run_paste(state.filesystem.as_file_system(), job, &|| false);
+    finish_paste(state, outcome, false)
+}
+
+fn run_paste(
+    fs: &dyn FileSystem,
+    mut job: PendingPasteJob,
+    cancelled: &dyn Fn() -> bool,
+) -> PasteOutcome {
     let previous_count = job.created.len();
-    let done = step_paste_job(state.filesystem.as_file_system(), job);
+    let result = step_paste_job(fs, &mut job, cancelled);
+    PasteOutcome {
+        job,
+        previous_count,
+        result,
+    }
+}
+
+fn finish_paste(
+    state: &mut FileDialogState,
+    outcome: PasteOutcome,
+    cancelled: bool,
+) -> Result<(), String> {
+    let PasteOutcome {
+        job,
+        previous_count,
+        result: done,
+    } = outcome;
     let created = job.created.len() != previous_count;
-    if created {
+    if created && !cancelled && state.core.cwd == job.dest_dir {
         state.ui.operations.reveal_id_next = job.created.first().copied();
         state
             .core
@@ -198,6 +428,11 @@ pub(super) fn run_paste_job_until_wait_or_done(state: &mut FileDialogState) -> R
     if created || done.is_err() {
         state.core.invalidate_dir_cache();
     }
+    if cancelled {
+        state.ui.operations.paste.job = Some(job);
+        cancel_paste_job(state);
+        return Ok(());
+    }
     match done {
         Ok(true) => {
             if job.clipboard.op == ClipboardOp::Cut && !job.created.is_empty() {
@@ -205,8 +440,12 @@ pub(super) fn run_paste_job_until_wait_or_done(state: &mut FileDialogState) -> R
             }
             state.ui.operations.paste.job = None;
         }
-        Ok(false) => state.ui.operations.paste.conflict_open_next = true,
+        Ok(false) => {
+            state.ui.operations.paste.job = Some(job);
+            state.ui.operations.paste.conflict_open_next = true;
+        }
         Err(e) => {
+            state.ui.operations.paste.job = Some(job);
             cancel_paste_job(state);
             return Err(e);
         }
@@ -238,6 +477,48 @@ mod tests {
         assert!(job.conflict.take().is_some());
         job.pending_conflict_action = Some(action);
         run_paste_job_until_wait_or_done(state).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn background_paste_waits_for_conflict_input_and_respects_later_navigation() {
+        use std::time::{Duration, Instant};
+
+        fn poll_until_idle(state: &mut FileDialogState) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while file_operation_in_progress(state) {
+                assert!(Instant::now() < deadline, "file operation did not return");
+                poll_file_operation(state);
+                std::thread::yield_now();
+            }
+        }
+
+        let temp = TempDir::new();
+        let source = temp.path().join("entry");
+        let dest_dir = temp.path().join("target");
+        let target = dest_dir.join("entry");
+        fs::create_dir(&dest_dir).unwrap();
+        fs::write(&source, b"source").unwrap();
+        fs::write(&target, b"existing").unwrap();
+        let mut state = FileDialogState::new(DialogMode::OpenFiles);
+        state.core.set_cwd(dest_dir.clone());
+        state.ui.operations.paste.clipboard = Some(FileClipboard {
+            op: ClipboardOp::Copy,
+            sources: vec![source.clone()],
+        });
+        start_paste_into_cwd(&mut state).unwrap();
+        assert!(file_operation_in_progress(&state));
+        poll_until_idle(&mut state);
+        assert_eq!(fs::read(&target).unwrap(), b"existing");
+
+        state.core.set_cwd(temp.path().to_owned());
+        let selected = EntryId::from_path(&source);
+        state.core.focus_and_select_by_id(selected);
+        resolve(&mut state, PasteConflictAction::Overwrite);
+        poll_until_idle(&mut state);
+        assert_eq!(fs::read(&target).unwrap(), b"source");
+        assert_eq!(state.core.selected_entry_ids(), [selected]);
+        assert_eq!(state.ui.operations.reveal_id_next, None);
     }
 
     #[test]

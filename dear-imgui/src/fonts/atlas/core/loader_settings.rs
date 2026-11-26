@@ -7,7 +7,7 @@ use super::FontAtlas;
 impl FontAtlas {
     /// Sets the font loader for this atlas.
     ///
-    /// This allows using custom font backends like FreeType with additional features.
+    /// Use [`FontLoader::stb_truetype`] to select stb_truetype even in a FreeType build.
     /// Returns an error if any font source has already been added, before native state changes.
     /// The loader must be static because Dear ImGui stores the raw `ImFontLoader*`.
     pub fn set_font_loader(&self, loader: &'static FontLoader) -> Result<(), FontAtlasLoaderError> {
@@ -27,12 +27,6 @@ impl FontAtlas {
         }
         Ok(())
     }
-
-    // Note: switching to the FreeType loader at runtime requires access to the
-    // C++ symbol ImGuiFreeType_GetFontLoader(), which may not be available in
-    // prebuilt dear-imgui-sys distributions. If needed, prefer configuring the
-    // loader from the sys layer or ensure the symbol is exported, then add a
-    // thin wrapper here.
 
     /// Sets global font loader flags
     ///

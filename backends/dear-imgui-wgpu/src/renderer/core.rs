@@ -215,8 +215,9 @@ impl RendererContextState {
     }
 
     pub(super) fn clear_with_context(&self, context: &mut Context) {
-        // SAFETY: callers have already verified the matching live Context.
-        let owned_name = unsafe { self.publication.clear_owned_raw_state_bound() };
+        let owned_name = context
+            .binding()
+            .with_bound_context(|| unsafe { self.publication.clear_owned_raw_state_bound() });
         if owned_name {
             context
                 .set_renderer_name::<String>(None)

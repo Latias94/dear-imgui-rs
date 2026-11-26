@@ -28,14 +28,14 @@ This document explains the minimal integration patterns and the typical lifecycl
 3) Pass `ThumbnailBackend` into the dialog draw call:
 
 ```rust
-use dear_file_browser::{ThumbnailBackend, ThumbnailRenderer, ThumbnailProvider};
+use dear_file_browser::{ImageThumbnailProvider, ThumbnailBackend, ThumbnailDecoder};
 
 // Keep these alive across frames:
-let mut provider = /* e.g. ImageThumbnailProvider::default() */;
+let decoder = ThumbnailDecoder::spawn(ImageThumbnailProvider::default)?;
 let mut renderer = /* your GPU upload/destroy implementation */;
 
 let mut backend = ThumbnailBackend {
-    provider: &mut provider,
+    decoder: &decoder,
     renderer: &mut renderer,
 };
 
@@ -57,12 +57,12 @@ For a working Glow/OpenGL reference implementation, see:
 
 Internally, the ImGui UI drives a `ThumbnailCache` stored in `FileDialogUiState`:
 
-- Every frame (when thumbnails are enabled) it calls `thumbnails.advance_frame()`.
+- Every drawn frame it calls `thumbnails.advance_frame()`.
 - For visible entries, it calls `thumbnails.request_visible(path, max_size)`.
 - If a backend is provided, it calls `thumbnails.maintain(&mut backend)`:
-  - drains requests (`take_requests`)
-  - decodes them via `ThumbnailProvider::decode`
-  - uploads them via `ThumbnailRenderer::upload_rgba8`
+  - submits requests to a bounded queue without waiting
+  - polls completed `ThumbnailProvider::decode` calls from two native workers
+  - uploads completed images via `ThumbnailRenderer::upload_rgba8` on the drawing thread
   - fulfills the cache and requests retirement of evicted textures via `ThumbnailRenderer::destroy`
 - The host renderer consumes/records the current frame before draining its retirement queue and unregistering those IDs. GPU resource release must also respect completion of the recorded draws.
 
@@ -75,20 +75,22 @@ If you need tighter control (threading, prioritization, custom decode pipeline),
 
 ## Tuning & Performance
 
-The cache configuration is a public `config` field, not a `config()` accessor:
+Read the cache configuration with `config()` and update it with `set_config()`:
 
-- `state.ui.thumbnails.config.max_entries`: GPU texture cache size (LRU).
-- `state.ui.thumbnails.config.max_new_requests_per_frame`: decode/upload request rate limiting.
+- `max_entries`: completed LRU entries, including failures.
+- `max_new_requests_per_frame`: admission budget, subject to the 16-request pending limit.
 - `state.ui.config.thumbnail_size`: requested maximum thumbnail size (UI-controlled).
 
 Notes:
 
+- A failed decode or upload is cached. Use `invalidate(path)` when a file changes
+  and needs another attempt.
 - `ImageThumbnailProvider` reads files via `std::fs` and is intended for native builds.
 - For large directories, prefer a smaller `max_new_requests_per_frame` to avoid frame spikes.
 
 ## Platform Notes
 
-- `wasm32`: `ImageThumbnailProvider` does not work by default (no `std::fs` access). Provide a
-  custom `ThumbnailProvider` and a filesystem strategy suitable for your platform.
+- `wasm32`: the native decoder pool and host-filesystem access are unavailable.
+  Use the manual queue with a browser-suitable decode strategy.
 - Custom filesystem backends: thumbnails requests include absolute `PathBuf`. If your host uses a
   virtual filesystem, implement a provider that can read and decode through that system.

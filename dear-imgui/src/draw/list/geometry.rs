@@ -375,45 +375,25 @@ impl<'ui> DrawListMut<'ui> {
         assert_polyline_flags("DrawListMut::path_stroke()", flags);
         assert_positive_f32("DrawListMut::path_stroke()", "thickness", thickness);
 
-        unsafe {
-            // PathStroke is inline: AddPolyline(_Path.Data, _Path.Size, col, thickness, flags); _Path.Size = 0;
-            let draw_list = self.draw_list;
-            let path = &mut (*draw_list)._Path;
-
-            if path.Size > 0 {
-                sys::ImDrawList_AddPolyline(
-                    self.draw_list,
-                    path.Data,
-                    path.Size,
-                    color.into().into(),
-                    thickness,
-                    flags.bits() as sys::ImDrawFlags,
-                );
-                path.Size = 0; // Clear path after stroking
-            }
-        }
+        let color = color.into().into();
+        self.with_raw_bound("DrawListMut::path_stroke()", |draw_list| unsafe {
+            sys::ImDrawList_PathStroke(
+                draw_list,
+                color,
+                thickness,
+                flags.bits() as sys::ImDrawFlags,
+            );
+        });
     }
 
     /// Fill the current path as a convex polygon.
     #[doc(alias = "PathFillConvex")]
     pub fn path_fill_convex(&self, color: impl Into<ImColor32>, flags: DrawFlags) {
         assert_draw_flags("DrawListMut::path_fill_convex()", flags, FILL_FLAGS);
-        unsafe {
-            // PathFillConvex is inline: AddConvexPolyFilled(_Path.Data, _Path.Size, col); _Path.Size = 0;
-            let draw_list = self.draw_list;
-            let path = &mut (*draw_list)._Path;
-
-            if path.Size > 0 {
-                sys::ImDrawList_AddConvexPolyFilled(
-                    self.draw_list,
-                    path.Data,
-                    path.Size,
-                    color.into().into(),
-                    flags.bits() as sys::ImDrawFlags,
-                );
-                path.Size = 0; // Clear path after filling
-            }
-        }
+        let color = color.into().into();
+        self.with_raw_bound("DrawListMut::path_fill_convex()", |draw_list| unsafe {
+            sys::ImDrawList_PathFillConvex(draw_list, color, flags.bits() as sys::ImDrawFlags);
+        });
     }
 
     /// Draw a quadrilateral outline given four points.

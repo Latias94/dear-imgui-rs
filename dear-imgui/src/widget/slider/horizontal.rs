@@ -101,21 +101,21 @@ where
     #[doc(alias = "SliderScalar")]
     pub fn build(self, value: &mut Data) -> bool {
         validate_slider_preconditions("Slider::build()", &self.min, &self.max, self.flags);
-        let (label, display_format) = self
-            .ui
-            .scratch_txt_with_opt(self.label, self.display_format);
-
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igSliderScalar(
-                label,
-                Data::KIND as i32,
-                value as *mut Data as *mut c_void,
-                &self.min as *const Data as *const c_void,
-                &self.max as *const Data as *const c_void,
-                display_format,
-                self.flags.bits(),
-            )
-        })
+        self.ui.with_scratch_txt_with_opt(
+            self.label,
+            self.display_format,
+            |label, display_format| unsafe {
+                sys::igSliderScalar(
+                    label,
+                    Data::KIND as i32,
+                    value as *mut Data as *mut c_void,
+                    &self.min as *const Data as *const c_void,
+                    &self.max as *const Data as *const c_void,
+                    display_format,
+                    self.flags.bits(),
+                )
+            },
+        )
     }
 
     /// Builds a horizontal array of multiple sliders attached to the given slice.
@@ -131,21 +131,21 @@ where
                 "Slider::build_array() supports at most 4 components with COLOR_MARKERS"
             );
         }
-        let (label, display_format) = self
-            .ui
-            .scratch_txt_with_opt(self.label, self.display_format);
-
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igSliderScalarN(
-                label,
-                Data::KIND as i32,
-                values.as_mut_ptr() as *mut c_void,
-                count,
-                &self.min as *const Data as *const c_void,
-                &self.max as *const Data as *const c_void,
-                display_format,
-                self.flags.bits(),
-            )
-        })
+        self.ui.with_scratch_txt_with_opt(
+            self.label,
+            self.display_format,
+            |label, display_format| unsafe {
+                sys::igSliderScalarN(
+                    label,
+                    Data::KIND as i32,
+                    values.as_mut_ptr() as *mut c_void,
+                    count,
+                    &self.min as *const Data as *const c_void,
+                    &self.max as *const Data as *const c_void,
+                    display_format,
+                    self.flags.bits(),
+                )
+            },
+        )
     }
 }

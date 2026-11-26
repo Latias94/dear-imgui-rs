@@ -75,16 +75,16 @@ fn extension_artifact_profile(
 
 fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     // Prefer paths exported by dear-imgui-sys build script (prefix comes from links = "dear-imgui")
+    let local_cimgui_root = cfg
+        .manifest_dir
+        .join("../../dear-imgui-sys/third-party/cimgui");
     let imgui_src = env::var_os("DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH")
         .or_else(|| env::var_os("DEP_DEAR_IMGUI_THIRD_PARTY"))
         .map(PathBuf::from)
-        .unwrap_or_else(|| cfg.manifest_dir.join("../../dear-imgui-sys/imgui"));
+        .unwrap_or_else(|| local_cimgui_root.join("imgui"));
     let cimgui_root = env::var_os("DEP_DEAR_IMGUI_CIMGUI_INCLUDE_PATH")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            cfg.manifest_dir
-                .join("../../dear-imgui-sys/third-party/cimgui")
-        });
+        .unwrap_or(local_cimgui_root);
     (imgui_src, cimgui_root)
 }
 
@@ -224,6 +224,23 @@ fn try_link_prebuilt_all(cfg: &BuildConfig, plan: &NativeBuildPlan) -> bool {
     false
 }
 
+fn configure_msvc_cpp(cfg: &BuildConfig, build: &mut cc::Build) {
+    if cfg.is_msvc() && cfg.is_windows() {
+        let use_static = cfg.use_static_crt();
+        build
+            .flag("/EHsc")
+            .static_crt(use_static)
+            .flag(if use_static { "/MT" } else { "/MD" })
+            .define("_ITERATOR_DEBUG_LEVEL", Some("0"));
+        let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
+        if profile == "debug" {
+            build.debug(true).opt_level(0);
+        } else {
+            build.debug(false).opt_level(2);
+        }
+    }
+}
+
 fn build_with_cc(
     cfg: &BuildConfig,
     sources: &build_support::source_inventory::MaintainedSourcePaths,
@@ -244,24 +261,7 @@ fn build_with_cc(
         &cfg.target_abi,
     );
 
-    // MSVC flags align with dear-imgui-sys
-    if cfg.is_msvc() && cfg.is_windows() {
-        build.flag("/EHsc");
-        let use_static = cfg.use_static_crt();
-        build.static_crt(use_static);
-        if use_static {
-            build.flag("/MT");
-        } else {
-            build.flag("/MD");
-        }
-        let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
-        if profile == "debug" {
-            build.debug(true).opt_level(0);
-        } else {
-            build.debug(false).opt_level(2);
-        }
-        build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
-    }
+    configure_msvc_cpp(cfg, &mut build);
 
     native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
 
@@ -317,9 +317,7 @@ fn build_line_test_probe(
         &cfg.target_env,
         &cfg.target_abi,
     );
-    if cfg.is_msvc() && cfg.is_windows() {
-        build.static_crt(cfg.use_static_crt());
-    }
+    configure_msvc_cpp(cfg, &mut build);
     native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
     build.define("IMGUI_DEFINE_MATH_OPERATORS", Some("1"));
     build
@@ -352,7 +350,9 @@ fn main() {
     for path in sources.native_candidate_paths() {
         println!("cargo:rerun-if-changed={}", path.display());
     }
-    println!("cargo:rerun-if-changed=../../dear-imgui-sys");
+    if Path::new("../../dear-imgui-sys").is_dir() {
+        println!("cargo:rerun-if-changed=../../dear-imgui-sys");
+    }
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_PREBUILT_URL");

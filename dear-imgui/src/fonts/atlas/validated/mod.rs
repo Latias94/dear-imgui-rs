@@ -293,7 +293,12 @@ struct MaxpLimits {
     max_component_depth: usize,
 }
 
-fn validate_font(data: &[u8]) -> Result<(), StbTrueTypeFontError> {
+/// Checks the contracts of the pinned native parser, not just whether Rust can parse a face.
+///
+/// The stb loader does not pass `FontDataSize` to `stbtt_InitFont`. It selects its own cmap
+/// and walks the metrics, glyph locations and composite data on demand. A generic SFNT parse
+/// is not a substitute for checking these loader-specific reads and work bounds.
+pub(super) fn validate_font(data: &[u8]) -> Result<(), StbTrueTypeFontError> {
     validate_font_data_length(data.len())?;
 
     let signature = read::read_u32(data, 0, "sfnt header")?;

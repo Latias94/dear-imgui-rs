@@ -269,7 +269,6 @@ fn platform_owner_context_mismatch_reports_actual_then_expected() {
     let _guard = lock_context();
     let actual_context = Context::create();
     let actual = actual_context.id();
-    let suspended_actual = actual_context.suspend_or_panic();
     let expected_context = Context::create();
     let expected = expected_context.id();
 
@@ -280,7 +279,7 @@ fn platform_owner_context_mismatch_reports_actual_then_expected() {
         format!("WGPU viewport platform owner belongs to Context {actual:?}, not {expected:?}")
     );
     drop(expected_context);
-    drop(suspended_actual);
+    drop(actual_context);
 }
 
 fn viewport_identity(viewport: &mut sys::ImGuiViewport) -> ViewportIdentity {
@@ -942,7 +941,6 @@ fn public_route_context_gate_preserves_renderer_and_platform_fault_queues() {
     let _guard = lock_context();
     let context_a = Context::create();
     let expected = context_a.id();
-    let suspended_a = context_a.suspend_or_panic();
     let mut context_b = Context::create();
     prepare_legacy_frame_context(&mut context_b);
     let frame = context_b.begin_frame();
@@ -996,7 +994,7 @@ fn public_route_context_gate_preserves_renderer_and_platform_fault_queues() {
 
     drop(frame);
     drop(context_b);
-    drop(suspended_a);
+    drop(context_a);
 }
 
 #[test]
@@ -1013,7 +1011,6 @@ fn prepare_frame_rejects_foreign_context_before_renderer_faults_are_consumed() {
             operation: "queued before frame Context validation",
         });
 
-    let suspended_a = context_a.suspend_or_panic();
     let mut context_b = Context::create();
     prepare_legacy_frame_context(&mut context_b);
     let actual = context_b.id();
@@ -1035,7 +1032,7 @@ fn prepare_frame_rejects_foreign_context_before_renderer_faults_are_consumed() {
     drop(context_b);
     drop(runtime_a);
     drop(platform_a);
-    drop(suspended_a);
+    drop(context_a);
 }
 
 #[test]
@@ -1052,7 +1049,6 @@ fn invalidate_device_objects_rejects_foreign_context_before_faults_are_consumed(
             operation: "queued before invalidation Context validation",
         });
 
-    let suspended_a = context_a.suspend_or_panic();
     let mut context_b = Context::create();
     let actual = context_b.id();
 
@@ -1073,7 +1069,7 @@ fn invalidate_device_objects_rejects_foreign_context_before_faults_are_consumed(
     drop(context_b);
     drop(runtime_a);
     drop(platform_a);
-    drop(suspended_a);
+    drop(context_a);
 }
 
 #[test]
@@ -1090,7 +1086,6 @@ fn prepared_runtime_mismatch_is_rejected_before_target_faults_are_consumed() {
             operation: "queued before runtime validation",
         });
 
-    let suspended_a = context_a.suspend_or_panic();
     let mut context_b = Context::create();
     let platform_b = attach_test_platform(&mut context_b);
     let runtime_b =
@@ -1116,7 +1111,7 @@ fn prepared_runtime_mismatch_is_rejected_before_target_faults_are_consumed() {
     drop(context_b);
     drop(runtime_a);
     drop(platform_a);
-    drop(suspended_a);
+    drop(context_a);
 }
 
 #[test]

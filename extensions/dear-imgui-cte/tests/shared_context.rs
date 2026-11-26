@@ -1,6 +1,6 @@
 use dear_imgui_cte::{CteUiExt, TextDiff, TextEditor};
 use dear_imgui_rs::{Condition, Context, FramePrepareOptions, sys};
-use dear_imnodes::{ImNodesExt, NodeId};
+use dear_imnodes::{ImNodesContext, ImNodesExt, NodeId};
 use dear_implot::PlotContext;
 
 #[test]
@@ -14,7 +14,7 @@ fn cte_core_implot_and_imnodes_share_one_imgui_context() {
         .build();
 
     let plot_context = PlotContext::create(&context);
-    let nodes_context = dear_imnodes::Context::create(&context);
+    let nodes_context = ImNodesContext::create(&context);
     let node_editor = nodes_context.create_editor_context();
     let mut editor = TextEditor::create(&context);
     let mut diff = TextDiff::create(&context);

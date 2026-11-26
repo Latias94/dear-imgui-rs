@@ -1,18 +1,28 @@
-use std::fs::File;
+use std::fs::{File, Metadata};
 use std::io;
-use std::os::windows::{ffi::OsStrExt, fs::OpenOptionsExt, io::AsRawHandle};
+use std::os::windows::{
+    ffi::OsStrExt,
+    fs::{MetadataExt, OpenOptionsExt},
+    io::AsRawHandle,
+};
 use std::path::Path;
 
 use windows_sys::Win32::Foundation::{
     ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_ID_INFO, FILE_READ_ATTRIBUTES, FileIdInfo, GetFileInformationByHandle,
-    GetFileInformationByHandleEx, MoveFileExW,
+    BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO, FILE_READ_ATTRIBUTES,
+    FileIdInfo, GetFileInformationByHandle, GetFileInformationByHandleEx, MoveFileExW,
 };
 
 use super::{FsEntry, FsEntryIdentity, StdFileSystem, canonical_entry};
+
+pub(super) fn is_directory_reparse_point(metadata: &Metadata) -> bool {
+    // Junctions and other directory reparse points can redirect traversal.
+    let flags = FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT;
+    metadata.file_attributes() & flags == flags
+}
 
 pub(super) fn inspect_move_source(path: &Path) -> io::Result<(FsEntry, Option<FsEntryIdentity>)> {
     let file = File::options()

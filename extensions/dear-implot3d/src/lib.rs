@@ -15,7 +15,7 @@
 //!
 //! // In your main loop:
 //! let ui = imgui_ctx.frame();
-//! let plot_ui = plot3d_ctx.get_plot_ui(ui);
+//! let plot_ui = ui.implot3d(&plot3d_ctx);
 //!
 //! plot_ui.begin_plot("3D Plot").build(|plot| {
 //!     let xs = [0.0, 1.0, 2.0];
@@ -69,6 +69,6 @@ pub use mesh_builder::Mesh3DBuilder;
 pub use plots::*;
 pub use style::*;
 pub use surface_builder::Surface3DBuilder;
-pub use ui::{Plot3DScope, Plot3DSetup, Plot3DUi};
+pub use ui::{ImPlot3DExt, Plot3DScope, Plot3DSetup, Plot3DUi};
 
 pub(crate) use layout::{axis_tick_count_to_i32, imvec2, imvec4, len_i32};

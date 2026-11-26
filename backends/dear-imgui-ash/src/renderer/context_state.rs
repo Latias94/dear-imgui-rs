@@ -373,7 +373,9 @@ impl RendererContextState {
     }
 
     pub(super) fn unpublish(&self, context: &mut Context) {
-        let name_was_ours = self.unpublish_bound();
+        let name_was_ours = context
+            .binding()
+            .with_bound_context(|| self.unpublish_bound());
         if name_was_ours {
             let _ = context.set_renderer_name(None::<String>);
         }
@@ -543,8 +545,7 @@ mod tests {
         first
             .io_mut()
             .set_backend_flags(flags & !core_renderer_flags());
-        let suspended = first.suspend_or_panic();
-        drop(suspended);
+        drop(first);
 
         let mut later = Context::create();
         let token = state.token_ptr();

@@ -280,6 +280,7 @@ use std::sync::Arc;
 pub use dear_imgui_rs as imgui;
 
 mod containers;
+mod numeric;
 mod response;
 mod session;
 mod settings;
@@ -310,6 +311,12 @@ pub use settings::{
 };
 pub use values::imgui_tuple_body;
 
+#[doc(hidden)]
+pub mod __private {
+    pub use super::numeric::{NumericWidget, render_numeric};
+    pub use super::values::{TextWidget, render_bool, render_enum_selection, render_text};
+}
+
 /// Trait for values that can render themselves as a single ImGui input widget.
 ///
 /// This is implemented for common primitive types and can be implemented
@@ -320,6 +327,19 @@ pub trait ImGuiValue {
     ///
     /// Returns `true` if the value was modified.
     fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool;
+
+    /// Draws this value with the effective settings for the enclosing member.
+    ///
+    /// The default implementation delegates to [`Self::imgui_value`]. Built-in
+    /// editors use this hook to layer member overrides on top of session defaults.
+    fn imgui_value_with_member(
+        inspector: &mut Inspector<'_, '_>,
+        label: &str,
+        value: &mut Self,
+        _member: Option<&MemberSettings>,
+    ) -> bool {
+        Self::imgui_value(inspector, label, value)
+    }
 }
 
 /// Trait for complex types (structs/enums) that can generate ImGui controls

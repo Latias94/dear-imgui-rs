@@ -13,8 +13,7 @@ impl Ui {
     /// Renders a separator with text.
     #[doc(alias = "SeparatorText")]
     pub fn separator_with_text(&self, text: impl AsRef<str>) {
-        let text = self.scratch_txt(text);
-        self.run_with_bound_context(|| unsafe { sys::igSeparatorText(text) });
+        self.with_scratch_txt(text, |text| unsafe { sys::igSeparatorText(text) });
     }
 
     /// Creates a vertical separator

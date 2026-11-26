@@ -1,3 +1,4 @@
+use std::cell::OnceCell;
 use std::ops::Deref;
 use std::ptr::NonNull;
 
@@ -18,7 +19,7 @@ use super::snapshot::{
 pub struct PendingFrame<'ctx> {
     context: Option<&'ctx mut Context>,
     draw_data: NonNull<DrawData>,
-    draw_requirements: DrawRequirements,
+    draw_requirements: OnceCell<DrawRequirements>,
     epoch: SnapshotEpoch,
     texture_requests: Vec<TextureRequest>,
 }
@@ -67,7 +68,7 @@ impl<'ctx> PendingFrame<'ctx> {
         Self {
             context: Some(context),
             draw_data,
-            draw_requirements: unsafe { draw_data.as_ref() }.requirements(),
+            draw_requirements: OnceCell::new(),
             epoch,
             texture_requests,
         }
@@ -99,8 +100,10 @@ impl<'ctx> PendingFrame<'ctx> {
     /// This summary is available before reconciliation so a renderer can reject unsupported work
     /// without partially applying managed-texture updates.
     #[must_use]
-    pub const fn draw_requirements(&self) -> DrawRequirements {
-        self.draw_requirements
+    pub fn draw_requirements(&self) -> DrawRequirements {
+        *self
+            .draw_requirements
+            .get_or_init(|| unsafe { self.draw_data.as_ref() }.requirements())
     }
 
     /// Apply request-bound feedback and return the only drawable frame capability.

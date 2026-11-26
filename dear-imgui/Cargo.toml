@@ -17,6 +17,8 @@ features = ["freetype"]
 
 [dependencies]
 bitflags.workspace = true
+mint.workspace = true
+glam = { workspace = true, optional = true }
 dear-imgui-sys.workspace = true
 parking_lot.workspace = true
 thiserror.workspace = true
@@ -34,7 +36,7 @@ system-clipboard-wayland = ["system-clipboard", "arboard/wayland-data-control"]
 # Docking is always enabled; feature removed.
 # Enable multi-viewport support (define feature to satisfy cfg checks; opt-in)
 multi-viewport = []
-# Enable freetype font rasterizer
+# Use FreeType for native atlases. wasm32 keeps the provider's stb_truetype loader.
 freetype = ["dear-imgui-sys/freetype"]
 # Enable Dear ImGui test engine hooks in dear-imgui-sys.
 test-engine = ["dear-imgui-sys/test-engine"]
@@ -54,7 +56,7 @@ stack-layout = ["dear-imgui-sys/stack-layout"]
 wasm-font-atlas-experimental = []
 # Optional math interop: enable glam support in the sys crate so draw/list APIs
 # taking Into<sys::ImVec2>/ImVec4 can accept glam vectors directly.
-glam = ["dear-imgui-sys/glam"]
+glam = ["dear-imgui-sys/glam", "dep:glam"]
 
 [dev-dependencies]
 approx = "0.5"
@@ -64,4 +66,3 @@ serde_test = "1"
 static_assertions = "1.1"
 once_cell = "1.21"
 glam.workspace = true
-mint.workspace = true

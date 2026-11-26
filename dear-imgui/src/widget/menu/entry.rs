@@ -86,8 +86,9 @@ impl Ui {
         label: impl AsRef<str>,
         enabled: bool,
     ) -> Option<MenuToken<'_>> {
-        let label_ptr = self.scratch_txt(label);
-        if self.run_with_bound_context(|| unsafe { sys::igBeginMenu(label_ptr, enabled) }) {
+        if self.with_scratch_txt(label, |label_ptr| unsafe {
+            sys::igBeginMenu(label_ptr, enabled)
+        }) {
             Some(MenuToken::new(self))
         } else {
             None

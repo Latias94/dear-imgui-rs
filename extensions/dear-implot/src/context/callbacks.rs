@@ -1,12 +1,13 @@
 use super::PlotSetup;
 use crate::{XAxis, YAxis, sys};
+use dear_imgui_rs::ffi::RawBox;
 use std::any::Any;
 use std::ffi::{c_char, c_int, c_void};
 
 #[derive(Default)]
 pub(super) struct AxisCallbacks {
-    formatters: [Option<Box<dyn Any>>; YAxis::Y3 as usize + 1],
-    transforms: [Option<Box<dyn Any>>; YAxis::Y3 as usize + 1],
+    formatters: [Option<RawBox<dyn Any>>; YAxis::Y3 as usize + 1],
+    transforms: [Option<RawBox<dyn Any>>; YAxis::Y3 as usize + 1],
 }
 
 impl AxisCallbacks {
@@ -27,7 +28,7 @@ impl AxisCallbacks {
     }
 }
 
-impl PlotSetup<'_> {
+impl PlotSetup<'_, '_> {
     /// Format X-axis tick and mouse labels. The plot owns the callback through `EndPlot`.
     ///
     /// # Safety
@@ -54,8 +55,8 @@ impl PlotSetup<'_> {
     }
 
     fn formatter<F: Fn(f64) -> String + 'static>(&mut self, axis: sys::ImAxis, f: F) {
-        let holder = Box::new(f);
-        let data = (&*holder as *const F).cast_mut().cast();
+        let holder = RawBox::from(Box::new(f) as Box<dyn Any>);
+        let data = holder.as_ptr().cast();
         self.plot.with_axes(&[axis], || unsafe {
             sys::ImPlot_SetupAxisFormat_PlotFormatter(axis, Some(formatter_thunk::<F>), data);
         });
@@ -102,8 +103,8 @@ impl PlotSetup<'_> {
         F: Fn(f64) -> f64 + 'static,
         I: Fn(f64) -> f64 + 'static,
     {
-        let holder = Box::new((forward, inverse));
-        let data = (&*holder as *const (F, I)).cast_mut().cast();
+        let holder = RawBox::from(Box::new((forward, inverse)) as Box<dyn Any>);
+        let data = holder.as_ptr().cast();
         self.plot.with_axes(&[axis], || unsafe {
             sys::ImPlot_SetupAxisScale_PlotTransform(
                 axis,

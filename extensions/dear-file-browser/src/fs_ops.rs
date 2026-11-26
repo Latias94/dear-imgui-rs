@@ -84,29 +84,34 @@ fn validate_target(
     Ok(source_path)
 }
 
-pub(crate) fn paste(
+pub(crate) fn paste_cancellable(
     fs: &dyn FileSystem,
     op: ClipboardOp,
     from: &Path,
     to: &Path,
     overwrite: bool,
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<(), PasteError> {
+    check_cancelled(cancelled)?;
     let exists = entry_exists(fs, to)?;
     let source_path = validate_target(fs, from, to, exists)?;
     if exists && !overwrite {
         return Err(Error::from(ErrorKind::AlreadyExists).into());
     }
 
+    check_cancelled(cancelled)?;
     if op == ClipboardOp::Cut && !exists && try_move(fs, from, to)? {
         return Ok(());
     }
 
     let mut copied = None;
     install_target(fs, to, exists, |incoming| {
+        check_cancelled(cancelled)?;
         if op == ClipboardOp::Cut && exists && try_move(fs, from, to)? {
             return Ok(());
         }
-        copied = copy_tree(fs, from, incoming, op == ClipboardOp::Cut)?;
+        copied = copy_tree(fs, from, incoming, op == ClipboardOp::Cut, cancelled)?;
+        check_cancelled(cancelled)?;
         fs.rename_noreplace(incoming, to)
     })?;
 
@@ -116,6 +121,17 @@ pub(crate) fn paste(
             .map_err(PasteError::AfterInstall)?;
     }
     Ok(())
+}
+
+fn check_cancelled(cancelled: &dyn Fn() -> bool) -> io::Result<()> {
+    if cancelled() {
+        Err(Error::new(
+            ErrorKind::Interrupted,
+            "file operation cancelled",
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 fn try_move(fs: &dyn FileSystem, from: &Path, to: &Path) -> io::Result<bool> {
@@ -225,7 +241,9 @@ fn copy_tree(
     from: &Path,
     to: &Path,
     moving: bool,
+    cancelled: &dyn Fn() -> bool,
 ) -> io::Result<Option<CopiedEntry>> {
+    check_cancelled(cancelled)?;
     let (entry, identity) = if moving {
         fs.inspect_move_source(from)?
     } else {
@@ -242,9 +260,13 @@ fn copy_tree(
     if entry.is_dir {
         let mut children = Vec::new();
         fs.visit_dir(from, &mut |child| {
+            if cancelled() {
+                return ScanVisit::Stop;
+            }
             children.push(child);
             ScanVisit::Continue
         })?;
+        check_cancelled(cancelled)?;
         fs.create_dir(to)?;
         for child in children {
             reject_copy_link(&child)?;
@@ -255,7 +277,7 @@ fn copy_tree(
                 ));
             }
             let child_target = to.join(file_name(&child.path)?);
-            if let Some(copied) = copy_tree(fs, &child.path, &child_target, moving)? {
+            if let Some(copied) = copy_tree(fs, &child.path, &child_target, moving, cancelled)? {
                 copied_children.push(copied);
             }
         }
@@ -291,7 +313,7 @@ fn reject_copy_link(entry: &FsEntry) -> io::Result<()> {
         return Err(Error::new(
             ErrorKind::Unsupported,
             format!(
-                "copying symbolic links is unsupported: {}",
+                "copying links or directory reparse points is unsupported: {}",
                 entry.path.display()
             ),
         ));

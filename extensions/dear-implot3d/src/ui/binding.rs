@@ -1,10 +1,12 @@
 use crate::{Plot3DContext, sys};
+use std::{cell::RefCell, ptr};
+
+thread_local! {
+    static PREVIOUS_CONTEXTS: RefCell<Vec<*mut sys::ImPlot3DContext>> = const { RefCell::new(Vec::new()) };
+}
 
 #[must_use = "dropping the guard restores the previous ImPlot3D context"]
-struct Plot3DContextGuard {
-    prev_plot_ctx_raw: *mut sys::ImPlot3DContext,
-    restore_plot: bool,
-}
+struct Plot3DContextGuard;
 
 impl Plot3DContext {
     pub(crate) fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
@@ -16,32 +18,34 @@ impl Plot3DContext {
         let _guard = Plot3DContextGuard::bind(self.raw);
         f()
     }
+
+    pub(crate) fn invalidate_saved_binding(&self) {
+        let _ = PREVIOUS_CONTEXTS.try_with(|stack| {
+            for previous in stack.borrow_mut().iter_mut() {
+                if *previous == self.raw {
+                    *previous = ptr::null_mut();
+                }
+            }
+        });
+    }
 }
 
 impl Plot3DContextGuard {
-    fn bind(plot_ctx_raw: *mut sys::ImPlot3DContext) -> Self {
-        assert!(
-            !plot_ctx_raw.is_null(),
-            "dear-implot3d: Plot3DUi requires an active ImPlot3D context"
-        );
-        let prev_plot_ctx_raw = unsafe { sys::ImPlot3D_GetCurrentContext() };
-        let restore_plot = prev_plot_ctx_raw != plot_ctx_raw;
-        unsafe {
-            sys::ImPlot3D_SetCurrentContext(plot_ctx_raw);
+    fn bind(raw: *mut sys::ImPlot3DContext) -> Option<Self> {
+        let previous = unsafe { sys::ImPlot3D_GetCurrentContext() };
+        if previous == raw {
+            return None;
         }
-        Self {
-            prev_plot_ctx_raw,
-            restore_plot,
-        }
+        PREVIOUS_CONTEXTS.with_borrow_mut(|stack| stack.push(previous));
+        unsafe { sys::ImPlot3D_SetCurrentContext(raw) };
+        Some(Self)
     }
 }
 
 impl Drop for Plot3DContextGuard {
     fn drop(&mut self) {
-        if self.restore_plot {
-            unsafe {
-                sys::ImPlot3D_SetCurrentContext(self.prev_plot_ctx_raw);
-            }
-        }
+        let previous = PREVIOUS_CONTEXTS
+            .with_borrow_mut(|stack| stack.pop().expect("active ImPlot3D context binding"));
+        unsafe { sys::ImPlot3D_SetCurrentContext(previous) };
     }
 }

@@ -55,6 +55,21 @@ impl Drop for PlatformDrawDataTextureMask {
 }
 
 impl Context {
+    /// Updates this context's hovered window and input capture flags.
+    ///
+    /// Platform integrations can use this when they drive hover and capture manually.
+    /// Panics if either component of `mouse_pos` is non-finite.
+    #[doc(alias = "UpdateHoveredWindowAndCaptureFlags")]
+    pub fn update_hovered_window_and_capture_flags(&mut self, mouse_pos: [f32; 2]) {
+        assert!(
+            mouse_pos.into_iter().all(f32::is_finite),
+            "mouse position must be finite"
+        );
+        with_bound_context(self.raw, || unsafe {
+            sys::igUpdateHoveredWindowAndCaptureFlags(sys::ImVec2::from(mouse_pos).into());
+        });
+    }
+
     /// Get shared access to the platform IO.
     ///
     /// Note: `ImGuiPlatformIO` exists even when multi-viewport is disabled. We expose it
@@ -443,7 +458,7 @@ mod tests {
         let first = Context::create();
         let binding = first.binding();
         let first_raw = first.as_raw();
-        let _first = first.suspend_or_panic();
+        let _first = first;
         let mut target = Context::create();
         let target_raw = target.as_raw();
         let _lease = target

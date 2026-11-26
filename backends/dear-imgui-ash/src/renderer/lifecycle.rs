@@ -138,6 +138,8 @@ impl AshRenderer {
             queue,
             command_pool,
             render_target,
+            #[cfg(feature = "dynamic-rendering")]
+            stencil_attachment_format,
             options,
         } = config;
         if options.in_flight_frames == 0 {
@@ -147,7 +149,13 @@ impl AshRenderer {
         }
         let context_state = RendererContextState::prepare(imgui)?;
 
-        let resources = VulkanRendererResources::create(&device, render_target, options)?;
+        let resources = VulkanRendererResources::create(
+            &device,
+            render_target,
+            options,
+            #[cfg(feature = "dynamic-rendering")]
+            stencil_attachment_format,
+        )?;
 
         let mut renderer = Self {
             device,
@@ -378,6 +386,8 @@ impl AshRenderer {
             self.resources.pipeline_layout,
             target.pipeline_target(),
             options,
+            #[cfg(feature = "dynamic-rendering")]
+            vk::Format::UNDEFINED,
         ) {
             Ok(pipeline) => pipeline,
             Err(err) => {
@@ -688,6 +698,9 @@ mod shutdown_transaction_tests {
         let mut context = Context::create();
         let mut renderer = renderer_for_test(&mut context);
         let texture = seed_external_texture(&mut renderer);
+        let mut foreign = Context::create();
+        let foreign_state = RendererContextState::prepare(&foreign).unwrap();
+        foreign_state.publish(&mut foreign).unwrap();
 
         let result = renderer.shutdown_with_destroy(&mut context, |renderer| {
             renderer.textures.external_textures.clear();
@@ -699,6 +712,11 @@ mod shutdown_transaction_tests {
             result,
             Err(RendererError::Vulkan(vk::Result::ERROR_DEVICE_LOST))
         ));
+        assert_eq!(
+            unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+            foreign.as_raw()
+        );
+        foreign_state.validate().unwrap();
         assert!(renderer.consumer.is_none());
         assert!(
             !renderer
@@ -711,6 +729,7 @@ mod shutdown_transaction_tests {
         assert!(!context.io().backend_flags().intersects(
             BackendFlags::RENDERER_HAS_TEXTURES | BackendFlags::RENDERER_HAS_VTX_OFFSET
         ));
+        foreign_state.unpublish(&mut foreign);
     }
 
     #[test]

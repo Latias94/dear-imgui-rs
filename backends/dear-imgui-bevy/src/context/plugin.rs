@@ -170,7 +170,7 @@ impl std::error::Error for ImguiPluginInstallError {
 }
 
 struct PreparedImguiInstallation {
-    primary: Option<dear_imgui_rs::SuspendedContext>,
+    primary: Option<dear_imgui_rs::Context>,
     driver_schedule: schedule::ValidatedImguiDriverSchedulePlacement,
 }
 
@@ -267,7 +267,7 @@ impl ImguiPlugin {
                 return Err(ImguiPluginInstallError::ContextRegistryMissing);
             }
             Some(
-                dear_imgui_rs::SuspendedContext::try_create()
+                dear_imgui_rs::Context::try_create()
                     .map_err(ImguiPluginInstallError::ContextCreation)?,
             )
         };

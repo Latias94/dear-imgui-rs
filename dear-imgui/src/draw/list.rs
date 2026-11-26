@@ -148,15 +148,34 @@ impl<'ui> DrawListMut<'ui> {
     }
 
     pub(super) fn assert_scope(&self, operation: &'static str) {
-        let DrawListProvenance::Window(scope) = self.provenance else {
-            return;
-        };
-        self.ui().run_with_bound_context(|| {
+        if self.is_window_scoped() {
+            self.ui()
+                .run_with_bound_context(|| self.assert_bound_scope(operation));
+        }
+    }
+
+    fn assert_bound_scope(&self, operation: &'static str) {
+        if let DrawListProvenance::Window(scope) = self.provenance {
             assert!(
                 self.ui().current_native_scope().window() == Some(scope),
                 "{operation} requires the window Begin scope that created this DrawListMut"
             );
-        });
+        }
+    }
+
+    pub(super) fn with_raw_bound<R>(
+        &self,
+        operation: &'static str,
+        f: impl FnOnce(*mut sys::ImDrawList) -> R,
+    ) -> R {
+        #[cfg(test)]
+        if self.ui.is_none() {
+            return f(self.draw_list);
+        }
+        self.ui().run_with_bound_context(|| {
+            self.assert_bound_scope(operation);
+            f(self.draw_list)
+        })
     }
 
     pub(super) fn is_window_scoped(&self) -> bool {

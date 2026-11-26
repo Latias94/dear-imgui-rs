@@ -15,7 +15,7 @@ mod viewport_attachment;
 
 #[cfg(feature = "render")]
 pub use backend_contract::ImguiRendererOwnershipError;
-pub(crate) use backend_contract::{BackendAttachment, ImguiActiveRendererContextError};
+pub(crate) use backend_contract::{BackendAttachment, ImguiRendererContextError};
 pub use backend_contract::{ImguiContextRemovalPendingReason, ImguiContextScopeError};
 pub(crate) use driver::{drive_imgui_contexts, install_context_lifecycle};
 #[cfg(feature = "render")]

@@ -708,7 +708,6 @@ fn public_drift_check_clears_only_the_runtime_context_capability() {
             .platform_io_mut()
             .set_renderer_destroy_window_raw(Some(foreign_renderer_unary));
     }
-    let suspended_context = context.suspend_or_panic();
     let mut other_context = Context::create();
     let io = other_context.io_mut();
     io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_VIEWPORTS);
@@ -727,10 +726,6 @@ fn public_drift_check_clears_only_the_runtime_context_capability() {
         "drift cleanup must not mutate the Context restored after validation"
     );
 
-    let suspended_other = other_context.suspend_or_panic();
-    let mut context = suspended_context
-        .activate()
-        .expect("the other Context was suspended");
     assert!(
         !context
             .io()
@@ -744,7 +739,7 @@ fn public_drift_check_clears_only_the_runtime_context_capability() {
     }
 
     runtime.shutdown(&mut context).unwrap();
-    drop(suspended_other);
+    drop(other_context);
 }
 
 #[test]
@@ -1196,7 +1191,6 @@ fn public_route_rejects_foreign_frame_before_platform_or_renderer_side_effects()
             callback: "queued renderer fault",
         });
 
-    let suspended_target = target.suspend_or_panic();
     let mut source = Context::create();
     source
         .font_atlas()
@@ -1247,7 +1241,7 @@ fn public_route_rejects_foreign_frame_before_platform_or_renderer_side_effects()
     drop(source);
     drop(target_runtime);
     drop(target_platform);
-    drop(suspended_target);
+    drop(target);
 }
 
 #[test]
@@ -1263,7 +1257,6 @@ fn owning_runtime_rejects_foreign_frame_before_target_fault_or_renderer_entry() 
             callback: "queued before owning prepare",
         });
 
-    let suspended_target = target.suspend_or_panic();
     let mut source = Context::create();
     source
         .font_atlas()
@@ -1296,7 +1289,7 @@ fn owning_runtime_rejects_foreign_frame_before_target_fault_or_renderer_entry() 
     drop(source);
     drop(target_runtime);
     drop(target_platform);
-    drop(suspended_target);
+    drop(target);
 }
 
 #[test]
@@ -1312,7 +1305,6 @@ fn frame_runtime_identity_mismatch_is_rejected_before_target_faults_are_consumed
             callback: "queued before runtime validation",
         });
 
-    let suspended_a = context_a.suspend_or_panic();
     let mut context_b = Context::create();
     let platform_b = attach_test_platform(&mut context_b);
     let runtime_b = OwningViewportRuntime::attach_for_test(&mut context_b).unwrap();
@@ -1347,7 +1339,7 @@ fn frame_runtime_identity_mismatch_is_rejected_before_target_faults_are_consumed
     drop(context_b);
     drop(runtime_a);
     drop(platform_a);
-    drop(suspended_a);
+    drop(context_a);
 }
 
 #[test]

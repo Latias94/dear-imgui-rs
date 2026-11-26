@@ -46,7 +46,13 @@ impl NodeEditor<'_> {
                 }
             },
             sys::imnodes_EndNode,
-            |host| draw(&NodeToken { editor: self, host }),
+            |host| {
+                draw(&NodeToken {
+                    editor: self,
+                    host,
+                    title_submitted: Default::default(),
+                })
+            },
         )
     }
 

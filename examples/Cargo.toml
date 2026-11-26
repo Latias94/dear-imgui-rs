@@ -19,6 +19,7 @@ node-editor-blueprints = [
 imguizmo-quat = ["dep:dear-imguizmo-quat"]
 implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
 file-browser = ["dep:dear-file-browser", "dear-file-browser/thumbnails-image"]
+file-browser-native = ["file-browser", "dear-file-browser/native-rfd"]
 reflect = ["dep:dear-imgui-reflect", "dear-imgui-reflect/glam"]
 test-engine = ["dep:dear-imgui-test-engine", "dear-app/test-engine"]
 cte = ["dep:dear-imgui-cte"]
@@ -342,7 +343,7 @@ path = "04-integration/asset_browser_grid.rs"
 [[bin]]
 name = "file_dialog_native"
 path = "04-integration/file_dialog_native.rs"
-required-features = ["file-browser"]
+required-features = ["file-browser-native"]
 
 [[bin]]
 name = "file_browser_imgui"

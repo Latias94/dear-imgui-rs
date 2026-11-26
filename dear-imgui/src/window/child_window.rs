@@ -141,14 +141,13 @@ impl<'ui> ChildWindow<'ui> {
 
     /// Begins the child window and returns a token
     fn begin(self, ui: &'ui Ui) -> Option<ChildWindowGuard<'ui>> {
-        let name_ptr = ui.scratch_txt(self.name);
         validate_child_flags("ChildWindow::begin()", self.child_flags, self.flags);
         assert!(
             self.size[0].is_finite() && self.size[1].is_finite(),
             "ChildWindow::begin() size must contain finite values"
         );
 
-        ui.run_with_bound_context(|| {
+        ui.with_scratch_txt(self.name, |name_ptr| {
             let result = unsafe {
                 let size_vec = sys::ImVec2 {
                     x: self.size[0],

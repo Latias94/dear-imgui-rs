@@ -9,10 +9,7 @@ use std::ffi::{CStr, CString};
 use std::fmt;
 use std::os::raw::c_char;
 use std::ptr;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-
-use crate::string::ScratchBuffers;
 
 #[cfg(feature = "system-clipboard")]
 mod system;
@@ -53,28 +50,23 @@ pub trait ClipboardBackend: 'static {
 pub(crate) struct ClipboardContext {
     borrowed: AtomicBool,
     backend: RefCell<Box<dyn ClipboardBackend>>,
-    scratch_buffers: Rc<ScratchBuffers>,
     // This is needed to keep ownership of the value when the raw C callback is called
     last_value: RefCell<CString>,
 }
 
 impl ClipboardContext {
     /// Creates a new ClipboardContext
-    pub fn new<T: ClipboardBackend>(
-        backend: T,
-        scratch_buffers: Rc<ScratchBuffers>,
-    ) -> ClipboardContext {
+    pub fn new<T: ClipboardBackend>(backend: T) -> ClipboardContext {
         ClipboardContext {
             borrowed: AtomicBool::new(false),
             backend: RefCell::new(Box::new(backend)),
-            scratch_buffers,
             last_value: RefCell::new(CString::default()),
         }
     }
 
     /// Creates a dummy clipboard context that doesn't actually interact with the system clipboard
-    pub fn dummy(scratch_buffers: Rc<ScratchBuffers>) -> ClipboardContext {
-        Self::new(DummyClipboardBackend, scratch_buffers)
+    pub fn dummy() -> ClipboardContext {
+        Self::new(DummyClipboardBackend)
     }
 
     fn try_borrow(&self) -> Option<ClipboardBorrowGuard<'_>> {
@@ -82,14 +74,11 @@ impl ClipboardContext {
     }
 
     fn get(&self, _borrow: &ClipboardBorrowGuard<'_>) -> Option<String> {
-        // A native widget may still need its staged label after the backend returns.
-        self.scratch_buffers
-            .with(|_| self.backend.borrow_mut().get())
+        self.backend.borrow_mut().get()
     }
 
     fn set(&self, _borrow: &ClipboardBorrowGuard<'_>, value: &str) {
-        self.scratch_buffers
-            .with(|_| self.backend.borrow_mut().set(value));
+        self.backend.borrow_mut().set(value);
     }
 
     fn store_last_value(
@@ -164,7 +153,7 @@ pub(crate) unsafe extern "C" fn get_clipboard_text(
         }
     });
     result.unwrap_or_else(|_| {
-        eprintln!("Clipboard getter panicked");
+        let _ = std::io::Write::write_all(&mut std::io::stderr(), b"Clipboard getter panicked\n");
         std::process::abort();
     })
 }
@@ -199,7 +188,7 @@ pub(crate) unsafe extern "C" fn set_clipboard_text(
         ctx.set(&borrow, &text);
     });
     result.unwrap_or_else(|_| {
-        eprintln!("Clipboard setter panicked");
+        let _ = std::io::Write::write_all(&mut std::io::stderr(), b"Clipboard setter panicked\n");
         std::process::abort();
     });
 }

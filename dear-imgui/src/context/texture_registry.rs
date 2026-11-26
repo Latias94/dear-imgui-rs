@@ -16,7 +16,7 @@ use crate::texture::{
     ManagedTextureRef, OwnedTextureData, TextureData, TextureDataError, TextureStatus,
 };
 
-use super::binding::CTX_MUTEX;
+use super::binding::{CTX_MUTEX, RawBoundContextGuard};
 use super::texture_sync::{TextureSyncQueue, cumulative_update_rect, update_pending_create};
 use super::{Context, ContextId};
 
@@ -777,7 +777,7 @@ impl Context {
     /// Transfer an owned user texture into this Context's managed registry.
     pub fn register_texture(&mut self, texture: OwnedTextureData) -> ManagedTextureId {
         let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::register_texture()");
+        let _bound = RawBoundContextGuard::bind(self.raw);
         let watermark = self.snapshot_hub.completion_watermark();
         self.texture_registry
             .borrow_mut()
@@ -801,7 +801,7 @@ impl Context {
         f: impl for<'texture> FnOnce(ManagedTextureRef<'texture>) -> R,
     ) -> Result<R, ManagedTextureError> {
         let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::with_texture()");
+        let _bound = RawBoundContextGuard::bind(self.raw);
         self.texture_registry.borrow().with_texture(id, f)
     }
 
@@ -824,7 +824,7 @@ impl Context {
         f: impl for<'texture> FnOnce(ManagedTextureMut<'texture>) -> R,
     ) -> Result<R, ManagedTextureError> {
         let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::with_texture_mut()");
+        let _bound = RawBoundContextGuard::bind(self.raw);
         self.texture_registry.borrow_mut().with_texture_mut(id, f)
     }
 
@@ -874,7 +874,7 @@ impl Context {
     /// commands can still be rendered or captured. Retirement starts when that frame expires.
     pub fn remove_texture(&mut self, id: ManagedTextureId) -> Result<(), ManagedTextureError> {
         let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::remove_texture()");
+        let _bound = RawBoundContextGuard::bind(self.raw);
         let watermark = self.snapshot_hub.completion_watermark();
         let retain_frame =
             self.frame_lifecycle_state_unlocked() != super::FrameLifecycleState::Idle;
@@ -917,7 +917,7 @@ mod tests {
     fn foreign_and_reused_handles_fail_before_native_access() {
         let mut context_a = Context::create();
         let first_id = context_a.register_texture(texture());
-        let suspended_a = context_a.suspend_or_panic();
+        let suspended_a = context_a;
         let mut context_b = Context::create();
         assert!(matches!(
             context_b.with_texture(first_id, |_| ()),
@@ -932,7 +932,7 @@ mod tests {
             ))
         ));
         drop(context_b);
-        let mut context_a = suspended_a.activate().expect("Context A should reactivate");
+        let mut context_a = suspended_a;
         context_a.remove_texture(first_id).expect("unused texture");
         assert_eq!(
             context_a.try_with_texture_mut(first_id, |mut texture| {

@@ -13,7 +13,7 @@ use crate::render::snapshot::{
     validate_texture_feedback,
 };
 
-use super::binding::CTX_MUTEX;
+use super::binding::{CTX_MUTEX, RawBoundContextGuard};
 use super::texture_registry::{
     FontAtlasSnapshotTarget, FontAtlasTextureTarget, ManagedTextureRegistry,
 };
@@ -584,7 +584,7 @@ impl Context {
         &mut self,
         caller: &str,
     ) -> Result<NonZeroU64, RendererConsumerError> {
-        self.assert_current_context(caller);
+        let _bound = RawBoundContextGuard::bind(self.raw);
         let atlas_target = self.font_atlas_snapshot_target();
         let _ = self.poll_snapshot_completions_with_target(&atlas_target)?;
         let (atlas, generation) = self.validate_renderer_consumer_admission_unlocked(caller)?;
@@ -596,7 +596,6 @@ impl Context {
         &self,
         caller: &str,
     ) -> Result<(*mut crate::sys::ImFontAtlas, NonZeroU64), RendererConsumerError> {
-        self.assert_current_context(caller);
         let io = self.io_ptr(caller);
         let atlas = unsafe { (*io).Fonts };
         crate::fonts::validate_font_atlas_managed_renderer(atlas, self.raw)?;
@@ -615,7 +614,7 @@ impl Context {
     pub(super) fn poll_snapshot_completions_unlocked(
         &mut self,
     ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
-        self.assert_current_context("Context::poll_snapshot_completions()");
+        let _bound = RawBoundContextGuard::bind(self.raw);
         let atlas = self.font_atlas_snapshot_target();
         self.poll_snapshot_completions_with_target(&atlas)
     }
@@ -682,7 +681,7 @@ impl Context {
         &mut self,
         consumer: &impl RendererConsumerCapability,
     ) -> Result<u64, RendererConsumerError> {
-        self.assert_current_context("Context::prepare_renderer_texture_reset()");
+        let _bound = RawBoundContextGuard::bind(self.raw);
         self.snapshot_hub.validate_consumer_identity(consumer)?;
         let atlas = self.font_atlas_snapshot_target();
         let _ = self.poll_snapshot_completions_with_target(&atlas)?;
@@ -699,7 +698,7 @@ impl Context {
     }
 
     fn commit_renderer_texture_reset_unlocked(&mut self, watermark: u64) {
-        self.assert_current_context("RendererTextureReset::commit()");
+        let _bound = RawBoundContextGuard::bind(self.raw);
         let atlas = self.font_atlas_snapshot_target();
         atlas.reset_renderer_bindings();
         self.texture_registry
@@ -852,7 +851,7 @@ mod tests {
         let _guard = crate::test_support::imgui_context_guard();
         let atlas = crate::SharedFontAtlas::create();
         let first = Context::create_with_shared_font_atlas(atlas.clone());
-        let suspended = first.suspend_or_panic();
+        let suspended = first;
         let second = Context::create_with_shared_font_atlas(atlas.clone());
 
         assert_eq!(
@@ -883,7 +882,7 @@ mod tests {
             Err(RendererConsumerError::ConsumerGenerationExhausted)
         ));
 
-        let suspended = context.suspend_or_panic();
+        let suspended = context;
         let second = Context::try_create_with_shared_font_atlas(atlas.clone())
             .expect("failed consumer admission must not claim the shared font atlas");
         drop(second);

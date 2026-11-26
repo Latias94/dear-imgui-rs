@@ -16,13 +16,7 @@ impl Ui {
     /// clicking outside of the UI).
     #[doc(alias = "SetWindowFocus")]
     pub fn set_window_focus(&self, name: Option<&str>) {
-        let name = name.map(|name| self.scratch_txt(name));
-        self.run_with_bound_context(|| unsafe {
-            match name {
-                Some(name) => sys::igSetWindowFocus_Str(name),
-                None => sys::igSetWindowFocus_Nil(),
-            }
-        });
+        self.with_scratch_txt_opt(name, |name| unsafe { sys::igSetWindowFocus_Str(name) });
     }
 
     /// Sets the position of the current window.
@@ -63,8 +57,7 @@ impl Ui {
             x: pos[0],
             y: pos[1],
         };
-        let name = self.scratch_txt(name);
-        self.run_with_bound_context(|| unsafe {
+        self.with_scratch_txt(name, |name| unsafe {
             sys::igSetWindowPos_Str(name, pos_vec, cond as sys::ImGuiCond)
         });
     }
@@ -107,8 +100,7 @@ impl Ui {
             x: size[0],
             y: size[1],
         };
-        let name = self.scratch_txt(name);
-        self.run_with_bound_context(|| unsafe {
+        self.with_scratch_txt(name, |name| unsafe {
             sys::igSetWindowSize_Str(name, size_vec, cond as sys::ImGuiCond);
         });
     }
@@ -141,8 +133,7 @@ impl Ui {
         collapsed: bool,
         cond: crate::Condition,
     ) {
-        let name = self.scratch_txt(name);
-        self.run_with_bound_context(|| unsafe {
+        self.with_scratch_txt(name, |name| unsafe {
             sys::igSetWindowCollapsed_Str(name, collapsed, cond as sys::ImGuiCond);
         });
     }

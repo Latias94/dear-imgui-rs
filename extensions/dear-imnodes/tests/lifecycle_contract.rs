@@ -1,5 +1,5 @@
 use dear_imgui_rs::{Context, FramePrepareOptions};
-use dear_imnodes::{ImNodesExt, LinkId, NodeId, PinId, PinShape};
+use dear_imnodes::{ImNodesContext, ImNodesExt, LinkId, NodeId, PinId, PinShape};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, OnceLock};
 
@@ -26,7 +26,7 @@ fn title_only_nodes_include_the_body_origin_in_the_group_bounds() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    let nodes = dear_imnodes::Context::create(&imgui);
+    let nodes = ImNodesContext::create(&imgui);
     let ui = imgui.frame();
     ui.window("Node bounds")
         .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
@@ -51,11 +51,33 @@ fn title_only_nodes_include_the_body_origin_in_the_group_bounds() {
 }
 
 #[test]
+fn each_node_accepts_only_one_title_bar() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let nodes = ImNodesContext::create(&imgui);
+    let ui = imgui.frame();
+    ui.imnodes(&nodes).editor(None).with_nodes(|editor| {
+        editor.node(NodeId::new(1), |node| {
+            node.title_bar(|| {
+                ui.text("First title");
+                assert!(catch_unwind(AssertUnwindSafe(|| node.title_bar(|| {}))).is_err());
+            });
+            assert!(catch_unwind(AssertUnwindSafe(|| node.title_bar(|| {}))).is_err());
+        });
+        editor.node(NodeId::new(2), |node| {
+            node.title_bar(|| ui.text("Another node"))
+        });
+    });
+    assert!(imgui.end_frame());
+}
+
+#[test]
 fn queued_unsubmitted_node_options_do_not_touch_native_node_bookkeeping() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    let nodes = dear_imnodes::Context::create(&imgui);
+    let nodes = ImNodesContext::create(&imgui);
     let editor_context = nodes.create_editor_context();
 
     let ui = imgui.frame();
@@ -83,7 +105,7 @@ fn selection_tracks_submitted_nodes_and_links() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    let nodes = dear_imnodes::Context::create(&imgui);
+    let nodes = ImNodesContext::create(&imgui);
     let graph = nodes.create_editor_context();
     let keep = NodeId::new(1);
     let remove = NodeId::new(2);
@@ -159,7 +181,7 @@ fn editor_scopes_own_their_explicit_editor_context_lease() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    let nodes = dear_imnodes::Context::create(&imgui);
+    let nodes = ImNodesContext::create(&imgui);
 
     let editor_context = nodes.create_editor_context();
     let bound = nodes.bind_editor(&editor_context);
@@ -186,7 +208,7 @@ fn unwinding_an_attribute_restores_the_host_and_allows_another_editor() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    let nodes = dear_imnodes::Context::create(&imgui);
+    let nodes = ImNodesContext::create(&imgui);
     let ui = imgui.frame();
     ui.window("Parent")
         .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
@@ -243,8 +265,8 @@ fn submissions_are_bound_to_their_canvas_node_and_connectable_pins() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    let nodes = dear_imnodes::Context::create(&imgui);
-    let other = dear_imnodes::Context::create(&imgui);
+    let nodes = ImNodesContext::create(&imgui);
+    let other = ImNodesContext::create(&imgui);
     let explicit = nodes.create_editor_context();
     let ui = imgui.frame();
     ui.window("Outer graph")
@@ -314,7 +336,7 @@ fn temporary_style_stacks_restore_configuration_for_the_next_editor() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    let nodes = dear_imnodes::Context::create(&imgui);
+    let nodes = ImNodesContext::create(&imgui);
     let ui = imgui.frame();
     let setup = ui.imnodes(&nodes).editor(None);
     let color = ColorElement::TitleBar;
@@ -330,8 +352,63 @@ fn temporary_style_stacks_restore_configuration_for_the_next_editor() {
             ))
             .is_err()
         );
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| {
+                editor.push_style_var_f32(StyleVar::LinkLineSegmentsPerLength, f32::NAN)
+            }))
+            .is_err()
+        );
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| {
+                editor.push_style_var_vec2(StyleVar::MiniMapPadding, [4.0, f32::INFINITY])
+            }))
+            .is_err()
+        );
         let _padding = editor.push_style_var_vec2(StyleVar::NodePadding, [3.0; 2]);
     });
     assert_eq!(ui.imnodes(&nodes).editor(None).get_color(color), original);
+    assert!(imgui.end_frame());
+}
+
+#[test]
+fn editor_rejects_invalid_panning_and_layout_before_native_mutation() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let nodes = ImNodesContext::create(&imgui);
+    let editor = nodes.create_editor_context();
+    let bound = nodes.bind_editor(&editor);
+    bound.reset_panning([-7.0, 12.0]);
+    assert!(catch_unwind(AssertUnwindSafe(|| bound.reset_panning([f32::NAN, 2.0]))).is_err());
+    assert_eq!(bound.get_panning(), [-7.0, 12.0]);
+
+    let ui = imgui.frame();
+    let setup = ui.imnodes(&nodes).editor(Some(&editor));
+    assert!(catch_unwind(AssertUnwindSafe(|| setup.set_auto_panning_speed(f32::NAN))).is_err());
+    assert!(catch_unwind(AssertUnwindSafe(|| setup.set_node_padding([f32::NAN, 0.0]))).is_err());
+    assert!(
+        catch_unwind(AssertUnwindSafe(
+            || setup.set_minimap_padding([0.0, f32::INFINITY])
+        ))
+        .is_err()
+    );
+    assert!(
+        catch_unwind(AssertUnwindSafe(
+            || setup.set_minimap_offset([0.0, f32::INFINITY])
+        ))
+        .is_err()
+    );
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            setup.set_link_line_segments_per_length(f32::INFINITY)
+        }))
+        .is_err()
+    );
+    setup.set_auto_panning_speed(200.0);
+    setup.set_node_padding([4.0, 8.0]);
+    setup.set_minimap_padding([4.0, 8.0]);
+    setup.set_minimap_offset([-2.0, 2.0]);
+    setup.set_link_line_segments_per_length(0.1);
+    setup.end();
     assert!(imgui.end_frame());
 }

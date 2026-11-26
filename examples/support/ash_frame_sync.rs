@@ -157,11 +157,7 @@ pub unsafe fn transition_swapchain_image(
     new_layout: vk::ImageLayout,
 ) {
     let (src_stage, src_access) = match old_layout {
-        vk::ImageLayout::UNDEFINED => (
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::AccessFlags::empty(),
-        ),
-        vk::ImageLayout::PRESENT_SRC_KHR => (
+        vk::ImageLayout::UNDEFINED | vk::ImageLayout::PRESENT_SRC_KHR => (
             vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
             vk::AccessFlags::empty(),
         ),

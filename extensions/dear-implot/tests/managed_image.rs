@@ -163,7 +163,6 @@ fn managed_image_rejects_a_foreign_context_before_plot_ffi() {
     let _guard = test_guard();
     let mut owner = Context::create();
     let managed = register_texture(&mut owner);
-    let owner = owner.suspend_or_panic();
 
     let mut foreign = Context::create();
     prepare_imgui(&mut foreign);
@@ -196,9 +195,7 @@ fn managed_image_rejects_a_foreign_context_before_plot_ffi() {
     drop(plot);
     drop(foreign);
 
-    let _owner = owner
-        .activate()
-        .unwrap_or_else(|_| panic!("owner context should reactivate"));
+    assert!(owner.with_texture(managed, |_| ()).is_ok());
 }
 
 #[test]

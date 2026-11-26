@@ -92,6 +92,10 @@ texture-parameter fallback. The fallback changes `TEXTURE_MIN_FILTER` and `TEXTU
 only for an explicit linear or nearest sampler command and restores their exact previous values
 after the draw, including mipmapped filters.
 
+On OpenGL ES 3.x and WebGL 2, the renderer handles ImGui vertex offsets with byte offsets into
+the vertex buffer. To preserve separable program pipeline bindings on native OpenGL, supply
+the entry point from your context loader with `GlowRenderer::set_bind_program_pipeline`.
+
 On sampler-object contexts, the renderer's default and reset state use its linear sampler without
 changing the texture object. On fallback contexts, the default path honors the texture's own
 filtering. A standard sampler command affects only subsequent ImGui elements in the current

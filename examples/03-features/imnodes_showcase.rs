@@ -23,7 +23,7 @@ struct ImguiState {
     context: Context,
     platform: WinitPlatform,
     renderer: WgpuRenderer,
-    nodes_context: imnodes::Context,
+    nodes_context: imnodes::ImNodesContext,
     editor_context: imnodes::EditorContext,
     editor_context_b: imnodes::EditorContext,
     editor_context_shader: imnodes::EditorContext,
@@ -207,7 +207,7 @@ impl AppWindow {
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
 
         // Setup ImNodes
-        let nodes_context = imnodes::Context::create(&context);
+        let nodes_context = imnodes::ImNodesContext::create(&context);
         let editor_context = nodes_context.create_editor_context();
         let editor_context_b = nodes_context.create_editor_context();
         let editor_context_shader = nodes_context.create_editor_context();

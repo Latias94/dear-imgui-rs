@@ -8,31 +8,51 @@
 
 #include <chrono>
 #include <limits>
+#include <memory>
 #include <new>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#if defined(__cpp_exceptions) || defined(_CPPUNWIND)
+#define CTE_TRY try
+#define CTE_CATCH(...) catch (...) { __VA_ARGS__ }
+#else
+#define CTE_TRY
+#define CTE_CATCH(...)
+#endif
+#define CTE_CATCH_STATUS CTE_CATCH(return DearImGuiCteStatus_CallbackFailed;)
+
+struct DearImGuiCteAutocompleteConfig {
+    TextEditor::AutoCompleteConfig value;
+    DearImGuiCteAutocompleteCallback callback = nullptr;
+    void* callback_userdata = nullptr;
+};
+
+namespace {
+
 // Glyph is mirrored by the sys crate because its enums use one-byte storage.
-static_assert(sizeof(TextEditor::Glyph) == 12);
-static_assert(alignof(TextEditor::Glyph) == alignof(uint32_t));
-static_assert(offsetof(TextEditor::Glyph, codepoint) == 0);
-static_assert(offsetof(TextEditor::Glyph, color) == 4);
-static_assert(offsetof(TextEditor::Glyph, breakOption) == 5);
-static_assert(offsetof(TextEditor::Glyph, columns) == 6);
-static_assert(offsetof(TextEditor::Glyph, squiggle) == 8);
+struct CteGlyph {
+    uint32_t codepoint;
+    uint8_t color;
+    uint8_t break_option;
+    uint8_t columns;
+    uint32_t squiggle;
+};
+
+static_assert(sizeof(TextEditor::Glyph) == sizeof(CteGlyph));
+static_assert(alignof(TextEditor::Glyph) == alignof(CteGlyph));
+static_assert(offsetof(TextEditor::Glyph, codepoint) == offsetof(CteGlyph, codepoint));
+static_assert(offsetof(TextEditor::Glyph, color) == offsetof(CteGlyph, color));
+static_assert(offsetof(TextEditor::Glyph, breakOption) == offsetof(CteGlyph, break_option));
+static_assert(offsetof(TextEditor::Glyph, columns) == offsetof(CteGlyph, columns));
+static_assert(offsetof(TextEditor::Glyph, squiggle) == offsetof(CteGlyph, squiggle));
 static_assert(static_cast<int>(TextEditor::Color::currentLineHighlight) == 22);
 static_assert(static_cast<int>(TextEditor::Color::currentLineHighlightBorder) == 23);
 static_assert(static_cast<int>(TextEditor::Color::customColor1) == 24);
 static_assert(static_cast<int>(TextEditor::Color::customColor9) == 32);
 static_assert(static_cast<int>(TextEditor::Color::count) == 33);
-
-struct DearImGuiCteAutocompleteConfig {
-    TextEditor::AutoCompleteConfig value;
-};
-
-namespace {
 
 bool valid_bytes(const char* data, size_t length) noexcept {
     return data != nullptr || length == 0;
@@ -72,19 +92,26 @@ DearImGuiCteBridgeTextEditor* bridge_editor(TextEditor* editor) noexcept {
 
 } // namespace
 
-TextEditor* dear_imgui_cte_text_editor_create(void) noexcept {
-    return IM_NEW(DearImGuiCteBridgeTextEditor)();
-}
+TextEditor* dear_imgui_cte_text_editor_create(void) noexcept CTE_TRY {
+    std::unique_ptr<void, decltype(&ImGui::MemFree)> storage(
+        IM_ALLOC(sizeof(DearImGuiCteBridgeTextEditor)), ImGui::MemFree);
+    if (!storage) {
+        return nullptr;
+    }
+    auto* editor = ::new (storage.get()) DearImGuiCteBridgeTextEditor();
+    storage.release();
+    return editor;
+} CTE_CATCH(return nullptr;)
 
-void dear_imgui_cte_text_editor_destroy(TextEditor* editor) noexcept {
+void dear_imgui_cte_text_editor_destroy(TextEditor* editor) noexcept CTE_TRY {
     IM_DELETE(bridge_editor(editor));
-}
+} CTE_CATCH()
 
 DearImGuiCteStatus dear_imgui_cte_text_editor_set_change_callback(
     TextEditor* editor,
     DearImGuiCteChangeCallback callback,
     void* userdata,
-    int delay_ms) noexcept {
+    int delay_ms) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -99,31 +126,31 @@ DearImGuiCteStatus dear_imgui_cte_text_editor_set_change_callback(
             delay_ms);
     }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_text_editor_reset_autocomplete(
-    TextEditor* editor) noexcept {
+    TextEditor* editor) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
     bridge_editor(editor)->reset_autocomplete();
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_text_editor_clear_callbacks(
-    TextEditor* editor) noexcept {
+    TextEditor* editor) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
     bridge_editor(editor)->clear_callbacks();
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_set_change_callback(
     TextEditor* editor,
     DearImGuiCteChangeCallback callback,
     void* userdata,
-    int delay_ms) noexcept {
+    int delay_ms) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -136,12 +163,12 @@ DearImGuiCteStatus dear_imgui_cte_set_change_callback(
         editor->SetChangeCallback([callback, userdata]() { callback(userdata); }, delay_ms);
     }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_set_transaction_callback(
     TextEditor* editor,
     DearImGuiCteTransactionCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -163,12 +190,12 @@ DearImGuiCteStatus dear_imgui_cte_set_transaction_callback(
             });
     }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_set_insert_callback(
     TextEditor* editor,
     DearImGuiCteInsertCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -179,12 +206,12 @@ DearImGuiCteStatus dear_imgui_cte_set_insert_callback(
             [callback, userdata](size_t line) { return callback(userdata, line); });
     }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_set_delete_callback(
     TextEditor* editor,
     DearImGuiCteDeleteCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -196,12 +223,12 @@ DearImGuiCteStatus dear_imgui_cte_set_delete_callback(
         });
     }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_iterate_line_data(
     TextEditor* editor,
     DearImGuiCteLineDataCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     if (editor == nullptr || callback == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -209,13 +236,13 @@ DearImGuiCteStatus dear_imgui_cte_iterate_line_data(
         callback(userdata, line, line_data);
     });
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_set_line_decorator(
     TextEditor* editor,
     size_t width,
     DearImGuiCteDecoratorCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -229,12 +256,12 @@ DearImGuiCteStatus dear_imgui_cte_set_line_decorator(
             });
     }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_set_custom_caret_callback(
     TextEditor* editor,
     DearImGuiCteCaretCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -247,12 +274,12 @@ DearImGuiCteStatus dear_imgui_cte_set_custom_caret_callback(
             });
     }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_set_custom_line_number_callback(
     TextEditor* editor,
     DearImGuiCteLineNumberCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -265,12 +292,12 @@ DearImGuiCteStatus dear_imgui_cte_set_custom_line_number_callback(
             });
     }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_set_line_number_context_callback(
     TextEditor* editor,
     DearImGuiCtePopupCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -283,12 +310,12 @@ DearImGuiCteStatus dear_imgui_cte_set_line_number_context_callback(
             });
     }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_set_text_context_callback(
     TextEditor* editor,
     DearImGuiCtePopupCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -301,12 +328,12 @@ DearImGuiCteStatus dear_imgui_cte_set_text_context_callback(
             });
     }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_set_text_hover_callback(
     TextEditor* editor,
     DearImGuiCtePopupCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -319,12 +346,12 @@ DearImGuiCteStatus dear_imgui_cte_set_text_hover_callback(
             });
     }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_set_language_change_callback(
     TextEditor* editor,
     DearImGuiCteChangeCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -334,12 +361,12 @@ DearImGuiCteStatus dear_imgui_cte_set_language_change_callback(
         editor->SetLanguageChangeCallback([callback, userdata]() { callback(userdata); });
     }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_iterate_identifiers(
     TextEditor* editor,
     DearImGuiCteIdentifierCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     if (editor == nullptr || callback == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -347,7 +374,7 @@ DearImGuiCteStatus dear_imgui_cte_iterate_identifiers(
         callback(userdata, identifier.data(), identifier.size());
     });
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 namespace {
 
@@ -355,7 +382,7 @@ DearImGuiCteStatus filter_text(
     TextEditor* editor,
     DearImGuiCteFilterCallback callback,
     void* userdata,
-    bool lines) noexcept {
+    bool lines) {
     if (editor == nullptr || callback == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -394,18 +421,18 @@ DearImGuiCteStatus filter_text(
 DearImGuiCteStatus dear_imgui_cte_filter_selections(
     TextEditor* editor,
     DearImGuiCteFilterCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     return filter_text(editor, callback, userdata, false);
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_filter_lines(
     TextEditor* editor,
     DearImGuiCteFilterCallback callback,
-    void* userdata) noexcept {
+    void* userdata) noexcept CTE_TRY {
     return filter_text(editor, callback, userdata, true);
-}
+} CTE_CATCH_STATUS
 
-DearImGuiCteStatus dear_imgui_cte_clear_callbacks(TextEditor* editor) noexcept {
+DearImGuiCteStatus dear_imgui_cte_clear_callbacks(TextEditor* editor) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -422,23 +449,23 @@ DearImGuiCteStatus dear_imgui_cte_clear_callbacks(TextEditor* editor) noexcept {
     editor->SetLanguageChangeCallback(nullptr);
     editor->SetAutoCompleteConfig(nullptr);
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
-DearImGuiCteAutocompleteConfig* dear_imgui_cte_autocomplete_config_create(void) noexcept {
+DearImGuiCteAutocompleteConfig* dear_imgui_cte_autocomplete_config_create(void) noexcept CTE_TRY {
     return new (std::nothrow) DearImGuiCteAutocompleteConfig{};
-}
+} CTE_CATCH(return nullptr;)
 
 void dear_imgui_cte_autocomplete_config_destroy(
-    DearImGuiCteAutocompleteConfig* config) noexcept {
+    DearImGuiCteAutocompleteConfig* config) noexcept CTE_TRY {
     delete config;
-}
+} CTE_CATCH()
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_triggers(
     DearImGuiCteAutocompleteConfig* config,
     bool on_typing,
     bool on_shortcut,
     bool in_comments,
-    bool in_strings) noexcept {
+    bool in_strings) noexcept CTE_TRY {
     if (config == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -447,43 +474,43 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_triggers(
     config->value.triggerInComments = in_comments;
     config->value.triggerInStrings = in_strings;
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_shortcut(
     DearImGuiCteAutocompleteConfig* config,
-    ImGuiKeyChord shortcut) noexcept {
+    ImGuiKeyChord shortcut) noexcept CTE_TRY {
     if (config == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
     config->value.triggerShortcut = shortcut;
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_auto_insert_single(
     DearImGuiCteAutocompleteConfig* config,
-    bool enabled) noexcept {
+    bool enabled) noexcept CTE_TRY {
     if (config == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
     config->value.autoInsertSingleSuggestions = enabled;
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_characters(
     DearImGuiCteAutocompleteConfig* config,
     const char* trigger_characters,
-    const char* word_characters) noexcept {
+    const char* word_characters) noexcept CTE_TRY {
     if (config == nullptr || trigger_characters == nullptr || word_characters == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
     AutoCompleteConfig_SetTriggerCharacters(&config->value, trigger_characters);
     AutoCompleteConfig_SetWordCharacters(&config->value, word_characters);
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_trigger_delay(
     DearImGuiCteAutocompleteConfig* config,
-    uint64_t delay_ms) noexcept {
+    uint64_t delay_ms) noexcept CTE_TRY {
     if (config == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -493,63 +520,69 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_trigger_delay(
     }
     config->value.triggerDelay = Milliseconds(static_cast<Milliseconds::rep>(delay_ms));
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_no_suggestions_label(
     DearImGuiCteAutocompleteConfig* config,
     const char* label,
-    size_t label_len) noexcept {
+    size_t label_len) noexcept CTE_TRY {
     if (config == nullptr || !valid_bytes(label, label_len)) {
         return DearImGuiCteStatus_NullArgument;
     }
     config->value.noSuggestionsLabel.assign(label_len == 0 ? "" : label, label_len);
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_suggestion_width(
     DearImGuiCteAutocompleteConfig* config,
-    size_t width) noexcept {
+    size_t width) noexcept CTE_TRY {
     if (config == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
     config->value.suggestionWidth = width;
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_callback(
     DearImGuiCteAutocompleteConfig* config,
     DearImGuiCteAutocompleteCallback callback,
-    void* userdata) noexcept {
+    void* callback_userdata) noexcept CTE_TRY {
     if (config == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
-    config->value.userData = userdata;
-    if (callback == nullptr) {
-        config->value.callback = nullptr;
-    } else {
-        config->value.callback =
-            [callback, userdata](TextEditor::AutoCompleteState& state) {
-                callback(userdata, &state);
-            };
-    }
+    config->callback = callback;
+    config->callback_userdata = callback == nullptr ? nullptr : callback_userdata;
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_text_editor_set_autocomplete_config(
     TextEditor* editor,
-    const DearImGuiCteAutocompleteConfig* config) noexcept {
+    const DearImGuiCteAutocompleteConfig* config) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
-    editor->SetAutoCompleteConfig(config == nullptr ? nullptr : &config->value);
+    if (config == nullptr || config->callback == nullptr) {
+        editor->SetAutoCompleteConfig(config == nullptr ? nullptr : &config->value);
+    } else {
+        auto armed = std::make_shared<bool>(false);
+        auto value = config->value;
+        value.callback = [armed, callback = config->callback, userdata = config->callback_userdata](
+                             TextEditor::AutoCompleteState& state) {
+            if (*armed) {
+                callback(userdata, &state);
+            }
+        };
+        editor->SetAutoCompleteConfig(&value);
+        *armed = true;
+    }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_text_editor_set_autocomplete_suggestions(
     TextEditor* editor,
     const char* const* suggestions,
     const size_t* suggestion_lengths,
-    size_t suggestion_count) noexcept {
+    size_t suggestion_count) noexcept CTE_TRY {
     if (editor == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -568,35 +601,35 @@ DearImGuiCteStatus dear_imgui_cte_text_editor_set_autocomplete_suggestions(
     }
     editor->SetAutoCompleteSuggestions(owned);
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_state_get_search_term(
     const DearImGuiCteAutocompleteState* state,
     const char** text,
-    size_t* text_len) noexcept {
+    size_t* text_len) noexcept CTE_TRY {
     if (state == nullptr || text == nullptr || text_len == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
     *text = state->searchTerm.data();
     *text_len = state->searchTerm.size();
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_state_get_range(
     const DearImGuiCteAutocompleteState* state,
     DocPos_c* start,
-    DocPos_c* end) noexcept {
+    DocPos_c* end) noexcept CTE_TRY {
     if (state == nullptr || start == nullptr || end == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
     *start = {state->searchTermStart.line, state->searchTermStart.index};
     *end = {state->searchTermEnd.line, state->searchTermEnd.index};
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_state_get_context(
     const DearImGuiCteAutocompleteState* state,
-    DearImGuiCteAutocompleteContextView* context) noexcept {
+    DearImGuiCteAutocompleteContextView* context) noexcept CTE_TRY {
     if (state == nullptr || context == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -609,21 +642,21 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_state_get_context(
         state->userData,
     };
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_state_clear_suggestions(
-    DearImGuiCteAutocompleteState* state) noexcept {
+    DearImGuiCteAutocompleteState* state) noexcept CTE_TRY {
     if (state == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
     AutoCompleteState_ClearSuggestions(state);
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_state_add_suggestion(
     DearImGuiCteAutocompleteState* state,
     const char* suggestion,
-    size_t suggestion_len) noexcept {
+    size_t suggestion_len) noexcept CTE_TRY {
     if (state == nullptr || !valid_bytes(suggestion, suggestion_len)) {
         return DearImGuiCteStatus_NullArgument;
     }
@@ -631,17 +664,26 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_state_add_suggestion(
         suggestion_len == 0 ? "" : suggestion,
         suggestion_len);
     if (!state->labels.empty()) {
-        state->labels.push_back(state->suggestions.back());
+        CTE_TRY {
+            state->labels.push_back(state->suggestions.back());
+        } CTE_CATCH(
+            state->suggestions.pop_back();
+            return DearImGuiCteStatus_CallbackFailed;
+        )
     }
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
 
 DearImGuiCteStatus dear_imgui_cte_autocomplete_state_set_promise(
     DearImGuiCteAutocompleteState* state,
-    bool promised) noexcept {
+    bool promised) noexcept CTE_TRY {
     if (state == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
     state->suggestionsPromise = promised;
     return DearImGuiCteStatus_Ok;
-}
+} CTE_CATCH_STATUS
+
+#undef CTE_CATCH_STATUS
+#undef CTE_CATCH
+#undef CTE_TRY

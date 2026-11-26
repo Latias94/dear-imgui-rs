@@ -455,10 +455,10 @@ pub(in crate::ui) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> O
                 *out = Some(p.path.clone());
             }
             if row_hovered {
-                ui.tooltip_text(p.path.display().to_string());
+                ui.tooltip_text(crate::fs::display_path(&p.path).as_ref());
             }
             if let Some(_popup) = ui.begin_popup_context_item() {
-                ui.text_disabled(p.path.display().to_string());
+                ui.text_disabled(crate::fs::display_path(&p.path).as_ref());
                 ui.separator();
                 if ui.menu_item_enabled_selected("Open", Some("Enter"), false, true) {
                     *out = Some(p.path.clone());

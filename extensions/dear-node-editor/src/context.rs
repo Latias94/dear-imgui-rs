@@ -1,5 +1,8 @@
 use crate::{EditorConfig, EditorConfigSnapshot, NodeEditorStyle, StyleColor, sys};
-use dear_imgui_rs::{Context as ImGuiContext, ContextBinding, ContextId, ContextThreadLease};
+use dear_imgui_rs::{
+    Context as ImGuiContext, ContextBinding, ContextId, ContextThreadLease,
+    ffi::{RawBox, RawCString},
+};
 use std::{
     cell::{Cell, RefCell},
     ffi::c_void,
@@ -15,14 +18,21 @@ pub enum NodeEditorError {
     ThreadLease(#[from] dear_imgui_rs::ImGuiError),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FrameState {
+    Idle,
+    Active,
+    Ending,
+}
+
 /// Owned imgui-node-editor context.
 pub struct EditorContext {
     raw: *mut sys::DneEditorContext,
     imgui_binding: ContextBinding,
     config: EditorConfigSnapshot,
-    _settings_file: Option<std::ffi::CString>,
-    _callbacks: Option<Box<crate::config::CallbackState>>,
-    pub(crate) frame_active: Cell<bool>,
+    _settings_file: Option<RawCString>,
+    _callbacks: Option<RawBox<crate::config::CallbackState>>,
+    pub(crate) frame_state: Cell<FrameState>,
     _thread_lease: ContextThreadLease,
 }
 
@@ -39,7 +49,7 @@ impl EditorContext {
 
     pub fn try_create_with_config(
         imgui: &ImGuiContext,
-        mut config: EditorConfig,
+        config: EditorConfig,
     ) -> Result<Self, NodeEditorError> {
         let thread_lease = ContextThreadLease::acquire()?;
         let imgui_binding = imgui.binding();
@@ -55,9 +65,9 @@ impl EditorContext {
             raw,
             imgui_binding,
             config: config_snapshot,
-            _settings_file: config.settings_file.take(),
-            _callbacks: config.callbacks.take(),
-            frame_active: Cell::new(false),
+            _settings_file: config.settings_file,
+            _callbacks: config.callbacks,
+            frame_state: Cell::new(FrameState::Idle),
             _thread_lease: thread_lease,
         })
     }
@@ -268,7 +278,6 @@ mod tests {
         let raw_imgui_a = imgui_a.as_raw();
         let editor_a = EditorContext::create(&imgui_a);
         let raw_editor_a = editor_a.as_raw_native();
-        let suspended_a = imgui_a.suspend_or_panic();
 
         let imgui_b = ImGuiContext::create();
         let raw_imgui_b = imgui_b.as_raw();
@@ -297,7 +306,6 @@ mod tests {
         unsafe { sys::dne_set_current_editor_raw(ptr::null_mut()) };
         drop(editor_b);
         drop(imgui_b);
-        let imgui_a = suspended_a.activate().expect("context A should reactivate");
         drop(editor_a);
         drop(imgui_a);
     }
@@ -324,7 +332,6 @@ mod tests {
         let _guard = test_guard();
         let imgui_a = ImGuiContext::create();
         let editor_a = EditorContext::create(&imgui_a);
-        let suspended_a = imgui_a.suspend_or_panic();
 
         let imgui_b = ImGuiContext::create();
         let raw_imgui_b = imgui_b.as_raw();
@@ -332,7 +339,7 @@ mod tests {
         let raw_editor_b = editor_b.as_raw_native();
         unsafe { sys::dne_set_current_editor_raw(raw_editor_b) };
 
-        drop(suspended_a);
+        drop(imgui_a);
         drop(editor_a);
 
         assert_eq!(
@@ -389,7 +396,6 @@ mod tests {
         let _guard = test_guard();
         let imgui_a = ImGuiContext::create();
         let editor = EditorContext::create(&imgui_a);
-        let suspended_a = imgui_a.suspend_or_panic();
 
         let mut imgui_b = ImGuiContext::create();
         imgui_b.io_mut().set_display_size([640.0, 480.0]);
@@ -408,7 +414,6 @@ mod tests {
         drop(imgui_b.render_legacy());
 
         drop(imgui_b);
-        let imgui_a = suspended_a.activate().expect("context A should reactivate");
         drop(editor);
         drop(imgui_a);
     }
@@ -623,6 +628,29 @@ mod tests {
                             );
                             assert_eq!(hint.min(), min);
                             assert_eq!(hint.max(), max);
+
+                            let channel = || {
+                                ui.with_bound_context(|| unsafe {
+                                    (*dear_imgui_rs::sys::igGetWindowDrawList())
+                                        ._Splitter
+                                        ._Current
+                                })
+                            };
+                            let foreground = {
+                                let _foreground = hint.foreground_draw_list();
+                                channel()
+                            };
+                            let host_draw_list = ui.get_window_draw_list();
+                            assert!(
+                                catch_unwind(AssertUnwindSafe(|| {
+                                    drop(hint.background_draw_list());
+                                }))
+                                .is_err()
+                            );
+                            assert_eq!(channel(), foreground);
+                            drop(host_draw_list);
+                            let _background = hint.background_draw_list();
+                            assert_ne!(channel(), foreground);
                         })
                         .expect("zoomed-out group has a hint");
 
@@ -868,14 +896,14 @@ mod tests {
                         }))
                         .is_err()
                     );
-                    assert!(!context.frame_active.get());
+                    assert_eq!(context.frame_state.get(), FrameState::Idle);
                 }
                 ui.with_node_editor(&context, "unwind", [200.0, 80.0], |frame| {
                     frame.node(NodeId::new(1), |node| {
                         node.pin(PinId::new(11), PinKind::Output, |_| ());
                     });
                 });
-                assert!(!context.frame_active.get());
+                assert_eq!(context.frame_state.get(), FrameState::Idle);
             });
         drop(imgui.render_legacy());
         drop(context);
@@ -939,7 +967,7 @@ mod tests {
 
     #[test]
     fn config_accepts_typed_buttons_and_custom_zoom_levels() {
-        let mut config = EditorConfig::new()
+        let config = EditorConfig::new()
             .drag_button(MouseButton::Left)
             .select_button(MouseButton::Right)
             .navigate_button(MouseButton::Middle)

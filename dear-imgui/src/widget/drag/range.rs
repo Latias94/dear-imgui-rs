@@ -113,23 +113,30 @@ where
         self
     }
 
-    fn scratch_labels(&self, ui: &Ui) -> (*const c_char, *const c_char, *const c_char) {
-        let label = self.label.as_ref();
-        let format = self.display_format.as_ref().map(AsRef::as_ref);
-        let max_format = self.max_display_format.as_ref().map(AsRef::as_ref);
-        ui.with_scratch_buffer(|buffer| {
-            buffer.refresh_buffer();
-            let label = buffer.push(label);
-            let format = format.map(|value| buffer.push(value));
-            let max_format = max_format.map(|value| buffer.push(value));
-            // Resolve offsets only after all strings have been appended.
-            unsafe {
-                (
-                    buffer.offset(label),
-                    format.map_or(std::ptr::null(), |offset| buffer.offset(offset)),
-                    max_format.map_or(std::ptr::null(), |offset| buffer.offset(offset)),
-                )
-            }
+    fn with_scratch_labels(
+        &self,
+        ui: &Ui,
+        submit: impl FnOnce(*const c_char, *const c_char, *const c_char) -> bool,
+    ) -> bool {
+        ui.run_with_bound_context(|| {
+            let label = self.label.as_ref();
+            let format = self.display_format.as_ref().map(AsRef::as_ref);
+            let max_format = self.max_display_format.as_ref().map(AsRef::as_ref);
+            ui.with_scratch_buffer(|buffer| {
+                buffer.refresh_buffer();
+                let label = buffer.push(label);
+                let format = format.map(|value| buffer.push(value));
+                let max_format = max_format.map(|value| buffer.push(value));
+                // Resolve offsets only after all strings have been appended.
+                let (label, format, max_format) = unsafe {
+                    (
+                        buffer.offset(label),
+                        format.map_or(std::ptr::null(), |offset| buffer.offset(offset)),
+                        max_format.map_or(std::ptr::null(), |offset| buffer.offset(offset)),
+                    )
+                };
+                submit(label, format, max_format)
+            })
         })
     }
 }
@@ -146,8 +153,7 @@ where
     #[doc(alias = "DragFloatRange2")]
     pub fn build(self, ui: &Ui, min: &mut f32, max: &mut f32) -> bool {
         validate_drag_flags("DragRange::build()", self.flags);
-        ui.run_with_bound_context(|| unsafe {
-            let (label, display_format, max_display_format) = self.scratch_labels(ui);
+        self.with_scratch_labels(ui, |label, display_format, max_display_format| unsafe {
             sys::igDragFloatRange2(
                 label,
                 min as *mut f32,
@@ -175,8 +181,7 @@ where
     #[doc(alias = "DragIntRange2")]
     pub fn build(self, ui: &Ui, min: &mut i32, max: &mut i32) -> bool {
         validate_drag_flags("DragRange::build()", self.flags);
-        ui.run_with_bound_context(|| unsafe {
-            let (label, display_format, max_display_format) = self.scratch_labels(ui);
+        self.with_scratch_labels(ui, |label, display_format, max_display_format| unsafe {
             sys::igDragIntRange2(
                 label,
                 min as *mut i32,

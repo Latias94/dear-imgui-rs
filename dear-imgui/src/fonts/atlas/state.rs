@@ -547,6 +547,10 @@ pub(super) fn font_atlas_state(raw: *mut sys::ImFontAtlas) -> FontAtlasState {
     })
 }
 
+pub(super) fn try_font_atlas_state(raw: *mut sys::ImFontAtlas) -> Option<FontAtlasState> {
+    FONT_ATLAS_STATES.with(|states| states.borrow().by_atlas.get(&(raw as usize)).copied())
+}
+
 pub(super) fn bump_font_atlas_generation(raw: *mut sys::ImFontAtlas) -> FontAtlasState {
     assert!(!raw.is_null(), "font atlas pointer must not be null");
     FONT_ATLAS_STATES.with(|states| {
@@ -905,8 +909,14 @@ pub(super) fn font_atlas_contains_font(
 }
 
 pub(super) fn current_context_font_atlas(caller: &str) -> *mut sys::ImFontAtlas {
+    context_font_atlas(unsafe { sys::igGetCurrentContext() }, caller)
+}
+
+pub(super) fn context_font_atlas(
+    ctx: *mut sys::ImGuiContext,
+    caller: &str,
+) -> *mut sys::ImFontAtlas {
     unsafe {
-        let ctx = sys::igGetCurrentContext();
         assert!(!ctx.is_null(), "{caller} requires an active ImGui context");
         let io = sys::igGetIO_ContextPtr(ctx);
         assert!(!io.is_null(), "{caller} requires a valid ImGui IO");
@@ -916,5 +926,34 @@ pub(super) fn current_context_font_atlas(caller: &str) -> *mut sys::ImFontAtlas 
             "{caller} requires the current ImGui context to have a font atlas"
         );
         atlas
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn querying_a_font_from_a_destroyed_atlas_does_not_register_it_again() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let (id, atlas) = {
+            let context = crate::Context::create();
+            let atlas = context.font_atlas();
+            let id = atlas.add_font(&[crate::fonts::FontSource::default_font()]);
+            (id, atlas.raw())
+        };
+        let is_registered = || {
+            FONT_ATLAS_STATES
+                .with(|states| states.borrow().by_atlas.contains_key(&(atlas as usize)))
+        };
+        assert!(!is_registered());
+        assert!(
+            std::panic::catch_unwind(|| super::super::id::validate_font_id(
+                id,
+                "retired font test"
+            ))
+            .is_err()
+        );
+        assert!(!is_registered());
     }
 }

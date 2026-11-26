@@ -127,11 +127,23 @@ pub struct PlacesMergeOptions {
 ///
 /// This is intentionally dependency-free (no serde). The compact persistence
 /// format is designed to be stable and forward-compatible.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct Places {
     /// Places groups shown in UI.
     pub groups: Vec<PlaceGroup>,
+    #[cfg(windows)]
+    drive_scan: Option<crate::background::BackgroundTask<u32>>,
+}
+
+impl Clone for Places {
+    fn clone(&self) -> Self {
+        Self {
+            groups: self.groups.clone(),
+            #[cfg(windows)]
+            drive_scan: None,
+        }
+    }
 }
 
 impl Places {
@@ -142,7 +154,7 @@ impl Places {
 
     /// Creates a places store with default groups and system entries.
     pub fn new() -> Self {
-        let mut p = Self { groups: Vec::new() };
+        let mut p = Self::empty();
         p.ensure_default_groups();
         p.refresh_system_places();
         p
@@ -178,8 +190,9 @@ impl Places {
 
     /// Rebuilds the system places group (home/root/drives).
     ///
-    /// This is a best-effort operation and may produce different results across
-    /// platforms.
+    /// On Windows this starts a best-effort drive scan without waiting. The
+    /// dialog polls for results on draw. Standalone callers can use
+    /// [`Self::poll_system_places`] to apply drives when ready.
     pub fn refresh_system_places(&mut self) {
         let group = self.ensure_group_mut(Self::SYSTEM_GROUP);
         group.places.clear();
@@ -193,11 +206,46 @@ impl Places {
             PathBuf::from(std::path::MAIN_SEPARATOR.to_string()),
         ));
 
-        #[cfg(target_os = "windows")]
-        {
-            for d in windows_drives() {
-                group.places.push(Place::code(d.clone(), PathBuf::from(d)));
+        #[cfg(windows)]
+        if self.drive_scan.is_none() {
+            self.drive_scan =
+                crate::background::BackgroundTask::spawn("dear-file-browser-drives", |cancelled| {
+                    use std::sync::atomic::Ordering;
+                    use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
+                    if cancelled.load(Ordering::Relaxed) {
+                        return 0;
+                    }
+                    // SAFETY: This Win32 call takes no arguments and returns a drive bitmask.
+                    unsafe { GetLogicalDrives() }
+                })
+                .ok();
+        }
+    }
+
+    /// Applies a completed background drive scan without blocking.
+    ///
+    /// Returns whether drive entries were added. Windows lists mounted drive letters;
+    /// this does not check whether a remote drive or removable medium is reachable.
+    pub fn poll_system_places(&mut self) -> bool {
+        #[cfg(windows)]
+        if let Some(result) = self.drive_scan.as_ref().and_then(|scan| scan.poll()) {
+            self.drive_scan = None;
+            if let Ok(mask) = result
+                && mask != 0
+            {
+                let group = self.ensure_group_mut(Self::SYSTEM_GROUP);
+                group.places.extend(windows_drive_places(mask));
+                return true;
             }
+        }
+        false
+    }
+
+    fn empty() -> Self {
+        Self {
+            groups: Vec::new(),
+            #[cfg(windows)]
+            drive_scan: None,
         }
     }
 
@@ -363,7 +411,7 @@ impl Places {
     /// Deserializes places from the compact format produced by
     /// [`Places::serialize_compact`].
     pub fn deserialize_compact(input: &str) -> Result<Self, PlacesDeserializeError> {
-        let mut places = Places { groups: Vec::new() };
+        let mut places = Self::empty();
         let mut version_ok = false;
 
         for (line_idx, raw_line) in input.lines().enumerate() {
@@ -597,16 +645,15 @@ fn home_dir() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
 }
 
-#[cfg(target_os = "windows")]
-fn windows_drives() -> Vec<String> {
-    let mut v = Vec::new();
-    for c in b'A'..=b'Z' {
-        let s = format!("{}:\\", c as char);
-        if Path::new(&s).exists() {
-            v.push(s);
-        }
-    }
-    v
+#[cfg(windows)]
+fn windows_drive_places(mask: u32) -> impl Iterator<Item = Place> {
+    (b'A'..=b'Z')
+        .enumerate()
+        .filter(move |(index, _)| mask & (1 << index) != 0)
+        .map(|(_, letter)| {
+            let label = format!("{}:\\", char::from(letter));
+            Place::code(label.clone(), PathBuf::from(label))
+        })
 }
 
 fn default_label_for_path(path: &Path) -> String {

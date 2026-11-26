@@ -5,7 +5,6 @@
 //! `Pop`/`End`. This registry rejects invalid strict-LIFO use before FFI and can defer cleanup
 //! until the original window or table scope is current again.
 
-use std::collections::HashMap;
 use std::fmt;
 
 use crate::sys;
@@ -45,14 +44,14 @@ impl ScopeSnapshot {
         debug_assert_eq!(unsafe { sys::igGetCurrentContext() }, ui.context_raw());
         let context = unsafe { &*ui.context_raw() };
         let frame = context.FrameCount;
-        let window = unsafe { sys::igGetCurrentWindowRead() };
+        let window = context.CurrentWindow;
         let window = (!window.is_null()).then(|| WindowScope {
             frame,
             window: window as usize,
             stack_depth: context.CurrentWindowStack.Size,
             owner: None,
         });
-        let table = unsafe { sys::igGetCurrentTable() };
+        let table = context.CurrentTable;
         if table.is_null() {
             return Self {
                 window,
@@ -124,6 +123,59 @@ enum NativeScopeKey {
     DrawListTexture(usize),
     DrawListFlags(usize),
     TableStack,
+}
+
+#[repr(usize)]
+enum ScopeStack {
+    Window,
+    StyleColor,
+    StyleVar,
+    AlphaMutation,
+    Font,
+    Id,
+    FocusScope,
+    ItemFlag,
+    ItemWidth,
+    TextWrap,
+    Group,
+    Indent,
+    MenuBar,
+    Tab,
+    DragDrop,
+    #[cfg(feature = "stack-layout")]
+    StackLayout,
+    DrawListClip,
+    DrawListTexture,
+    DrawListFlags,
+    Table,
+}
+
+impl NativeScopeKey {
+    fn stack(self) -> usize {
+        (match self {
+            Self::WindowStack => ScopeStack::Window,
+            Self::StyleColor => ScopeStack::StyleColor,
+            Self::StyleVar => ScopeStack::StyleVar,
+            Self::AlphaMutation => ScopeStack::AlphaMutation,
+            Self::Font => ScopeStack::Font,
+            Self::Id(_) => ScopeStack::Id,
+            Self::FocusScope => ScopeStack::FocusScope,
+            Self::ItemFlag => ScopeStack::ItemFlag,
+            Self::ItemWidth(_) => ScopeStack::ItemWidth,
+            Self::TextWrap(_) => ScopeStack::TextWrap,
+            Self::Group(_) => ScopeStack::Group,
+            Self::Indent(_) => ScopeStack::Indent,
+            Self::MenuBar(_) => ScopeStack::MenuBar,
+            Self::Tab(_) => ScopeStack::Tab,
+            Self::DragDrop(_) => ScopeStack::DragDrop,
+            #[cfg(feature = "stack-layout")]
+            Self::StackLayout(_) => ScopeStack::StackLayout,
+            Self::DrawListClip(_) => ScopeStack::DrawListClip,
+            Self::DrawListTexture(_) => ScopeStack::DrawListTexture,
+            Self::DrawListFlags(_) => ScopeStack::DrawListFlags,
+            Self::TableStack => ScopeStack::Table,
+        }) as usize
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -428,6 +480,10 @@ impl NativeScopeKeys {
     fn iter(self) -> impl Iterator<Item = NativeScopeKey> {
         std::iter::once(self.primary).chain(self.secondary)
     }
+
+    fn contains(self, key: NativeScopeKey) -> bool {
+        self.primary == key || self.secondary == Some(key)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -436,71 +492,21 @@ enum NativeScopeOrder {
     ProvenanceOnly,
 }
 
-#[derive(Debug, Default)]
-enum NativeScopeStack {
-    #[default]
-    Empty,
-    One(u64),
-    Many(Vec<u64>),
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ScopeTokenId {
+    slot: usize,
+    generation: u64,
 }
 
-impl NativeScopeStack {
-    fn push(&mut self, id: u64) {
-        *self = match std::mem::take(self) {
-            Self::Empty => Self::One(id),
-            Self::One(previous) => Self::Many(vec![previous, id]),
-            Self::Many(mut ids) => {
-                ids.push(id);
-                Self::Many(ids)
-            }
-        };
-    }
-
-    fn last(&self) -> Option<u64> {
-        match self {
-            Self::Empty => None,
-            Self::One(id) => Some(*id),
-            Self::Many(ids) => ids.last().copied(),
-        }
-    }
-
-    fn len(&self) -> usize {
-        match self {
-            Self::Empty => 0,
-            Self::One(_) => 1,
-            Self::Many(ids) => ids.len(),
-        }
-    }
-
-    fn position(&self, id: u64) -> Option<usize> {
-        match self {
-            Self::Empty => None,
-            Self::One(candidate) => (*candidate == id).then_some(0),
-            Self::Many(ids) => ids.iter().position(|candidate| *candidate == id),
-        }
-    }
-
-    fn remove(&mut self, position: usize) -> bool {
-        *self = match std::mem::take(self) {
-            Self::Empty => panic!("native scope resource stack is empty"),
-            Self::One(_) if position == 0 => Self::Empty,
-            Self::One(_) => panic!("native scope resource stack position is invalid"),
-            Self::Many(mut ids) => {
-                ids.remove(position);
-                match ids.as_slice() {
-                    [] => Self::Empty,
-                    [id] => Self::One(*id),
-                    _ => Self::Many(ids),
-                }
-            }
-        };
-        matches!(self, Self::Empty)
-    }
+#[derive(Debug)]
+enum StackTokenSlot {
+    Active(NativeScopeEntry),
+    Free(Option<usize>),
 }
 
 #[derive(Clone, Copy, Debug)]
 struct NativeScopeEntry {
-    id: u64,
+    id: ScopeTokenId,
     label: &'static str,
     pop: NativeScopePop,
     keys: NativeScopeKeys,
@@ -512,10 +518,16 @@ struct NativeScopeEntry {
 #[derive(Debug, Default)]
 pub(crate) struct NativeScopeTracker {
     next_id: u64,
-    stacks: HashMap<NativeScopeKey, NativeScopeStack>,
-    entries: HashMap<u64, NativeScopeEntry>,
+    slots: Vec<StackTokenSlot>,
+    first_free_slot: Option<usize>,
+    stacks: [Vec<ScopeTokenId>; ScopeStack::Table as usize + 1],
     window_boundaries: Vec<WindowBoundary>,
+    abandoned_count: usize,
     pending_recovery: bool,
+    #[cfg(feature = "stack-layout")]
+    stack_layout_frame: i32,
+    #[cfg(feature = "stack-layout")]
+    stack_layout_ids: std::collections::HashSet<(*mut sys::ImGuiWindow, sys::ImGuiID)>,
 }
 
 #[derive(Debug)]
@@ -531,70 +543,109 @@ impl fmt::Display for ScopeOrderError {
 }
 
 impl NativeScopeTracker {
+    fn active(&self, id: ScopeTokenId) -> Option<&NativeScopeEntry> {
+        match self.slots.get(id.slot)? {
+            StackTokenSlot::Active(entry) if entry.id == id => Some(entry),
+            _ => None,
+        }
+    }
+
+    fn active_mut(&mut self, id: ScopeTokenId) -> Option<&mut NativeScopeEntry> {
+        match self.slots.get_mut(id.slot)? {
+            StackTokenSlot::Active(entry) if entry.id == id => Some(entry),
+            _ => None,
+        }
+    }
+
+    fn entries(&self) -> impl Iterator<Item = &NativeScopeEntry> {
+        self.slots.iter().filter_map(|slot| match slot {
+            StackTokenSlot::Active(entry) => Some(entry),
+            StackTokenSlot::Free(_) => None,
+        })
+    }
+
+    fn stack_entries(&self, key: NativeScopeKey) -> impl Iterator<Item = &NativeScopeEntry> {
+        self.stacks[key.stack()]
+            .iter()
+            .rev()
+            .map(|&id| {
+                self.active(id)
+                    .expect("native scope resource stack lost its entry")
+            })
+            .filter(move |entry| entry.keys.contains(key))
+    }
+
+    fn top(&self, key: NativeScopeKey) -> Option<&NativeScopeEntry> {
+        self.stack_entries(key).next()
+    }
+
     fn begin(
         &mut self,
         pop: NativeScopePop,
         label: &'static str,
         order: NativeScopeOrder,
         raw_scope: ScopeSnapshot,
-    ) -> (NativeScopeKeys, u64) {
+    ) -> (NativeScopeKeys, ScopeTokenId) {
         assert!(
             !self.pending_recovery,
             "cannot enter `{label}` after a native scope order violation; finish the remaining scopes first"
         );
-        let id = self.next_id;
+        let generation = self.next_id;
         self.next_id = self
             .next_id
             .checked_add(1)
             .expect("native scope identity space is exhausted");
         let mut scope = self.resolve_scope(raw_scope);
         if pop.ends_window() {
-            scope = scope.with_window_owner(Some(id));
+            scope = scope.with_window_owner(Some(generation));
         }
         let keys = pop.keys(scope);
-        for key in keys.iter() {
-            self.stacks.entry(key).or_default().push(id);
-        }
-        self.entries.insert(
+        let slot = self.first_free_slot.unwrap_or(self.slots.len());
+        let id = ScopeTokenId { slot, generation };
+        let entry = StackTokenSlot::Active(NativeScopeEntry {
             id,
-            NativeScopeEntry {
-                id,
-                label,
-                pop,
-                keys,
-                scope,
-                order,
-                abandoned: false,
-            },
-        );
+            label,
+            pop,
+            keys,
+            scope,
+            order,
+            abandoned: false,
+        });
+        if let Some(free) = self.first_free_slot {
+            let StackTokenSlot::Free(next) = std::mem::replace(&mut self.slots[free], entry) else {
+                unreachable!("the native scope free list points at an active entry")
+            };
+            self.first_free_slot = next;
+        } else {
+            self.slots.push(entry);
+        }
+        for key in keys.iter() {
+            self.stacks[key.stack()].push(id);
+        }
         (keys, id)
     }
 
     fn prepare_pop(
         &mut self,
         keys: NativeScopeKeys,
-        id: u64,
+        id: ScopeTokenId,
         label: &'static str,
         raw_current: ScopeSnapshot,
     ) -> Result<bool, ScopeOrderError> {
         let first = self.first_unprotected_id();
-        let Some(entry) = self.entries.get_mut(&id) else {
+        let Some(&entry) = self.active(id) else {
             // A lexical window scope already ran this token's native cleanup.
             // IDs are unique for the lifetime of the Ui.
             return Ok(false);
         };
         debug_assert_eq!(entry.keys, keys);
-        if id < first {
-            entry.abandoned = true;
+        if id.generation < first {
+            self.abandon(id);
             return Ok(false);
         }
-        let entry = *entry;
         let current = self.resolve_scope(raw_current);
         if let Some(reason) = self.violation(entry, current) {
-            self.entries
-                .get_mut(&id)
-                .expect("native scope entry disappeared")
-                .abandoned = true;
+            self.abandon(id);
             self.refresh_pending_recovery();
             return match entry.order {
                 NativeScopeOrder::StrictLifo => Err(ScopeOrderError { label, reason }),
@@ -609,16 +660,14 @@ impl NativeScopeTracker {
     fn violation(&self, entry: NativeScopeEntry, current: ScopeSnapshot) -> Option<String> {
         if entry.order == NativeScopeOrder::StrictLifo {
             for key in entry.keys.iter() {
-                let stack = self
-                    .stacks
-                    .get(&key)
+                let top = self
+                    .top(key)
                     .expect("native scope resource stack disappeared");
-                if stack.last() != Some(entry.id) {
-                    let top = stack
-                        .last()
-                        .and_then(|id| self.entries.get(&id))
-                        .map_or("unknown scope", |entry| entry.label);
-                    return Some(format!("was dropped before the active inner scope `{top}`"));
+                if top.id != entry.id {
+                    return Some(format!(
+                        "was dropped before the active inner scope `{}`",
+                        top.label
+                    ));
                 }
             }
         }
@@ -637,14 +686,13 @@ impl NativeScopeTracker {
         }
         if entry.pop.ends_window() {
             if let Some(blocker) = self
-                .entries
-                .values()
+                .entries()
                 .filter(|other| {
-                    other.id > entry.id
+                    other.id.generation > entry.id.generation
                         && other.pop.counts_for_window_end()
                         && other.scope.window == entry.scope.window
                 })
-                .max_by_key(|other| other.id)
+                .max_by_key(|other| other.id.generation)
             {
                 return Some(format!(
                     "was dropped before the window-local scope `{}`",
@@ -654,14 +702,13 @@ impl NativeScopeTracker {
         }
         if entry.pop.ends_table() {
             if let Some(blocker) = self
-                .entries
-                .values()
+                .entries()
                 .filter(|other| {
-                    other.id > entry.id
+                    other.id.generation > entry.id.generation
                         && other.pop.counts_for_table_end()
                         && other.scope.table == entry.scope.table
                 })
-                .max_by_key(|other| other.id)
+                .max_by_key(|other| other.id.generation)
             {
                 return Some(format!(
                     "was dropped before the table-local scope `{}`",
@@ -672,10 +719,9 @@ impl NativeScopeTracker {
         None
     }
 
-    fn replace_pop(&mut self, id: u64, keys: NativeScopeKeys, pop: NativeScopePop) {
+    fn replace_pop(&mut self, id: ScopeTokenId, keys: NativeScopeKeys, pop: NativeScopePop) {
         let entry = self
-            .entries
-            .get_mut(&id)
+            .active_mut(id)
             .expect("native scope entry disappeared before its cleanup action was updated");
         assert_eq!(
             entry.keys, keys,
@@ -694,8 +740,7 @@ impl NativeScopeTracker {
             return;
         };
         let active = self
-            .entries
-            .values()
+            .entries()
             .filter(|entry| {
                 entry.scope.table == Some(table)
                     && matches!(
@@ -704,7 +749,7 @@ impl NativeScopeTracker {
                             | NativeScopePop::PopTableColumnChannel
                     )
             })
-            .max_by_key(|entry| entry.id);
+            .max_by_key(|entry| entry.id.generation);
         assert!(
             active.is_none(),
             "{operation} cannot change the current table cell while `{}` is active",
@@ -714,41 +759,30 @@ impl NativeScopeTracker {
 
     fn remove_ready(&mut self, entry: NativeScopeEntry) {
         for key in entry.keys.iter() {
-            let remove_stack = {
-                let stack = self
-                    .stacks
-                    .get_mut(&key)
-                    .expect("native scope resource stack disappeared");
-                let position = stack
-                    .position(entry.id)
+            let stack = &mut self.stacks[key.stack()];
+            if stack.last() == Some(&entry.id) {
+                stack.pop();
+            } else {
+                let index = stack
+                    .iter()
+                    .rposition(|&candidate| candidate == entry.id)
                     .expect("native scope resource stack lost its active entry");
-                if entry.order == NativeScopeOrder::StrictLifo {
-                    assert_eq!(
-                        position,
-                        stack.len() - 1,
-                        "strict native scope was removed out of order"
-                    );
-                }
-                stack.remove(position)
-            };
-            if remove_stack {
-                self.stacks.remove(&key);
+                stack.remove(index);
             }
         }
-        self.entries
-            .remove(&entry.id)
-            .expect("native scope entry disappeared");
+        self.slots[entry.id.slot] = StackTokenSlot::Free(self.first_free_slot);
+        self.first_free_slot = Some(entry.id.slot);
+        self.abandoned_count -= usize::from(entry.abandoned);
     }
 
     fn take_ready_abandoned(&mut self, raw_current: ScopeSnapshot) -> Option<NativeScopePop> {
         let current = self.resolve_scope(raw_current);
         let first = self.first_unprotected_id();
         let ready = self
-            .entries
-            .values()
-            .filter(|entry| entry.id >= first && entry.abandoned)
+            .entries()
+            .filter(|entry| entry.id.generation >= first && entry.abandoned)
             .filter(|entry| self.violation(**entry, current).is_none())
-            .max_by_key(|entry| entry.id)
+            .max_by_key(|entry| entry.id.generation)
             .copied()?;
         self.remove_ready(ready);
         self.refresh_pending_recovery();
@@ -756,10 +790,37 @@ impl NativeScopeTracker {
     }
 
     fn refresh_pending_recovery(&mut self) {
+        if self.abandoned_count == 0 {
+            self.pending_recovery = false;
+            return;
+        }
         let first = self.first_unprotected_id();
-        self.pending_recovery = self.entries.values().any(|entry| {
-            entry.id >= first && entry.abandoned && entry.order == NativeScopeOrder::StrictLifo
+        let pending_recovery = self.entries().any(|entry| {
+            entry.id.generation >= first
+                && entry.abandoned
+                && entry.order == NativeScopeOrder::StrictLifo
         });
+        self.pending_recovery = pending_recovery;
+    }
+
+    fn abandon(&mut self, id: ScopeTokenId) {
+        let entry = self.active_mut(id).expect("native scope entry disappeared");
+        if !entry.abandoned {
+            entry.abandoned = true;
+            self.abandoned_count += 1;
+        }
+    }
+
+    fn abandon_since(&mut self, first: u64) {
+        for slot in &mut self.slots {
+            if let StackTokenSlot::Active(entry) = slot
+                && entry.id.generation >= first
+                && !entry.abandoned
+            {
+                entry.abandoned = true;
+                self.abandoned_count += 1;
+            }
+        }
     }
 
     fn first_unprotected_id(&self) -> u64 {
@@ -770,7 +831,7 @@ impl NativeScopeTracker {
         // creating Rust tokens. Keep scopes below those containers intact until their End.
         [NativeScopeKey::WindowStack, NativeScopeKey::TableStack]
             .into_iter()
-            .filter_map(|key| self.stacks.get(&key)?.last())
+            .filter_map(|key| Some(self.top(key)?.id.generation))
             .fold(boundary.first_id, u64::max)
     }
 
@@ -786,17 +847,16 @@ impl NativeScopeTracker {
             return raw_scope;
         };
         let owner = self
-            .entries
-            .values()
+            .stack_entries(NativeScopeKey::WindowStack)
             .filter(|entry| entry.pop.ends_window())
             .filter_map(|entry| {
                 entry
                     .scope
                     .window
                     .filter(|window| window.has_same_native_position(raw_window))
-                    .map(|_| entry.id)
+                    .map(|_| entry.id.generation)
             })
-            .max();
+            .next();
         raw_scope.with_window_owner(owner)
     }
 }
@@ -805,7 +865,7 @@ impl NativeScopeTracker {
 pub(crate) struct NativeScopeToken<'ui> {
     ui: &'ui Ui,
     keys: NativeScopeKeys,
-    id: u64,
+    id: ScopeTokenId,
     label: &'static str,
     pop: NativeScopePop,
     finished: bool,
@@ -822,8 +882,7 @@ impl<'ui> NativeScopeToken<'ui> {
         label: &'static str,
         order: NativeScopeOrder,
     ) -> Self {
-        let binding = ui.ctx_binding.clone();
-        let (keys, id) = binding.with_bound_context(|| {
+        let (keys, id) = ui.with_live_context(|| {
             let scope = unsafe { ScopeSnapshot::current_raw(ui) };
             ui.native_scopes
                 .borrow_mut()
@@ -844,8 +903,7 @@ impl<'ui> NativeScopeToken<'ui> {
             return;
         }
         self.finished = true;
-        let binding = self.ui.ctx_binding.clone();
-        let _ = binding.try_with_bound_context(|| {
+        self.ui.with_live_context(|| {
             let current = unsafe { ScopeSnapshot::current_raw(self.ui) };
             let should_pop = match self
                 .ui
@@ -884,7 +942,7 @@ impl<'ui> NativeScopeToken<'ui> {
 
     pub(crate) fn is_finished(&self) -> bool {
         let tracker = self.ui.native_scopes.borrow();
-        self.finished || !tracker.entries.contains_key(&self.id)
+        self.finished || tracker.active(self.id).is_none()
     }
 
     pub(crate) fn finish(&mut self) {
@@ -897,7 +955,7 @@ impl Ui {
     // Called with this Ui's context current. An End may change the current window or table,
     // so obtain a fresh snapshot after each pop and release the registry borrow before FFI.
     fn finish_abandoned_native_scopes(&self) {
-        loop {
+        while self.native_scopes.borrow().abandoned_count != 0 {
             let current = unsafe { ScopeSnapshot::current_raw(self) };
             let Some(pop) = self
                 .native_scopes
@@ -947,6 +1005,36 @@ impl Ui {
         self.native_scopes
             .borrow()
             .assert_no_table_channel(current, "Ui::begin_table_with_sizing()");
+    }
+
+    #[cfg(feature = "stack-layout")]
+    pub(crate) fn claim_stack_layout_id(&self, window: *mut sys::ImGuiWindow, id: sys::ImGuiID) {
+        let frame = unsafe { (*self.context_raw()).FrameCount };
+        let mut tracker = self.native_scopes.borrow_mut();
+        if tracker.stack_layout_frame != frame {
+            tracker.stack_layout_frame = frame;
+            tracker.stack_layout_ids.clear();
+        }
+        assert!(
+            tracker.stack_layout_ids.insert((window, id)),
+            "stack layout ID {id:#x} already used in this window and frame"
+        );
+    }
+
+    #[cfg(feature = "stack-layout")]
+    pub(crate) fn assert_stack_layout_active(&self) {
+        let tracker = self.native_scopes.borrow();
+        let window = tracker
+            .resolve_scope(unsafe { ScopeSnapshot::current_raw(self) })
+            .window();
+        let layout = window.and_then(|window| tracker.top(NativeScopeKey::StackLayout(window)));
+        assert!(
+            layout.is_some_and(|entry| matches!(
+                entry.pop,
+                NativeScopePop::EndHorizontal | NativeScopePop::EndVertical
+            )),
+            "Ui::spring() requires an active, unsuspended stack layout in the current window"
+        );
     }
 
     pub(crate) fn current_native_scope(&self) -> ScopeSnapshot {

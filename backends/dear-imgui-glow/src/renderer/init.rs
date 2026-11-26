@@ -26,7 +26,7 @@ const RENDERER_RESERVED_FLAGS: i32 =
 
 fn core_renderer_flags(gl_version: GlVersion) -> i32 {
     let mut flags = sys::ImGuiBackendFlags_RendererHasTextures;
-    if gl_version.supports_vertex_offset() {
+    if gl_version.supports_vertex_offset() || gl_version.supports_vertex_offset_emulation() {
         flags |= sys::ImGuiBackendFlags_RendererHasVtxOffset;
     }
     flags
@@ -172,6 +172,7 @@ impl GlowRenderer {
             clip_origin: super::core::GlowClipOrigin::default(),
             has_separate_polygon_modes,
             has_sampler_object_support,
+            bind_program_pipeline: None,
             gl_context: owned_gl,
             context_binding: Some(imgui_context.binding()),
             backend_user_data,
@@ -314,7 +315,9 @@ impl GlowRenderer {
     }
 
     pub(super) fn unconfigure_imgui_context(&mut self, imgui_context: &mut ImGuiContext) {
-        let owned_name = unsafe { self.clear_owned_renderer_state_bound() };
+        let owned_name = imgui_context
+            .binding()
+            .with_bound_context(|| unsafe { self.clear_owned_renderer_state_bound() });
         if owned_name {
             imgui_context
                 .set_renderer_name::<String>(None)
@@ -642,35 +645,18 @@ mod tests {
 
     #[test]
     fn renderer_capabilities_do_not_claim_unavailable_vertex_offsets() {
-        let gl_30 = GlVersion {
-            major: 3,
-            minor: 0,
-            is_es: false,
-        };
-        let gl_32 = GlVersion {
-            major: 3,
-            minor: 2,
-            is_es: false,
-        };
-        let es_32 = GlVersion {
-            major: 3,
-            minor: 2,
-            is_es: true,
-        };
-
         assert_eq!(
-            core_renderer_flags(gl_30),
+            core_renderer_flags(GlVersion::parse("3.0")),
             sys::ImGuiBackendFlags_RendererHasTextures
         );
-        assert_eq!(
-            core_renderer_flags(es_32),
-            sys::ImGuiBackendFlags_RendererHasTextures
-        );
-        assert_eq!(
-            core_renderer_flags(gl_32),
-            sys::ImGuiBackendFlags_RendererHasTextures
-                | sys::ImGuiBackendFlags_RendererHasVtxOffset
-        );
+        for version in ["3.2", "OpenGL ES 3.0", "WebGL 2.0 (OpenGL ES 3.0)"] {
+            assert_eq!(
+                core_renderer_flags(GlVersion::parse(version)),
+                sys::ImGuiBackendFlags_RendererHasTextures
+                    | sys::ImGuiBackendFlags_RendererHasVtxOffset,
+                "{version}"
+            );
+        }
     }
 
     #[test]

@@ -10,10 +10,14 @@
 //! let _ = context.frame_with(|ui| ui.text("frame"));
 //! ```
 
+use std::ptr::NonNull;
+
+use crate::render::snapshot::{SnapshotEpoch, TextureRequest};
+use crate::render::{DrawData, SnapshotError, SynchronousRendererConsumer};
 use crate::sys;
 
 use super::Context;
-use super::binding::{CTX_MUTEX, with_bound_context};
+use super::binding::{CTX_MUTEX, RawBoundContextGuard, with_bound_context};
 
 /// Runtime state for a Dear ImGui frame owned by an external engine schedule.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -106,7 +110,8 @@ impl FramePrepareOptions {
 #[must_use = "dropping FrameToken ends the frame without rendering; call render() or render_snapshot() to produce draw data"]
 #[doc(alias = "EndFrame")]
 pub struct FrameToken<'ctx> {
-    ctx: &'ctx mut Context,
+    ctx: Option<&'ctx mut Context>,
+    rendered: Option<NonNull<DrawData>>,
 }
 
 /// Result returned by [`Context::frame_with_result`].
@@ -153,8 +158,6 @@ impl Context {
     /// This is intended for engine callback boundaries that must reject both an open frame and a
     /// frame that was opened and closed entirely inside the callback.
     pub fn frame_lifecycle_stamp(&self) -> FrameLifecycleStamp {
-        let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::frame_lifecycle_stamp()");
         self.frame_lifecycle_stamp_unlocked()
     }
 
@@ -166,7 +169,6 @@ impl Context {
     #[doc(alias = "EndFrame")]
     pub fn end_frame(&mut self) -> bool {
         let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::end_frame()");
         self.end_frame_for_teardown_unlocked()
     }
 
@@ -202,7 +204,10 @@ impl Context {
         &mut self,
     ) -> Result<FrameToken<'_>, crate::render::RendererConsumerError> {
         let _ = self.try_frame()?;
-        Ok(FrameToken { ctx: self })
+        Ok(FrameToken {
+            ctx: Some(self),
+            rendered: None,
+        })
     }
 
     /// Creates a new frame and returns a Ui object for building the interface.
@@ -210,7 +215,7 @@ impl Context {
     /// Note: you must update `io.DisplaySize` (and usually `io.DeltaTime`) before calling this,
     /// unless you are using a platform backend that does it for you (e.g. `dear-imgui-winit`).
     #[doc(alias = "NewFrame")]
-    pub fn frame(&mut self) -> &mut crate::ui::Ui {
+    pub fn frame(&mut self) -> &crate::ui::Ui {
         self.try_frame()
             .unwrap_or_else(|error| panic!("Context::frame() rejected completion: {error}"))
     }
@@ -220,11 +225,9 @@ impl Context {
     /// Native frame-order, display-size, docking, and font-atlas programmer errors retain their
     /// documented panic behavior. This method makes the asynchronous renderer completion boundary
     /// fallible so event-loop and engine integrations can recover without a later panic.
-    pub fn try_frame(
-        &mut self,
-    ) -> Result<&mut crate::ui::Ui, crate::render::RendererConsumerError> {
+    pub fn try_frame(&mut self) -> Result<&crate::ui::Ui, crate::render::RendererConsumerError> {
         let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::try_frame()");
+        let _bound = RawBoundContextGuard::bind(self.raw);
         self.assert_can_begin_frame_unlocked("Context::try_frame()");
         self.poll_snapshot_completions_unlocked()?;
         self.collect_retired_textures();
@@ -264,7 +267,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
                 .finish_frame_removals(self.snapshot_hub.completion_watermark());
             sys::igNewFrame();
         }
-        Ok(&mut self.ui)
+        Ok(&self.ui)
     }
 
     fn assert_docking_config_stable_unlocked(&self, caller: &str) {
@@ -319,16 +322,27 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     /// A rejected consumer leaves the frame open so the owning renderer can retry.
     pub fn try_render(
         &mut self,
-        consumer: &crate::render::SynchronousRendererConsumer,
-    ) -> Result<crate::render::PendingFrame<'_>, crate::render::SnapshotError> {
-        self.require_managed_renderer("Context::try_render()")?;
-        self.snapshot_hub.validate_consumer(consumer)?;
-        let draw_data = self.render_raw();
-        let (epoch, requests) =
-            self.begin_synchronous_render(consumer, draw_data.as_ptr().cast_const())?;
+        consumer: &SynchronousRendererConsumer,
+    ) -> Result<crate::render::PendingFrame<'_>, SnapshotError> {
+        let (draw_data, epoch, requests) = self.prepare_synchronous_render(consumer, &mut None)?;
         Ok(crate::render::PendingFrame::new(
             self, draw_data, epoch, requests,
         ))
+    }
+
+    fn prepare_synchronous_render(
+        &mut self,
+        consumer: &SynchronousRendererConsumer,
+        rendered: &mut Option<NonNull<DrawData>>,
+    ) -> Result<(NonNull<DrawData>, SnapshotEpoch, Vec<TextureRequest>), SnapshotError> {
+        let _guard = CTX_MUTEX.lock();
+        let _bound = RawBoundContextGuard::bind(self.raw);
+        self.require_managed_renderer("Context::try_render()")?;
+        self.snapshot_hub.validate_consumer(consumer)?;
+        let draw_data = *rendered.get_or_insert_with(|| self.render_raw_unlocked());
+        let (epoch, requests) =
+            self.begin_synchronous_render(consumer, draw_data.as_ptr().cast_const())?;
+        Ok((draw_data, epoch, requests))
     }
 
     /// Render a frame for a legacy renderer that does not implement managed texture requests.
@@ -338,6 +352,13 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     /// Panics when the active renderer advertises `RENDERER_HAS_TEXTURES`; managed renderers must
     /// use [`Self::render`] with their synchronous consumer and reconcile every request.
     pub fn render_legacy(&mut self) -> crate::render::ReconciledFrame<'_> {
+        let draw_data = self.render_legacy_raw();
+        crate::render::ReconciledFrame::new_legacy(self, draw_data)
+    }
+
+    fn render_legacy_raw(&mut self) -> NonNull<DrawData> {
+        let _guard = CTX_MUTEX.lock();
+        let _bound = RawBoundContextGuard::bind(self.raw);
         let renderer_has_textures = self
             .io()
             .backend_flags()
@@ -346,8 +367,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
             !renderer_has_textures,
             "Context::render_legacy() cannot bypass a managed renderer consumer"
         );
-        let draw_data = self.render_raw();
-        crate::render::ReconciledFrame::new_legacy(self, draw_data)
+        self.render_raw_unlocked()
     }
 
     fn require_managed_renderer(
@@ -365,9 +385,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         }
     }
 
-    fn render_raw(&mut self) -> std::ptr::NonNull<crate::render::DrawData> {
-        let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::render()");
+    fn render_raw_unlocked(&mut self) -> NonNull<DrawData> {
         self.assert_can_render_unlocked("Context::render()");
 
         let draw_data = unsafe {
@@ -408,8 +426,10 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         consumer: &crate::render::snapshot::DetachedRendererConsumer,
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
+        let _guard = CTX_MUTEX.lock();
+        let _bound = RawBoundContextGuard::bind(self.raw);
         self.snapshot_hub.validate_consumer(consumer)?;
-        let draw_data = self.render_raw();
+        let draw_data = self.render_raw_unlocked();
         self.capture_main_snapshot(consumer, draw_data.as_ptr())
     }
 
@@ -429,8 +449,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
         let _guard = CTX_MUTEX.lock();
+        let _bound = RawBoundContextGuard::bind(self.raw);
         self.snapshot_hub.validate_consumer(consumer)?;
-        let _ = self.render_raw();
+        let _ = self.render_raw_unlocked();
         self.capture_platform_snapshot(consumer)
     }
 
@@ -447,7 +468,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
         let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::platform_viewport_snapshot()");
+        let _bound = RawBoundContextGuard::bind(self.raw);
         if self.frame_lifecycle_state_unlocked() != FrameLifecycleState::Rendered {
             panic!(
                 "Context::platform_viewport_snapshot() called before rendering the current frame"
@@ -493,17 +514,39 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
 }
 
 impl<'ctx> FrameToken<'ctx> {
+    fn context_mut(&mut self) -> &mut Context {
+        self.ctx
+            .as_deref_mut()
+            .expect("frame token owns its context")
+    }
+
     /// Borrow the UI for this frame.
     ///
     /// This can be called repeatedly by an engine-owned frame runner to let multiple systems draw
     /// into the same frame, as long as those systems are scheduled sequentially.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a previous [`Self::try_render`] reached native rendering but failed to capture
+    /// the result. Such a frame can retry capture but cannot accept more UI commands.
     pub fn ui(&self) -> &crate::ui::Ui {
-        &self.ctx.ui
+        assert!(
+            self.rendered.is_none(),
+            "this frame has finished UI submission"
+        );
+        &self
+            .ctx
+            .as_deref()
+            .expect("frame token owns its context")
+            .ui
     }
 
     /// Return the lifecycle state while this token owns the open frame.
     pub fn lifecycle_state(&self) -> FrameLifecycleState {
-        self.ctx.frame_lifecycle_state()
+        self.ctx
+            .as_deref()
+            .expect("frame token owns its context")
+            .frame_lifecycle_state()
     }
 
     /// Render this managed-texture frame and return its pending capability.
@@ -512,58 +555,88 @@ impl<'ctx> FrameToken<'ctx> {
         consumer: &crate::render::SynchronousRendererConsumer,
     ) -> crate::render::PendingFrame<'ctx> {
         self.try_render(consumer)
-            .unwrap_or_else(|error| panic!("FrameToken::render() failed: {error}"))
+            .unwrap_or_else(|(_frame, error)| panic!("FrameToken::render() failed: {error}"))
     }
 
-    /// Render this managed-texture frame while returning capture or consumer failures.
+    /// Render this managed-texture frame, returning the token alongside any error.
+    ///
+    /// A preflight failure leaves UI submission open. A failure after native rendering can
+    /// retry capture without submitting the same native frame a second time.
     pub fn try_render(
-        self,
-        consumer: &crate::render::SynchronousRendererConsumer,
-    ) -> Result<crate::render::PendingFrame<'ctx>, crate::render::SnapshotError> {
-        let ctx = self.ctx as *mut Context;
-        match unsafe { (&mut *ctx).try_render(consumer) } {
-            Ok(frame) => {
-                std::mem::forget(self);
-                Ok(frame)
-            }
-            Err(error) => Err(error),
-        }
+        mut self,
+        consumer: &SynchronousRendererConsumer,
+    ) -> Result<crate::render::PendingFrame<'ctx>, (Self, SnapshotError)> {
+        let context = self
+            .ctx
+            .as_deref_mut()
+            .expect("frame token owns its context");
+        let (draw_data, epoch, requests) =
+            match context.prepare_synchronous_render(consumer, &mut self.rendered) {
+                Ok(result) => result,
+                Err(error) => return Err((self, error)),
+            };
+        let context = self.ctx.take().expect("frame token owns its context");
+        Ok(crate::render::PendingFrame::new(
+            context, draw_data, epoch, requests,
+        ))
     }
 
     /// Render this frame through the explicit legacy renderer path.
-    pub fn render_legacy(self) -> crate::render::ReconciledFrame<'ctx> {
-        let ctx = self.ctx as *mut Context;
-        let frame = unsafe { (&mut *ctx).render_legacy() };
-        std::mem::forget(self);
-        frame
+    ///
+    /// # Panics
+    ///
+    /// Panics if the renderer requires managed textures or if the native frame has
+    /// already rendered for a synchronous capture. Retry that capture with [`Self::try_render`].
+    pub fn render_legacy(mut self) -> crate::render::ReconciledFrame<'ctx> {
+        self.require_unrendered()
+            .unwrap_or_else(|error| panic!("FrameToken::render_legacy(): {error}"));
+        let draw_data = self.context_mut().render_legacy_raw();
+        let context = self.ctx.take().expect("frame token owns its context");
+        crate::render::ReconciledFrame::new_legacy(context, draw_data)
     }
 
     /// Render this frame and build a thread-safe snapshot from the resulting draw data.
     ///
     /// This is the preferred handoff shape for render-world integrations such as Bevy, where raw
     /// ImGui pointers must not cross the engine extraction boundary.
+    ///
+    /// A frame already rendered for synchronous capture cannot switch to snapshot capture.
     pub fn render_snapshot(
-        self,
+        mut self,
         consumer: &crate::render::snapshot::DetachedRendererConsumer,
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
-        self.ctx.render_snapshot(consumer)
+        self.require_unrendered()?;
+        self.context_mut().render_snapshot(consumer)
     }
 
     /// Render this frame and build a thread-safe snapshot for all platform viewports.
+    ///
+    /// A frame already rendered for synchronous capture cannot switch to snapshot capture.
     #[cfg(feature = "multi-viewport")]
     pub fn render_platform_viewport_snapshot(
-        self,
+        mut self,
         consumer: &crate::render::snapshot::DetachedRendererConsumer,
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
-        self.ctx.render_platform_viewport_snapshot(consumer)
+        self.require_unrendered()?;
+        self.context_mut()
+            .render_platform_viewport_snapshot(consumer)
+    }
+
+    fn require_unrendered(&self) -> Result<(), SnapshotError> {
+        if self.rendered.is_some() {
+            return Err(SnapshotError::FrameAlreadyRendered);
+        }
+        Ok(())
     }
 }
 
 impl Drop for FrameToken<'_> {
     fn drop(&mut self) {
-        let _guard = CTX_MUTEX.lock();
-        self.ctx.end_frame_for_teardown_unlocked();
+        if let Some(context) = self.ctx.as_deref_mut() {
+            let _guard = CTX_MUTEX.lock();
+            context.end_frame_for_teardown_unlocked();
+        }
     }
 }

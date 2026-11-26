@@ -660,7 +660,6 @@ mod tests {
         let mut owner = Context::create();
         let mut renderer = configured_test_renderer(&mut owner);
 
-        let suspended_owner = owner.suspend_or_panic();
         let mut foreign = Context::create();
         let foreign_flags = foreign.io().backend_flags();
 
@@ -675,15 +674,11 @@ mod tests {
         assert_eq!(foreign.io().backend_flags(), foreign_flags);
         assert!(renderer.context_state.is_some());
 
-        let suspended_foreign = foreign.suspend_or_panic();
-        let mut owner = suspended_owner
-            .activate()
-            .expect("owner context should reactivate");
         renderer
             .shutdown(&mut owner)
             .expect("matching context should shut down the test renderer");
         assert!(renderer.context_state.is_none());
-        drop(suspended_foreign);
+        drop(foreign);
     }
 
     #[test]
@@ -852,8 +847,12 @@ mod tests {
     fn explicit_shutdown_revokes_context_state_and_allows_replacement() {
         let mut context = Context::create();
         let mut renderer = configured_test_renderer(&mut context);
+        let mut foreign = Context::create();
+        let mut foreign_renderer = configured_test_renderer(&mut foreign);
         renderer.shutdown(&mut context).unwrap();
 
+        assert_eq!(unsafe { sys::igGetCurrentContext() }, foreign.as_raw());
+        foreign_renderer.ensure_renderer_contract().unwrap();
         assert!(context.io().backend_renderer_user_data().is_null());
         assert!(context.io().backend_renderer_name().is_none());
         assert!(!context.io().backend_flags().intersects(
@@ -878,6 +877,8 @@ mod tests {
                 .is_none()
         );
 
+        foreign_renderer.shutdown(&mut foreign).unwrap();
+        drop(foreign);
         let mut replacement = configured_test_renderer(&mut context);
         replacement.shutdown(&mut context).unwrap();
     }

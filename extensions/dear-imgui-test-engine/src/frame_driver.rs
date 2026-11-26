@@ -76,7 +76,7 @@ impl CaptureRequest<'_> {
         self.size
     }
 
-    /// Mutable RGBA8 output buffer with exactly `width * height` pixels.
+    /// Zero-initialized RGBA8 output buffer with exactly `width * height` pixels.
     ///
     /// Pixels are tightly packed in row-major order from the top-left to the bottom-right. There is
     /// no row padding. Drivers must preserve the framebuffer's rendered color values and channel

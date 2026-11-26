@@ -120,7 +120,7 @@ fn rendered_draw_commands_keep_their_owner_callbacks_after_backend_teardown() {
             .set_draw_callback_set_sampler_linear_raw(Some(nearest))
     };
     let other_binding = other.binding();
-    let _other = other.suspend_or_panic();
+    let _other = other;
 
     let mut ctx = crate::Context::create();
     ctx.prepare_frame(

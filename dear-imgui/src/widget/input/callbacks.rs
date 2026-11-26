@@ -1,4 +1,6 @@
 use crate::sys;
+use std::borrow::Cow;
+use std::str::Utf8Error;
 
 // InputText Callback System
 // =========================
@@ -33,8 +35,9 @@ pub enum HistoryDirection {
 
 /// This trait provides an interface which ImGui will call on InputText callbacks.
 ///
-/// Each method is called *if and only if* the corresponding flag for each
-/// method is passed to ImGui in the `callback` builder.
+/// Each method requires its matching callback flag. If a callback panics, the
+/// widget skips further user callbacks and resumes the panic after Dear ImGui
+/// has returned and the Rust string has been restored.
 pub trait InputTextCallbackHandler {
     /// Filters a char -- returning a `None` means that the char is removed,
     /// and returning another char substitutes it out.
@@ -68,31 +71,20 @@ pub trait InputTextCallbackHandler {
 /// This struct provides methods to edit the underlying text buffer that
 /// Dear ImGui manipulates. Primarily, it gives [remove_chars](Self::remove_chars),
 /// [insert_chars](Self::insert_chars), and mutable access to what text is selected.
-pub struct TextCallbackData<'cb>(
-    *mut sys::ImGuiInputTextCallbackData,
-    std::marker::PhantomData<&'cb mut sys::ImGuiInputTextCallbackData>,
-);
+pub struct TextCallbackData<'cb>(&'cb mut sys::ImGuiInputTextCallbackData);
 
 impl<'cb> TextCallbackData<'cb> {
-    /// `data` must remain live for `'cb` and describe a native text-edit callback buffer.
-    pub(super) unsafe fn new(data: *mut sys::ImGuiInputTextCallbackData) -> Self {
-        Self(data, std::marker::PhantomData)
+    /// `data` must describe a live native text-edit callback buffer for `'cb`.
+    pub(super) unsafe fn new(data: &'cb mut sys::ImGuiInputTextCallbackData) -> Self {
+        Self(data)
     }
 
     fn data(&self) -> &sys::ImGuiInputTextCallbackData {
-        unsafe {
-            self.0
-                .as_ref()
-                .expect("internal imgui error: InputText callback data was null")
-        }
+        self.0
     }
 
     fn data_mut(&mut self) -> &mut sys::ImGuiInputTextCallbackData {
-        unsafe {
-            self.0
-                .as_mut()
-                .expect("internal imgui error: InputText callback data was null")
-        }
+        self.0
     }
 
     fn valid_text_len(&self) -> usize {
@@ -110,6 +102,10 @@ impl<'cb> TextCallbackData<'cb> {
             assert!(!data.Ctx.is_null(), "missing text callback context");
             let text = unsafe { &(*data.Ctx).InputTextState.TextA };
             assert_eq!(data.Buf, text.Data, "unexpected text callback buffer");
+            assert!(
+                text.Size <= text.Capacity,
+                "internal imgui error: callback text buffer size exceeded capacity"
+            );
             text.Size
         } else {
             data.BufSize
@@ -149,13 +145,29 @@ impl<'cb> TextCallbackData<'cb> {
         );
     }
 
-    /// Get a reference to the text callback buffer's str.
-    pub fn str(&self) -> &str {
+    fn text_bytes(&self) -> &[u8] {
         let len = self.valid_text_len();
-        unsafe {
-            std::str::from_utf8(std::slice::from_raw_parts(self.data().Buf as *const _, len))
-                .expect("internal imgui error -- it boofed a utf8")
-        }
+        unsafe { std::slice::from_raw_parts(self.data().Buf.cast(), len) }
+    }
+
+    fn expect_utf8(&self) -> &str {
+        self.str()
+            .expect("invalid UTF-8 in InputText callback buffer")
+    }
+
+    /// Borrows the callback text, excluding the trailing NUL, or returns its UTF-8 error.
+    ///
+    /// # Panics
+    ///
+    /// Panics if native callback metadata does not describe an in-bounds buffer.
+    pub fn str(&self) -> Result<&str, Utf8Error> {
+        std::str::from_utf8(self.text_bytes())
+    }
+
+    /// Borrows valid text or replaces malformed UTF-8 sequences with U+FFFD.
+    /// Uses the same buffer bounds checks as [`Self::str`].
+    pub fn str_lossy(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(self.text_bytes())
     }
 
     /// Get the current cursor position
@@ -166,7 +178,7 @@ impl<'cb> TextCallbackData<'cb> {
 
     /// Set the cursor position
     pub fn set_cursor_pos(&mut self, pos: usize) {
-        let text = self.str();
+        let text = self.expect_utf8();
         assert!(pos <= text.len(), "cursor position out of bounds");
         Self::assert_byte_boundary(text, "cursor position", pos);
         self.data_mut().CursorPos = Self::position_to_i32("cursor position", pos);
@@ -180,7 +192,7 @@ impl<'cb> TextCallbackData<'cb> {
 
     /// Set the selection start position
     pub fn set_selection_start(&mut self, pos: usize) {
-        let text = self.str();
+        let text = self.expect_utf8();
         assert!(pos <= text.len(), "selection start out of bounds");
         Self::assert_byte_boundary(text, "selection start", pos);
         self.data_mut().SelectionStart = Self::position_to_i32("selection start", pos);
@@ -194,7 +206,7 @@ impl<'cb> TextCallbackData<'cb> {
 
     /// Set the selection end position
     pub fn set_selection_end(&mut self, pos: usize) {
-        let text = self.str();
+        let text = self.expect_utf8();
         assert!(pos <= text.len(), "selection end out of bounds");
         Self::assert_byte_boundary(text, "selection end", pos);
         self.data_mut().SelectionEnd = Self::position_to_i32("selection end", pos);
@@ -223,7 +235,7 @@ impl<'cb> TextCallbackData<'cb> {
 
     /// Delete characters in the range [pos, pos+bytes_count)
     pub fn remove_chars(&mut self, pos: usize, bytes_count: usize) {
-        let text = self.str();
+        let text = self.expect_utf8();
         let end = pos
             .checked_add(bytes_count)
             .expect("delete range overflowed usize");
@@ -240,7 +252,7 @@ impl<'cb> TextCallbackData<'cb> {
     /// Insert text at the given byte position. Insertion stops at the first NUL.
     /// A read-only widget's callback can edit only within the caller's existing buffer.
     pub fn insert_chars(&mut self, pos: usize, text: &str) {
-        let current = self.str();
+        let current = self.expect_utf8();
         assert!(pos <= current.len(), "insert position out of bounds");
         Self::assert_byte_boundary(current, "insert position", pos);
         let text = self.insertion_prefix(text, current.len());
@@ -297,15 +309,7 @@ impl<'cb> TextCallbackData<'cb> {
     /// [push_str]: Self::push_str
     pub unsafe fn str_as_bytes_mut(&mut self) -> &mut [u8] {
         let len = self.valid_text_len();
-        unsafe {
-            let str = std::str::from_utf8_mut(std::slice::from_raw_parts_mut(
-                self.data_mut().Buf as *mut u8,
-                len,
-            ))
-            .expect("internal imgui error -- it boofed a utf8");
-
-            str.as_bytes_mut()
-        }
+        unsafe { std::slice::from_raw_parts_mut(self.data_mut().Buf.cast(), len) }
     }
 
     /// Sets the dirty flag on the text to imgui, indicating that
@@ -326,7 +330,7 @@ impl<'cb> TextCallbackData<'cb> {
     /// Returns the selected text directly. Note that if no text is selected,
     /// an empty str slice will be returned.
     pub fn selected(&self) -> &str {
-        let text = self.str();
+        let text = self.expect_utf8();
         let start = self.selection_start().min(self.selection_end());
         let end = self.selection_start().max(self.selection_end());
         assert!(end <= text.len(), "selection range out of bounds");
@@ -394,7 +398,29 @@ mod tests {
         data.BufSize = 4;
 
         let info = unsafe { TextCallbackData::new(&mut data) };
-        assert_eq!(info.str(), "edited text");
+        assert_eq!(info.str(), Ok("edited text"));
+        assert!(matches!(info.str_lossy(), Cow::Borrowed("edited text")));
+    }
+
+    #[test]
+    fn callback_text_exposes_invalid_utf8_without_panicking() {
+        let mut text = [b'a', 0xff, b'b', 0];
+        let mut data = callback_data_for_text(&mut text);
+        let info = unsafe { TextCallbackData::new(&mut data) };
+
+        assert_eq!(info.str().unwrap_err().valid_up_to(), 1);
+        assert_eq!(info.str_lossy(), "a\u{fffd}b");
+    }
+
+    #[test]
+    #[should_panic(expected = "callback text must fit its buffer with a trailing NUL")]
+    fn callback_text_rejects_a_length_outside_its_buffer() {
+        let mut text = *b"abc\0";
+        let mut data = callback_data_for_text(&mut text);
+        data.BufTextLen = data.BufSize;
+        let info = unsafe { TextCallbackData::new(&mut data) };
+
+        let _ = info.str();
     }
 
     #[test]
@@ -405,7 +431,7 @@ mod tests {
         data.Flags =
             (sys::ImGuiInputTextFlags_CallbackResize | sys::ImGuiInputTextFlags_ReadOnly) as i32;
         let info = unsafe { TextCallbackData::new(&mut data) };
-        let len = info.str().len();
+        let len = info.str().unwrap().len();
         assert_eq!(info.insertion_prefix("éé", len), "é");
         assert_eq!(info.insertion_prefix("a\0b", len), "a");
     }

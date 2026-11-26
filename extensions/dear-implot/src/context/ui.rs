@@ -61,6 +61,7 @@ impl PlotUi<'_> {
     ///
     /// ImPlot pushes its item ID when setup finishes. The setup closure's window, table and ID
     /// scopes are balanced before that push. Drawing scopes are balanced before `EndPlot`.
+    /// Cells passed to [`PlotSetup::setup_axis_links`] must live until this call returns.
     ///
     /// ```compile_fail
     /// use dear_implot::PlotUi;
@@ -68,11 +69,11 @@ impl PlotUi<'_> {
     ///     let _plot = ui.with_plot("plot", |plot| plot);
     /// }
     /// ```
-    pub fn with_plot_setup<R>(
+    pub fn with_plot_setup<'links, R>(
         &self,
         title: &str,
         size: [f32; 2],
-        setup: impl FnOnce(&mut PlotSetup<'_>),
+        setup: impl for<'plot> FnOnce(&mut PlotSetup<'plot, 'links>),
         draw: impl FnOnce(&PlotScope<'_>) -> R,
     ) -> Option<R> {
         assert_finite_vec2("PlotUi::with_plot_setup()", "size", size);

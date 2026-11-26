@@ -1,9 +1,13 @@
+#[cfg(feature = "capture")]
+use std::cell::Cell;
 use std::ffi::CStr;
 #[cfg(feature = "capture")]
 use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
+#[cfg(feature = "capture")]
+use dear_imgui_rs::ffi::RawBox;
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole, ContextBinding,
     ContextId, ContextThreadLease, FrameToken, Ui, with_scratch_txt, with_scratch_txt_two,
@@ -23,11 +27,31 @@ use crate::{
 /// Dear ImGui Test Engine context with one transactional process-wide attachment.
 ///
 /// Upstream stores one global engine pointer, so only one engine may remain bound across all live
-/// and suspended ImGui Contexts. The engine is not thread-safe and must stay on its owning thread.
+/// ImGui Contexts. The engine is not thread-safe and must stay on its owning thread.
 pub struct TestEngine {
     control: Rc<AttachmentControl>,
     lease: Option<ContextAttachmentLease>,
     _not_send_sync: PhantomData<Rc<()>>,
+}
+
+/// Extension methods for drawing Test Engine windows from a Dear ImGui frame.
+pub trait TestEngineUiExt {
+    /// Shows the engine's windows during an active frame of its attached Context.
+    fn show_test_engine_windows(
+        &self,
+        engine: &mut TestEngine,
+        opened: Option<&mut bool>,
+    ) -> TestEngineResult<()>;
+}
+
+impl TestEngineUiExt for Ui {
+    fn show_test_engine_windows(
+        &self,
+        engine: &mut TestEngine,
+        opened: Option<&mut bool>,
+    ) -> TestEngineResult<()> {
+        engine.show_windows(self, opened)
+    }
 }
 
 struct ActivePresentation<'engine> {
@@ -41,28 +65,30 @@ struct PostSwapFailure {
 }
 
 #[cfg(feature = "capture")]
-pub(crate) struct CaptureProviderGuard {
+pub(crate) struct CaptureProviderGuard<'state, State> {
     engine: *mut sys::ImGuiTestEngine,
-    user_data: *mut c_void,
-    active: bool,
+    slot: Option<RawBox<Cell<Option<&'state State>>>>,
 }
 
 #[cfg(feature = "capture")]
-impl CaptureProviderGuard {
+impl<State> CaptureProviderGuard<'_, State> {
     pub(crate) fn clear(&mut self) -> TestEngineResult<()> {
-        if !self.active {
+        let Some(slot) = self.slot.take() else {
             return Ok(());
+        };
+        slot.as_ref().set(None);
+        let status = unsafe {
+            sys::imgui_test_engine_clear_capture_provider(self.engine, slot.as_ptr().cast())
+        };
+        if status != sys::ImGuiTestEngineStatus_Success {
+            std::mem::forget(slot);
         }
-        let status =
-            unsafe { sys::imgui_test_engine_clear_capture_provider(self.engine, self.user_data) };
-        ffi_status("imgui_test_engine_clear_capture_provider", status)?;
-        self.active = false;
-        Ok(())
+        ffi_status("imgui_test_engine_clear_capture_provider", status)
     }
 }
 
 #[cfg(feature = "capture")]
-impl Drop for CaptureProviderGuard {
+impl<State> Drop for CaptureProviderGuard<'_, State> {
     fn drop(&mut self) {
         let _ = self.clear();
     }
@@ -260,7 +286,8 @@ impl TestEngine {
     ///
     /// This operation is idempotent from every completed state. A failure leaves enough state for
     /// a later call or `Drop` to retry without double-unbinding. Call this explicitly when cleanup
-    /// failures must be observed; `Drop` is non-panicking and can only perform best-effort retries.
+    /// failures must be observed. `Drop` retries and defers an attachment that cannot be detached
+    /// to Context teardown.
     pub fn shutdown(&mut self) -> TestEngineResult<()> {
         match self.control.attachment_state() {
             AttachmentState::Destroyed => return Ok(()),
@@ -438,20 +465,28 @@ impl TestEngine {
         })
     }
 
+    /// Publishes a stable slot that is disconnected from `state` even if native unregistration
+    /// fails. In that case only the empty slot is retained for stale native invocations.
+    ///
+    /// # Safety
+    ///
+    /// The callback must interpret `user_data` as `*const Cell<Option<&State>>` and reject an
+    /// empty slot. The guard must be cleared or dropped before the native engine is destroyed.
     #[cfg(feature = "capture")]
-    pub(crate) fn install_capture_provider(
+    pub(crate) unsafe fn install_capture_provider<'state, State>(
         &mut self,
         callback: sys::ImGuiTestEngineCaptureCallback_c,
-        user_data: *mut c_void,
-    ) -> TestEngineResult<CaptureProviderGuard> {
+        state: &'state State,
+    ) -> TestEngineResult<CaptureProviderGuard<'state, State>> {
         self.require_started("TestEngine::install_capture_provider")?;
+        let slot = RawBox::new(Cell::new(Some(state)));
+        let user_data: *mut c_void = slot.as_ptr().cast();
         self.call_attached("imgui_test_engine_install_capture_provider", |raw| unsafe {
             sys::imgui_test_engine_install_capture_provider(raw, callback, user_data)
         })?;
         Ok(CaptureProviderGuard {
             engine: self.control.raw(),
-            user_data,
-            active: true,
+            slot: Some(slot),
         })
     }
 
@@ -1390,13 +1425,81 @@ impl TestEngine {
 
 impl Drop for TestEngine {
     fn drop(&mut self) {
-        if self.shutdown().is_err() && self.control.attachment_state() != AttachmentState::Destroyed
+        if self.shutdown().is_ok() || self.control.attachment_state() == AttachmentState::Destroyed
         {
-            // U7 exception injection is one-shot, so this retry covers every supported native
-            // failure path. Persistent external ABI failure cannot be reported from Drop; callers
-            // that need that signal must use explicit shutdown while ownership is retained.
-            let _ = self.shutdown();
+            return;
         }
+        if self.shutdown().is_err()
+            && let Some(lease) = self.lease.take()
+        {
+            lease.defer_to_context();
+        }
+    }
+}
+
+#[cfg(all(test, feature = "capture"))]
+mod capture_tests {
+    use super::*;
+
+    unsafe extern "C" fn capture_probe(
+        _viewport_id: u32,
+        _x: i32,
+        _y: i32,
+        _width: i32,
+        _height: i32,
+        _pixels: *mut u32,
+        user_data: *mut c_void,
+    ) -> bool {
+        unsafe { &*user_data.cast::<Cell<Option<&bool>>>() }
+            .get()
+            .is_some_and(|state| *state)
+    }
+
+    #[test]
+    fn failed_capture_clear_leaves_an_empty_slot_for_native_callbacks() {
+        let mut context = Context::create();
+        let mut engine = TestEngine::create().expect("engine");
+        engine.start(&mut context).expect("start");
+        let user_data = {
+            let state = true;
+            let mut provider =
+                unsafe { engine.install_capture_provider(Some(capture_probe), &state) }
+                    .expect("install capture provider");
+            let user_data = provider
+                .slot
+                .as_ref()
+                .expect("installed slot")
+                .as_ptr()
+                .cast();
+            assert!(unsafe { capture_probe(0, 0, 0, 0, 0, std::ptr::null_mut(), user_data) });
+            assert_eq!(
+                unsafe {
+                    sys::imgui_test_engine_test_set_exception_injection(
+                        sys::ImGuiTestEngineExceptionPoint_UpstreamCall,
+                    )
+                },
+                sys::ImGuiTestEngineStatus_Success
+            );
+            assert_eq!(
+                provider
+                    .clear()
+                    .expect_err("injected clear failure")
+                    .status(),
+                Some(crate::TestEngineStatus::Exception)
+            );
+            user_data
+        };
+
+        let mut installed = false;
+        assert_eq!(
+            unsafe { sys::imgui_test_engine_has_capture_provider(engine.as_raw(), &mut installed) },
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert!(installed);
+        assert!(!unsafe { capture_probe(0, 0, 0, 0, 0, std::ptr::null_mut(), user_data) });
+
+        engine.shutdown().expect("shutdown the installed provider");
+        unsafe { drop(Box::from_raw(user_data.cast::<Cell<Option<&bool>>>())) };
     }
 }
 

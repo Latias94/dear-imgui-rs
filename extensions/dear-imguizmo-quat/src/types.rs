@@ -1,3 +1,4 @@
+pub use dear_imgui_rs::math::Vec3Like;
 use dear_imguizmo_quat_sys as sys;
 
 /// Trait for quaternion-like types convertible to/from [x,y,z,w].
@@ -7,15 +8,6 @@ use dear_imguizmo_quat_sys as sys;
 pub trait QuatLike {
     fn to_xyzw(&self) -> [f32; 4];
     fn set_from_xyzw(&mut self, v: [f32; 4]);
-}
-
-/// Trait for vec3-like types convertible to/from [x,y,z].
-///
-/// Implemented for `[f32; 3]`, `glam::Vec3` (feature `glam`) and
-/// `mint::Vector3<f32>` (feature `mint`).
-pub trait Vec3Like {
-    fn to_array(&self) -> [f32; 3];
-    fn set_from_array(&mut self, v: [f32; 3]);
 }
 
 /// Trait for vec4-like types convertible to/from [x,y,z,w].
@@ -32,14 +24,6 @@ impl QuatLike for [f32; 4] {
         *self
     }
     fn set_from_xyzw(&mut self, v: [f32; 4]) {
-        *self = v;
-    }
-}
-impl Vec3Like for [f32; 3] {
-    fn to_array(&self) -> [f32; 3] {
-        *self
-    }
-    fn set_from_array(&mut self, v: [f32; 3]) {
         *self = v;
     }
 }
@@ -62,15 +46,6 @@ impl QuatLike for glam::Quat {
     }
 }
 #[cfg(feature = "glam")]
-impl Vec3Like for glam::Vec3 {
-    fn to_array(&self) -> [f32; 3] {
-        self.to_array()
-    }
-    fn set_from_array(&mut self, v: [f32; 3]) {
-        *self = glam::Vec3::from_array(v);
-    }
-}
-#[cfg(feature = "glam")]
 impl Vec4Like for glam::Vec4 {
     fn to_array(&self) -> [f32; 4] {
         self.to_array()
@@ -90,17 +65,6 @@ impl QuatLike for mint::Quaternion<f32> {
         self.v.y = v[1];
         self.v.z = v[2];
         self.s = v[3];
-    }
-}
-#[cfg(feature = "mint")]
-impl Vec3Like for mint::Vector3<f32> {
-    fn to_array(&self) -> [f32; 3] {
-        [self.x, self.y, self.z]
-    }
-    fn set_from_array(&mut self, v: [f32; 3]) {
-        self.x = v[0];
-        self.y = v[1];
-        self.z = v[2];
     }
 }
 #[cfg(feature = "mint")]

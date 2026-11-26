@@ -105,14 +105,28 @@ build_support::emit_prebuilt_cpp_runtime_linkage(&target_os, &target_env, &targe
 
 On Windows, MSVC keeps its toolchain-default C++ runtime, GNU-GCC links static `stdc++`, and GNU/LLVM (`target_abi="llvm"`) links static `c++`. Source builds must finish with `compile_cpp_archive` instead of calling `cc::Build::compile` directly so the static runtime follows every emitted archive. Prebuilt callers emit the runtime immediately after their own `rustc-link-lib` directive. Callers should not add separate `c++abi`, unwind, or Windows system libraries to compensate for this decision.
 
-## Blocking HTTP and TLS
+## Download Verification and Cache
 
-HTTP(S) download support is behind the feature `download`, which enables `ureq` (with rustls).
-By default, the crate does not pull in an HTTP client.
+The `download` feature enables HTTPS downloads with `ureq` and rustls. Remote
+`.tar.gz` and `.tgz` archives must match their filename entry in `SHA256SUMS`
+from the same release directory. Set `DEAR_IMGUI_SHA256SUMS` to the path of a
+local checksum file to override that manifest. A cached archive and checksum
+file are verified without a network request, even in online mode.
+With `CARGO_NET_OFFLINE=1`, a remote URL requires a cached archive and either
+its cached release manifest or the local override. Automatic release discovery
+can fall back to building from source when the archive or release manifest is
+unavailable. A checksum verification failure still fails the build.
+Set `DEAR_IMGUI_ALLOW_INSECURE_HTTP=1` only for local HTTP testing.
 
-`download_prebuilt()` always accepts local file paths (including `file://...`) without requiring
-the `download` feature. Note that extracting `.tar.gz` archives requires the feature `archive`
-(enabled automatically by `download`).
+An explicit `*_SYS_CACHE_DIR` specifies the crate's cache root. Otherwise, the
+helper uses a crate-specific subdirectory of `DEAR_IMGUI_CACHE_DIR` or defaults
+to `OUT_DIR/dear-imgui-prebuilt-cache`.
+
+Local paths (including `file://...`) and `*_SYS_PACKAGE_DIR` use local artifacts
+without the release checksum file. Extracting local archives requires the
+`archive` feature, which `download` also enables. Explicit `*_SYS_LIB_DIR`
+selects an already extracted library. Sys crates validate the artifact profile
+before linking in all cases.
 
 ## When to Use
 

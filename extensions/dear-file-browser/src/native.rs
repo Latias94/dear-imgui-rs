@@ -2,7 +2,7 @@
 //!
 //! This module implements the OS-native file dialogs via the `rfd` crate.
 //! This path-based adapter supports desktop platforms. Browser `rfd` handles
-//! have no host paths, so `native-rfd` must be disabled on `wasm32`. Both blocking
+//! have no host paths, so the adapter is unavailable on `wasm32`. Both blocking
 //! and async desktop flows are exposed via the
 //! `FileDialog` builder:
 //!
@@ -16,7 +16,7 @@
 //! - On the Web (wasm32), the ImGui in-UI browser cannot enumerate the local
 //!   filesystem. Use `rfd::AsyncFileDialog` directly and retain its file handle,
 //!   or supply an application virtual-filesystem adapter to the in-UI browser.
-use crate::core::{Backend, DialogMode, FileDialog, FileDialogError, Selection};
+use crate::core::{DialogMode, FileDialog, FileDialogError, Selection};
 
 #[cfg(feature = "tracing")]
 use tracing::trace;
@@ -64,16 +64,12 @@ impl FileDialog {
         a
     }
 
-    fn require_native_backend(&self) -> Result<(), FileDialogError> {
-        match self.backend {
-            Backend::Auto | Backend::Native => Ok(()),
-            Backend::ImGui => Err(FileDialogError::Unsupported),
-        }
-    }
-
     /// Open a dialog synchronously (blocking).
     pub fn open_blocking(self) -> Result<Selection, FileDialogError> {
         self.require_native_backend()?;
+        for filter in &self.filters {
+            filter.validate()?;
+        }
         #[cfg(feature = "tracing")]
         trace!(?self.mode, "rfd blocking open");
         let mut sel = Selection::default();
@@ -114,9 +110,12 @@ impl FileDialog {
     }
 
     /// Open a native dialog asynchronously. An explicit ImGui backend returns
-    /// [`FileDialogError::Unsupported`], just as [`Self::open_blocking`] does.
+    /// [`FileDialogError::ImGuiBackendRequiresUi`], just as [`Self::open_blocking`] does.
     pub async fn open_async(self) -> Result<Selection, FileDialogError> {
         self.require_native_backend()?;
+        for filter in &self.filters {
+            filter.validate()?;
+        }
         #[cfg(feature = "tracing")]
         trace!(?self.mode, "rfd async open");
         let mut sel = Selection::default();
@@ -195,15 +194,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn explicit_imgui_backend_rejects_native_dialog_entry_points() {
-        let dialog = FileDialog::new(DialogMode::OpenFile).backend(Backend::ImGui);
+    fn invalid_programmatic_regex_rejects_native_open_before_showing_a_dialog() {
+        let dialog = FileDialog::new(DialogMode::OpenFile).filter(("Invalid", &["(([))"][..]));
         assert!(matches!(
             dialog.clone().open_blocking(),
-            Err(FileDialogError::Unsupported)
+            Err(FileDialogError::InvalidFilter(_))
         ));
         assert!(matches!(
             pollster::block_on(dialog.open_async()),
-            Err(FileDialogError::Unsupported)
+            Err(FileDialogError::InvalidFilter(_))
         ));
     }
 }

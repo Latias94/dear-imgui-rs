@@ -11,12 +11,12 @@ use bevy::{
 use dear_imgui_bevy::prelude::*;
 use dear_imgui_rs::{Condition, DockLayout, DockLayoutApply, DockSplit, WindowKey};
 use dear_imguizmo::{DrawListTarget, GuizmoExt, Mat4Like};
-use dear_imnodes::ImNodesExt;
+use dear_imnodes::{ImNodesContext, ImNodesExt};
 use dear_implot::ImPlotExt;
 
 struct EcosystemContexts {
     plot: dear_implot::PlotContext,
-    nodes: dear_imnodes::Context,
+    nodes: ImNodesContext,
     node_editor: dear_imnodes::EditorContext,
 }
 
@@ -112,7 +112,7 @@ fn install_ecosystem_contexts(app: &mut App) {
         registry
             .configure(primary_id, |context| {
                 let plot = dear_implot::PlotContext::create(context);
-                let nodes = dear_imnodes::Context::create(context);
+                let nodes = ImNodesContext::create(context);
                 let node_editor = nodes.create_editor_context();
                 EcosystemContexts {
                     plot,
@@ -207,7 +207,7 @@ fn render_profiler_plot(
 
 fn render_frame_graph(
     ui: &dear_imgui_rs::Ui,
-    nodes_context: &dear_imnodes::Context,
+    nodes_context: &ImNodesContext,
     node_editor_context: &dear_imnodes::EditorContext,
     positions_initialized: &mut bool,
 ) {

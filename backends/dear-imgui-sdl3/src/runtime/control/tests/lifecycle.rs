@@ -290,7 +290,7 @@ fn context_renderer_phase_releases_provider_before_sdl_platform_phase() {
 fn platform_session_is_exclusive_and_reusable_across_contexts() {
     let _guard = crate::tests::test_guard();
     let mut context_a = Context::create();
-    let runtime_a = synthetic_claimed_registration(
+    let mut runtime_a = synthetic_claimed_registration(
         &mut context_a,
         Rc::new(Cell::new(0)),
         Rc::new(Cell::new(0)),
@@ -298,16 +298,16 @@ fn platform_session_is_exclusive_and_reusable_across_contexts() {
         synthetic_create_window,
     );
     let id_a = context_a.id();
+    let binding_a = context_a.binding();
     let key_a = runtime_a.control.platform_io_key.get();
     assert_eq!(
-        with_current_runtime(|control| control.binding.id()),
+        binding_a.with_bound_context(|| with_current_runtime(|control| control.binding.id())),
         Some(id_a)
     );
 
-    let suspended_a = context_a.suspend_or_panic();
-    let mut blocked_context = Context::create();
+    let mut context_b = Context::create();
     let error = RuntimeRegistration::prepare_with_backend(
-        &mut blocked_context,
+        &mut context_b,
         None,
         None,
         None,
@@ -316,19 +316,14 @@ fn platform_session_is_exclusive_and_reusable_across_contexts() {
     )
     .unwrap_err();
     assert!(matches!(error, Sdl3BackendError::PlatformSessionOccupied));
-    drop(blocked_context);
 
-    let mut context_a = suspended_a.activate().expect("Context A should reactivate");
     assert_eq!(
-        with_current_runtime(|control| control.binding.id()),
+        binding_a.with_bound_context(|| with_current_runtime(|control| control.binding.id())),
         Some(id_a)
     );
-    let mut runtime_a = runtime_a;
     runtime_a.shutdown_platform(&mut context_a).unwrap();
     assert!(!registry_contains(key_a));
-    drop(context_a);
 
-    let mut context_b = Context::create();
     let mut runtime_b = synthetic_claimed_registration(
         &mut context_b,
         Rc::new(Cell::new(0)),
@@ -340,7 +335,9 @@ fn platform_session_is_exclusive_and_reusable_across_contexts() {
     let key_b = runtime_b.control.platform_io_key.get();
     assert!(registry_contains(key_b));
     assert_eq!(
-        with_current_runtime(|control| control.binding.id()),
+        context_b
+            .binding()
+            .with_bound_context(|| with_current_runtime(|control| control.binding.id())),
         Some(id_b)
     );
     runtime_b.shutdown_platform(&mut context_b).unwrap();

@@ -200,7 +200,7 @@ static void script_free_for_engine(ImGuiTestEngine* engine) noexcept {
     }
 }
 
-static void report_script_error(const char* operation, const char* detail) noexcept {
+static void report_script_error(const char* operation, const char* detail) {
     ImGuiTestEngine_Error(
         __FILE__,
         operation,
@@ -664,7 +664,7 @@ static void script_test_func_impl(ImGuiTestContext* ctx) {
                 if (eps < 0.0f) {
                     eps = -eps;
                 }
-                if (diff > eps) {
+                if (!(diff <= eps)) {
                     ImGuiTestEngine_Error(
                         __FILE__,
                         __func__,
@@ -869,13 +869,23 @@ static void script_test_func_impl(ImGuiTestContext* ctx) {
     }
 }
 
+static void report_script_exception(ImGuiTestContext* ctx, const char* detail) noexcept {
+    try {
+        report_script_error("script_test_func", detail);
+    } catch (...) {
+        if (ctx != nullptr && ctx->TestOutput != nullptr) {
+            ctx->TestOutput->Status = ImGuiTestStatus_Error;
+        }
+    }
+}
+
 static void script_test_func(ImGuiTestContext* ctx) noexcept {
     try {
         script_test_func_impl(ctx);
     } catch (const std::exception& error) {
-        report_script_error("script_test_func", error.what());
+        report_script_exception(ctx, error.what());
     } catch (...) {
-        report_script_error("script_test_func", "unknown C++ exception");
+        report_script_exception(ctx, "unknown C++ exception");
     }
 }
 
@@ -1927,6 +1937,12 @@ ImGuiTestEngineStatus imgui_test_engine_register_script_test(
             return abi::fail(
                 ImGuiTestEngineStatus_InvalidState,
                 "script tests cannot be registered while tests are running"
+            );
+        }
+        if (abi::has_active_run(engine) || !ImGuiTestEngine_IsTestQueueEmpty(engine)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "script tests cannot be registered before the previous run is consumed"
             );
         }
         if (script->MouseButtons != 0) {

@@ -5,7 +5,7 @@
 
 Safe, idiomatic Rust integration for [Dear ImGui Test Engine](https://github.com/ocornut/imgui_test_engine) on top of `dear-imgui-rs`.
 
-- Transactional ownership: one live engine attachment per process, including suspended Contexts.
+- Transactional ownership: one engine attachment per process, even with multiple live Contexts.
 - Typed lifecycle and FFI errors with copied native diagnostics.
 - Test queue helpers with explicit Ready/Queued/Running/Terminal state.
 - A bounded `TestRunner` that reports five product outcomes separately from infrastructure errors.
@@ -146,12 +146,13 @@ headless run capable of screenshots.
 - Engine-first and Context-first teardown are both supported. Context-first teardown leaves the
   upstream shutdown/settings hooks installed until `ImGui::DestroyContext()`, then marks the Rust
   attachment as Context-destroyed before the wrapper destroys the detached engine.
-- Upstream Test Engine uses process-global state. Starting a second engine, even on a suspended
-  Context, returns `TestEngineStatus::BindingOccupied`. `stop()` retains that ownership because the
-  upstream hooks remain installed; `shutdown()` or Context destruction releases it after unbind.
+- Upstream Test Engine uses process-global state. Starting a second engine, even on another
+  live Context, returns `TestEngineStatus::BindingOccupied`. `stop()` retains that ownership
+  because the upstream hooks remain installed. `shutdown()` or Context destruction releases it
+  after unbind.
 - Even a detached engine holds the Dear ImGui allocator on its creating thread until its native destruction succeeds. `TestEngine::create()` can return `TestEngineError::ThreadLease` if another thread owns the allocator.
-- Call `shutdown()` when cleanup errors must be handled. `Drop` is non-panicking and retries
-  one-shot native failures on a best-effort basis.
+- Call `shutdown()` when cleanup errors must be handled. `Drop` retries transient failures and
+  defers an attachment that could not be detached to Context teardown.
 - `result_summary()` requires a queued, running, or terminal run; it returns
   `InvalidState` in `Ready`. Keep the consumed terminal summary in application state
   to display completed results while the engine is ready for the next run.
@@ -166,7 +167,8 @@ headless run capable of screenshots.
   by passing the exact `RunReport` to `validate_registered_test_suite()`. Manually pumped suite
   integrations should use `take_terminal_test_suite_result()`, which atomically consumes and
   validates the active run instead of accepting caller-created aggregate counters.
-- `show_windows()` accepts only a `Ui` from the attached Context during an active native frame.
+- Bring `TestEngineUiExt` into scope to call `ui.show_test_engine_windows(&mut engine, None)`.
+  It accepts only a `Ui` from the attached Context during an active frame.
 - Upstream Dear ImGui Test Engine has its own license terms; review `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine/imgui_test_engine/LICENSE.txt` before shipping commercial products.
 
 ## Features

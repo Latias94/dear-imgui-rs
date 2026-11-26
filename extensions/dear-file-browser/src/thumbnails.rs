@@ -2,6 +2,19 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use dear_imgui_rs::texture::TextureId;
+use lru::LruCache;
+
+#[cfg(not(target_arch = "wasm32"))]
+mod worker;
+#[cfg(not(target_arch = "wasm32"))]
+pub use worker::ThumbnailDecoder;
+
+#[cfg(target_arch = "wasm32")]
+/// A native background decoder, unavailable on this target.
+#[derive(Debug)]
+pub enum ThumbnailDecoder {}
+
+const MAX_PENDING_REQUESTS: usize = 16;
 
 /// Decoded thumbnail image in RGBA8 format.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,8 +61,8 @@ pub trait ThumbnailRenderer {
 
 /// Convenience wrapper passed to [`ThumbnailCache::maintain`].
 pub struct ThumbnailBackend<'a> {
-    /// Decoder/provider.
-    pub provider: &'a mut dyn ThumbnailProvider,
+    /// Persistent native decoder. Create it once and reuse it across frames.
+    pub decoder: &'a ThumbnailDecoder,
     /// Renderer (upload/destroy).
     pub renderer: &'a mut dyn ThumbnailRenderer,
 }
@@ -79,20 +92,24 @@ pub struct ThumbnailRequest {
     pub path: PathBuf,
     /// Maximum thumbnail size in pixels (width, height).
     pub max_size: [u32; 2],
+    id: u64,
 }
 
-#[derive(Clone, Debug)]
+impl ThumbnailRequest {
+    /// Creates a standalone decode request, not associated with a cache.
+    pub fn new(path: PathBuf, max_size: [u32; 2]) -> Self {
+        Self {
+            path,
+            max_size,
+            id: 0,
+        }
+    }
+}
+
+#[derive(Debug)]
 enum ThumbnailState {
-    Queued,
-    InFlight,
-    Ready { texture_id: TextureId },
+    Ready(TextureId),
     Failed,
-}
-
-#[derive(Clone, Debug)]
-struct ThumbnailEntry {
-    state: ThumbnailState,
-    lru_stamp: u64,
 }
 
 /// Monotonic per-frame token used by [`ThumbnailCache`] bookkeeping.
@@ -125,30 +142,33 @@ impl ThumbnailFrameIndex {
 /// This type is renderer-agnostic: the application is expected to:
 /// 1) call [`advance_frame`](Self::advance_frame) once per UI frame,
 /// 2) drive visibility by calling [`request_visible`](Self::request_visible) for entries that are
-///    currently visible,
+///    currently visible, including cache hits,
 /// 3) drain requests via [`take_requests`](Self::take_requests), decode/upload thumbnails in user
-///    code, then call [`fulfill`](Self::fulfill),
+///    code, then call [`fulfill_request`](Self::fulfill_request), or call
+///    [`maintain`](Self::maintain) to use the native decoder,
 /// 4) queue evicted IDs from [`take_pending_destroys`](Self::take_pending_destroys) for
 ///    retirement according to the [`ThumbnailRenderer`] lifetime contract.
-#[derive(Clone, Debug)]
+/// Completed entries, including failures, occupy one bounded LRU. The queue and in-flight
+/// requests share a separate limit of 16 per cache. A failure is retried only once evicted
+/// or explicitly invalidated.
+#[derive(Debug)]
 pub struct ThumbnailCache {
-    /// Cache configuration.
-    pub config: ThumbnailCacheConfig,
-
+    config: ThumbnailCacheConfig,
     frame_index: ThumbnailFrameIndex,
     issued_this_frame: usize,
-    next_stamp: u64,
-
-    entries: HashMap<PathBuf, ThumbnailEntry>,
-    lru: VecDeque<(PathBuf, u64)>,
+    next_request_id: u64,
+    entries: LruCache<PathBuf, ThumbnailState>,
+    pending: HashMap<PathBuf, u64>,
     requests: VecDeque<ThumbnailRequest>,
     pending_destroys: Vec<TextureId>,
+    #[cfg(not(target_arch = "wasm32"))]
+    decoding: Vec<worker::PendingDecode>,
 }
 
 /// Snapshot of thumbnail cache state, useful for UI indicators (e.g. "generation progress").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ThumbnailStats {
-    /// Total number of tracked thumbnail entries (including ready/failed/in-flight).
+    /// Total number of cached entries and pending requests.
     pub total: usize,
     /// Number of entries queued (requested but not yet decoded/uploaded).
     pub queued: usize,
@@ -179,11 +199,26 @@ impl ThumbnailCache {
             config,
             frame_index: ThumbnailFrameIndex::zero(),
             issued_this_frame: 0,
-            next_stamp: 1,
-            entries: HashMap::new(),
-            lru: VecDeque::new(),
+            next_request_id: 1,
+            entries: LruCache::unbounded(),
+            pending: HashMap::new(),
             requests: VecDeque::new(),
             pending_destroys: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            decoding: Vec::new(),
+        }
+    }
+
+    /// Returns the current configuration.
+    pub fn config(&self) -> ThumbnailCacheConfig {
+        self.config
+    }
+
+    /// Updates the configuration, queuing excess textures for retirement immediately.
+    pub fn set_config(&mut self, config: ThumbnailCacheConfig) {
+        self.config = config;
+        while self.entries.len() > config.max_entries {
+            self.evict_lru();
         }
     }
 
@@ -205,98 +240,89 @@ impl ThumbnailCache {
     /// If the thumbnail is not already cached, a request may be queued depending on the per-frame
     /// request budget.
     pub fn request_visible(&mut self, path: &Path, max_size: [u32; 2]) {
-        let key = path.to_path_buf();
-
-        if let Some(e) = self.entries.get(&key) {
-            // Touch existing entries so they are not evicted.
-            self.touch_existing(&key, e.lru_stamp);
+        if self.entries.get(path).is_some() || self.pending.contains_key(path) {
             return;
         }
 
-        if self.issued_this_frame >= self.config.max_new_requests_per_frame {
+        if self.config.max_entries == 0
+            || self.pending.len() >= MAX_PENDING_REQUESTS
+            || self.issued_this_frame >= self.config.max_new_requests_per_frame
+        {
             return;
         }
         self.issued_this_frame += 1;
 
-        let stamp = self.alloc_stamp();
-        self.entries.insert(
-            key.clone(),
-            ThumbnailEntry {
-                state: ThumbnailState::Queued,
-                lru_stamp: stamp,
-            },
-        );
-        self.lru.push_back((key.clone(), stamp));
+        let id = self.next_request_id;
+        self.next_request_id = id.wrapping_add(1).max(1);
+        self.pending.insert(path.to_owned(), id);
         self.requests.push_back(ThumbnailRequest {
-            path: key,
+            path: path.to_owned(),
             max_size,
+            id,
         });
-        self.evict_to_fit();
     }
 
     /// Returns the cached texture id for a path, if available.
     pub fn texture_id(&self, path: &Path) -> Option<TextureId> {
-        self.entries.get(path).and_then(|e| match &e.state {
-            ThumbnailState::Ready { texture_id } => Some(*texture_id),
+        match self.entries.peek(path) {
+            Some(ThumbnailState::Ready(texture_id)) => Some(*texture_id),
             _ => None,
-        })
+        }
     }
 
     /// Drain queued thumbnail requests.
     ///
-    /// Drained requests are marked as "in flight" until [`fulfill`](Self::fulfill) is called.
+    /// Drained requests remain in flight until [`fulfill_request`](Self::fulfill_request) is
+    /// called, including on failure. Their slots are not reused until completion.
     pub fn take_requests(&mut self) -> Vec<ThumbnailRequest> {
-        let mut out = Vec::new();
-        while let Some(req) = self.requests.pop_front() {
-            if let Some(entry) = self.entries.get_mut(&req.path) {
-                if let ThumbnailState::Queued = entry.state {
-                    entry.state = ThumbnailState::InFlight;
-                }
-            }
-            out.push(req);
-        }
-        out
+        self.requests.drain(..).collect()
     }
 
-    /// Complete a request with either a ready texture id or an error string.
+    /// Completes a request issued by this cache with a texture ID or a failure.
     ///
-    /// Queues evicted/replaced texture IDs for [`Self::take_pending_destroys`].
-    /// This method does not return IDs or destroy GPU resources itself.
-    pub fn fulfill(&mut self, path: &Path, result: Result<TextureId, String>, _max_size: [u32; 2]) {
-        let key = path.to_path_buf();
-        let stamp = self.alloc_stamp();
+    /// Queues evicted or unused textures for [`Self::take_pending_destroys`].
+    pub fn fulfill_request(&mut self, req: &ThumbnailRequest, result: Result<TextureId, String>) {
+        if self.pending.get(req.path.as_path()) != Some(&req.id) {
+            if let Ok(id) = result
+                && self.texture_id(&req.path) != Some(id)
+            {
+                self.pending_destroys.push(id);
+            }
+            return;
+        }
+        self.pending.remove(req.path.as_path());
         let state = match result {
-            Ok(texture_id) => ThumbnailState::Ready { texture_id },
+            Ok(texture_id) => ThumbnailState::Ready(texture_id),
             Err(_message) => ThumbnailState::Failed,
         };
-
-        if let Some(old) = self.entries.insert(
-            key.clone(),
-            ThumbnailEntry {
-                state,
-                lru_stamp: stamp,
-            },
-        ) {
-            if let ThumbnailState::Ready { texture_id } = old.state {
-                self.pending_destroys.push(texture_id);
+        if self.config.max_entries == 0 {
+            if let ThumbnailState::Ready(id) = state {
+                self.pending_destroys.push(id);
             }
+            return;
         }
-        self.lru.push_back((key, stamp));
-        self.evict_to_fit();
+        if self.entries.len() == self.config.max_entries {
+            self.evict_lru();
+        }
+        self.entries.put(req.path.clone(), state);
     }
 
-    /// Complete a previously issued request.
-    pub fn fulfill_request(&mut self, req: &ThumbnailRequest, result: Result<TextureId, String>) {
-        self.fulfill(&req.path, result, req.max_size);
+    /// Removes a completed entry, allowing that path to be requested again.
+    ///
+    /// An already in-flight decode is not cancelled. Retire removed textures using
+    /// [`Self::take_pending_destroys`].
+    pub fn invalidate(&mut self, path: &Path) {
+        if let Some(ThumbnailState::Ready(id)) = self.entries.pop(path) {
+            self.pending_destroys.push(id);
+        }
     }
 
     /// Process queued requests and request retirement of evicted textures.
     ///
     /// This is a convenience helper for applications that want `dear-file-browser` to drive the
     /// request lifecycle:
-    /// - Decodes queued requests using [`ThumbnailProvider`],
-    /// - Uploads them using [`ThumbnailRenderer`],
-    /// - Fulfills the cache, and
+    /// - Submits queued requests to the bounded native decoder without waiting,
+    /// - Uploads completed images and fulfills the cache on the caller's thread, and
     /// - Requests retirement of evicted/replaced textures via [`ThumbnailRenderer::destroy`].
     ///
     /// The renderer must queue these requests until the current frame is consumed/recorded
@@ -306,19 +332,38 @@ impl ThumbnailCache {
     /// [`take_requests`](Self::take_requests), [`fulfill_request`](Self::fulfill_request), and
     /// [`take_pending_destroys`](Self::take_pending_destroys).
     pub fn maintain(&mut self, backend: &mut ThumbnailBackend<'_>) {
-        let requests = self.take_requests();
-        for req in &requests {
-            let decoded = backend.provider.decode(req);
-            let uploaded = match decoded {
-                Ok(img) => backend.renderer.upload_rgba8(&img),
-                Err(e) => Err(e),
+        #[cfg(not(target_arch = "wasm32"))]
+        self.poll_decoder(backend);
+
+        for tex in self.take_pending_destroys() {
+            backend.renderer.destroy(tex);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn poll_decoder(&mut self, backend: &mut ThumbnailBackend<'_>) {
+        let mut index = 0;
+        while index < self.decoding.len() {
+            let Some(decoded) = self.decoding[index].poll() else {
+                index += 1;
+                continue;
             };
-            self.fulfill_request(req, uploaded);
+            let decode = self.decoding.swap_remove(index);
+            let uploaded = decoded.and_then(|image| backend.renderer.upload_rgba8(&image));
+            self.fulfill_request(&decode.request, uploaded);
         }
 
-        let destroys = self.take_pending_destroys();
-        for tex in destroys {
-            backend.renderer.destroy(tex);
+        while let Some(request) = self.requests.pop_front() {
+            match backend.decoder.submit(request) {
+                Ok(pending) => self.decoding.push(pending),
+                Err(worker::SubmitError::Full(request)) => {
+                    self.requests.push_front(request);
+                    break;
+                }
+                Err(worker::SubmitError::Closed(request)) => {
+                    self.fulfill_request(&request, Err("thumbnail decoder is closed".into()));
+                }
+            }
         }
     }
 
@@ -334,18 +379,18 @@ impl ThumbnailCache {
     /// Returns a snapshot of the cache state for UI display.
     pub fn stats(&self) -> ThumbnailStats {
         let mut stats = ThumbnailStats {
-            total: self.entries.len(),
+            total: self.entries.len() + self.pending.len(),
+            queued: self.requests.len(),
+            in_flight: self.pending.len() - self.requests.len(),
             pending_requests: self.requests.len(),
             issued_this_frame: self.issued_this_frame,
             max_new_requests_per_frame: self.config.max_new_requests_per_frame,
             ..ThumbnailStats::default()
         };
 
-        for entry in self.entries.values() {
-            match entry.state {
-                ThumbnailState::Queued => stats.queued += 1,
-                ThumbnailState::InFlight => stats.in_flight += 1,
-                ThumbnailState::Ready { .. } => stats.ready += 1,
+        for (_, entry) in self.entries.iter() {
+            match entry {
+                ThumbnailState::Ready(_) => stats.ready += 1,
                 ThumbnailState::Failed => stats.failed += 1,
             }
         }
@@ -353,58 +398,9 @@ impl ThumbnailCache {
         stats
     }
 
-    fn alloc_stamp(&mut self) -> u64 {
-        let s = self.next_stamp;
-        self.next_stamp = self.next_stamp.wrapping_add(1);
-        s
-    }
-
-    fn touch_existing(&mut self, key: &PathBuf, old_stamp: u64) {
-        let stamp = self.alloc_stamp();
-        if let Some(e) = self.entries.get_mut(key) {
-            e.lru_stamp = stamp;
-        }
-        self.lru.push_back((key.clone(), stamp));
-
-        // Avoid unbounded growth if the user constantly hovers a single entry.
-        // This is a soft heuristic: clean a little when the queue gets too large.
-        if self.lru.len() > self.config.max_entries.saturating_mul(8).max(64) {
-            self.compact_lru(old_stamp);
-        }
-    }
-
-    fn compact_lru(&mut self, _hint_stamp: u64) {
-        // Drop stale LRU nodes from the front.
-        let target = self.config.max_entries.saturating_mul(4).max(32);
-        while self.lru.len() > target {
-            let Some((k, s)) = self.lru.pop_front() else {
-                break;
-            };
-            let keep = self.entries.get(&k).is_some_and(|e| e.lru_stamp == s);
-            if keep {
-                self.lru.push_front((k, s));
-                break;
-            }
-        }
-    }
-
-    fn evict_to_fit(&mut self) {
-        while self.entries.len() > self.config.max_entries {
-            let Some((key, stamp)) = self.lru.pop_front() else {
-                break;
-            };
-            let Some(entry) = self.entries.get(&key) else {
-                continue;
-            };
-            if entry.lru_stamp != stamp {
-                continue;
-            }
-            let removed = self.entries.remove(&key);
-            if let Some(removed) = removed {
-                if let ThumbnailState::Ready { texture_id } = removed.state {
-                    self.pending_destroys.push(texture_id);
-                }
-            }
+    fn evict_lru(&mut self) {
+        if let Some((_, ThumbnailState::Ready(id))) = self.entries.pop_lru() {
+            self.pending_destroys.push(id);
         }
     }
 }
@@ -413,34 +409,20 @@ impl ThumbnailCache {
 mod tests {
     use super::*;
 
-    #[derive(Default)]
-    struct DummyProvider;
-
-    impl ThumbnailProvider for DummyProvider {
-        fn decode(&mut self, _req: &ThumbnailRequest) -> Result<DecodedRgbaImage, String> {
-            Ok(DecodedRgbaImage {
-                width: 1,
-                height: 1,
-                rgba: vec![255, 0, 0, 255],
-            })
-        }
-    }
-
+    #[cfg(not(target_arch = "wasm32"))]
     #[derive(Default)]
     struct DummyRenderer {
         next: u64,
-        destroyed: Vec<TextureId>,
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     impl ThumbnailRenderer for DummyRenderer {
         fn upload_rgba8(&mut self, _image: &DecodedRgbaImage) -> Result<TextureId, String> {
             self.next += 1;
             Ok(TextureId::new(self.next))
         }
 
-        fn destroy(&mut self, texture_id: TextureId) {
-            self.destroyed.push(texture_id);
-        }
+        fn destroy(&mut self, _texture_id: TextureId) {}
     }
 
     #[test]
@@ -470,47 +452,116 @@ mod tests {
 
     #[test]
     fn evicts_lru_and_collects_pending_destroys() {
-        let mut c = ThumbnailCache::new(ThumbnailCacheConfig {
-            max_entries: 1,
+        let mut cache = ThumbnailCache::new(ThumbnailCacheConfig {
+            max_entries: 2,
             max_new_requests_per_frame: 10,
         });
-        c.advance_frame();
-        c.request_visible(Path::new("/a.png"), [64, 64]);
-        c.take_requests();
-        c.fulfill(Path::new("/a.png"), Ok(TextureId::new(1)), [64, 64]);
+        let first = Path::new("/first.png");
+        let second = Path::new("/second.png");
+        let third = Path::new("/third.png");
+        for (path, id) in [(first, 1), (second, 2)] {
+            cache.request_visible(path, [64, 64]);
+            let request = cache.take_requests().pop().unwrap();
+            cache.fulfill_request(&request, Ok(TextureId::new(id)));
+        }
+        for _ in 0..1_000 {
+            cache.request_visible(first, [64, 64]);
+        }
+        cache.request_visible(third, [64, 64]);
+        let request = cache.take_requests().pop().unwrap();
+        cache.fulfill_request(&request, Ok(TextureId::new(3)));
 
-        c.advance_frame();
-        c.request_visible(Path::new("/b.png"), [64, 64]);
-        c.take_requests();
-        c.fulfill(Path::new("/b.png"), Ok(TextureId::new(2)), [64, 64]);
-
-        let destroyed = c.take_pending_destroys();
-        assert!(destroyed.contains(&TextureId::new(1)));
-        assert!(c.texture_id(Path::new("/a.png")).is_none());
-        assert_eq!(c.texture_id(Path::new("/b.png")), Some(TextureId::new(2)));
+        assert_eq!(cache.take_pending_destroys(), [TextureId::new(2)]);
+        assert_eq!(cache.texture_id(first), Some(TextureId::new(1)));
+        assert_eq!(cache.texture_id(second), None);
+        assert_eq!(cache.stats().ready, 2);
     }
 
     #[test]
-    fn maintain_decodes_uploads_and_destroys() {
-        let mut c = ThumbnailCache::new(ThumbnailCacheConfig {
-            max_entries: 1,
-            max_new_requests_per_frame: 10,
-        });
-        let mut provider = DummyProvider::default();
+    fn negative_cache_and_in_flight_requests_are_bounded() {
+        let mut cache = ThumbnailCache::default();
+        let unsupported = Path::new("/unsupported.txt");
+        cache.request_visible(unsupported, [64, 64]);
+        let request = cache.take_requests().pop().unwrap();
+        cache.fulfill_request(&request, Err("unsupported".into()));
+
+        for frame in 0..4 {
+            cache.advance_frame();
+            cache.request_visible(unsupported, [64, 64]);
+            for entry in 0..100 {
+                cache.request_visible(Path::new(&format!("/{frame}-{entry}.png")), [64, 64]);
+            }
+            let queued = cache.take_requests();
+            assert_eq!(
+                queued.len(),
+                if frame == 0 { MAX_PENDING_REQUESTS } else { 0 }
+            );
+            assert!(queued.iter().all(|item| item.path != unsupported));
+            assert_eq!(cache.stats().in_flight, MAX_PENDING_REQUESTS);
+            assert_eq!(cache.stats().failed, 1);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn maintain_only_uploads_on_the_calling_thread_after_decode_finishes() {
+        use std::sync::{Arc, Mutex, mpsc};
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        struct GatedProvider {
+            started: mpsc::Sender<thread::ThreadId>,
+            release: Arc<Mutex<mpsc::Receiver<()>>>,
+        }
+
+        impl ThumbnailProvider for GatedProvider {
+            fn decode(&mut self, _req: &ThumbnailRequest) -> Result<DecodedRgbaImage, String> {
+                self.started.send(thread::current().id()).unwrap();
+                self.release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                Ok(DecodedRgbaImage {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![255; 4],
+                })
+            }
+        }
+
+        let (started, started_rx) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let decoder = ThumbnailDecoder::spawn(|| GatedProvider {
+            started: started.clone(),
+            release: Arc::clone(&release_rx),
+        })
+        .unwrap();
+        let mut cache = ThumbnailCache::default();
         let mut renderer = DummyRenderer::default();
         let mut backend = ThumbnailBackend {
-            provider: &mut provider,
+            decoder: &decoder,
             renderer: &mut renderer,
         };
 
-        c.advance_frame();
-        c.request_visible(Path::new("/a.png"), [64, 64]);
-        c.maintain(&mut backend);
-        assert!(c.texture_id(Path::new("/a.png")).is_some());
-
-        c.advance_frame();
-        c.request_visible(Path::new("/b.png"), [64, 64]);
-        c.maintain(&mut backend);
-        assert!(renderer.destroyed.iter().any(|t| t == &TextureId::new(1)));
+        let path = Path::new("/a.png");
+        cache.request_visible(path, [64, 64]);
+        cache.maintain(&mut backend);
+        let worker = started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_ne!(worker, thread::current().id());
+        assert_eq!(cache.stats().in_flight, 1);
+        assert_eq!(cache.texture_id(path), None);
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while cache.texture_id(path).is_none() {
+            assert!(
+                Instant::now() < deadline,
+                "decoder did not return a thumbnail"
+            );
+            cache.maintain(&mut backend);
+            thread::yield_now();
+        }
+        assert_eq!(renderer.next, 1);
     }
 }

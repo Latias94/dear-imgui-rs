@@ -10,12 +10,10 @@ use dear_imgui_rs::{
     render::{DrawData, DrawIdx, DrawRequirements, RawCallbackCommand, TextureBinding},
 };
 
-// ImGui index type is currently u16 in dear-imgui-rs, but keep this derived so
-// future upgrades to u32 require fewer backend changes.
-const IMGUI_INDEX_FORMAT: wgpu::IndexFormat = if std::mem::size_of::<DrawIdx>() == 2 {
-    wgpu::IndexFormat::Uint16
-} else {
-    wgpu::IndexFormat::Uint32
+const IMGUI_INDEX_FORMAT: wgpu::IndexFormat = match std::mem::size_of::<DrawIdx>() {
+    2 => wgpu::IndexFormat::Uint16,
+    4 => wgpu::IndexFormat::Uint32,
+    _ => panic!("Dear ImGui draw indices must be 16 or 32 bits"),
 };
 
 /// Physical dimensions of the WGPU render target receiving Dear ImGui commands.

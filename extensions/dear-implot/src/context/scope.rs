@@ -1,7 +1,11 @@
 use super::callbacks::AxisCallbacks;
+use super::validation::is_valid_axis_range;
 use super::{PlotContext, PlotUi};
-use crate::sys;
+use crate::{Axis, sys};
 use dear_imgui_rs::{DrawListMut, NativeWindowScope, Ui};
+use std::cell::Cell;
+
+pub(super) type AxisLink<'links> = (Option<&'links Cell<f64>>, Option<&'links Cell<f64>>);
 
 /// Drawing and queries for one plot after its axes have been configured.
 ///
@@ -23,21 +27,23 @@ pub struct PlotScope<'plot> {
 ///
 /// ```compile_fail
 /// use dear_implot::PlotSetup;
-/// fn submit_during_setup(setup: &PlotSetup<'_>) {
+/// fn submit_during_setup(setup: &PlotSetup<'_, '_>) {
 ///     setup.plot_line("line", &[0.0, 1.0], &[2.0, 3.0]);
 /// }
 /// ```
-pub struct PlotSetup<'plot> {
+pub struct PlotSetup<'plot, 'links> {
     pub(crate) plot: &'plot PlotScope<'plot>,
     pub(super) callbacks: &'plot mut AxisCallbacks,
+    pub(super) axis_links: &'plot mut [AxisLink<'links>; Axis::Y3 as usize + 1],
 }
 
-pub(super) struct ActivePlot<'plot> {
+pub(super) struct ActivePlot<'plot, 'links> {
     pub(super) plot: PlotScope<'plot>,
     callbacks: AxisCallbacks,
+    axis_links: [AxisLink<'links>; Axis::Y3 as usize + 1],
 }
 
-impl<'plot> ActivePlot<'plot> {
+impl<'plot, 'links> ActivePlot<'plot, 'links> {
     pub(super) fn new(
         ui: &PlotUi<'plot>,
         host: &'plot NativeWindowScope<'plot>,
@@ -52,29 +58,44 @@ impl<'plot> ActivePlot<'plot> {
                 next_spec: Default::default(),
             },
             callbacks: AxisCallbacks::default(),
+            axis_links: Default::default(),
         }
     }
 
-    pub(super) fn setup(&mut self) -> PlotSetup<'_> {
+    pub(super) fn setup(&mut self) -> PlotSetup<'_, 'links> {
         PlotSetup {
             plot: &self.plot,
             callbacks: &mut self.callbacks,
+            axis_links: &mut self.axis_links,
         }
     }
 }
 
-impl Drop for ActivePlot<'_> {
+impl Drop for ActivePlot<'_, '_> {
     fn drop(&mut self) {
         self.plot.with_bound_context(|| unsafe {
             // EndPlot also finishes setup when the setup closure unwinds. Keep all registered
             // callbacks alive until it returns, then detach them from the cached native axes.
             sys::ImPlot_EndPlot();
             self.callbacks.detach(self.plot.raw);
-            // Native Axis::Reset leaves these pointers in cached, possibly disabled axes.
-            // Writeback is complete. A later use of this plot ID can establish fresh links.
-            for axis in &mut (*self.plot.raw).Axes {
+            // EndPlot has finished writing to native subplot links, but cached axes can
+            // retain those pointers. Rust Cell addresses were never passed to ImPlot.
+            let axes = &mut (*self.plot.raw).Axes;
+            for (axis, &(link_min, link_max)) in axes.iter_mut().zip(&self.axis_links) {
                 axis.LinkedMin = std::ptr::null_mut();
                 axis.LinkedMax = std::ptr::null_mut();
+                if link_min.is_none() && link_max.is_none() {
+                    continue;
+                }
+                let range = axis.Range;
+                if is_valid_axis_range(range.Min, range.Max) {
+                    if let Some(min) = link_min {
+                        min.set(range.Min);
+                    }
+                    if let Some(max) = link_max {
+                        max.set(range.Max);
+                    }
+                }
             }
         });
     }

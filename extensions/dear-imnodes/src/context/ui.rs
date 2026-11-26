@@ -1,8 +1,8 @@
-use super::{Context, EditorContext, NodeEditorSetup, NodesUi};
+use super::{EditorContext, ImNodesContext, NodeEditorSetup, NodesUi};
 use dear_imgui_rs::Ui;
 
 impl<'ui> NodesUi<'ui> {
-    pub(crate) fn new(ui: &'ui Ui, ctx: &'ui Context) -> Self {
+    pub(crate) fn new(ui: &'ui Ui, ctx: &'ui ImNodesContext) -> Self {
         // Keep ImNodes bound to the ImGui context this ImNodes context was created with.
         // This avoids accidental cross-context use when users manage multiple ImGui contexts.
         assert_eq!(

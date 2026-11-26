@@ -240,7 +240,7 @@ fn an_engine_owned_frame_can_retry_synchronous_render_with_its_own_consumer() {
     let _guard = test_guard();
     let mut other = imgui::Context::create();
     let foreign = other.create_synchronous_renderer_consumer().unwrap();
-    let _other = other.suspend_or_panic();
+    let _other = other;
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
@@ -255,6 +255,81 @@ fn an_engine_owned_frame_can_retry_synchronous_render_with_its_own_consumer() {
     ));
     assert_eq!(ctx.frame_lifecycle_stamp(), stamp);
     assert!(reconcile_test_frame(ctx.try_render(&consumer).unwrap(), &[]).valid());
+}
+
+#[test]
+fn a_frame_token_can_retry_synchronous_render_after_a_consumer_rejection() {
+    let _guard = test_guard();
+    let mut foreign_context = imgui::Context::create();
+    let foreign = foreign_context
+        .create_synchronous_renderer_consumer()
+        .unwrap();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
+    let frame = ctx.begin_frame();
+
+    frame.ui().text("Before preflight");
+    let (frame, error) = frame
+        .try_render(&foreign)
+        .expect_err("consumer belongs to another context");
+    assert!(matches!(
+        error,
+        imgui::render::SnapshotError::Consumer(
+            imgui::render::RendererConsumerError::ForeignContext { .. }
+        )
+    ));
+    assert_eq!(frame.lifecycle_state(), imgui::FrameLifecycleState::InFrame);
+    frame.ui().text("After preflight");
+    assert!(reconcile_test_frame(frame.render(&consumer), &[]).valid());
+}
+
+#[test]
+fn a_frame_token_can_only_retry_synchronous_capture_after_native_render() {
+    let _guard = test_guard();
+    let mut other = imgui::Context::create();
+    let detached = other.create_detached_renderer_consumer().unwrap();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let synchronous = ctx.create_synchronous_renderer_consumer().unwrap();
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255; 4],
+    )
+    .unwrap();
+    let id = ctx.register_texture(texture);
+    let native = unsafe { *(*ctx.as_raw()).UserTextures.Data };
+
+    for try_detached in [true, false] {
+        let frame = ctx.begin_frame();
+        frame.ui().image(id, [16.0, 16.0]);
+        let bytes_per_pixel = unsafe { std::mem::replace(&mut (*native).BytesPerPixel, 0) };
+        let result = frame.try_render(&synchronous);
+        unsafe { (*native).BytesPerPixel = bytes_per_pixel };
+        let (frame, error) = result.expect_err("invalid texture layout should prevent capture");
+        assert!(matches!(
+            error,
+            imgui::render::SnapshotError::TextureInvalidLayout { .. }
+        ));
+        assert_eq!(
+            frame.lifecycle_state(),
+            imgui::FrameLifecycleState::Rendered
+        );
+
+        if try_detached {
+            assert!(matches!(
+                frame.render_snapshot(&detached),
+                Err(imgui::render::SnapshotError::FrameAlreadyRendered)
+            ));
+        } else {
+            let frame = frame
+                .try_render(&synchronous)
+                .unwrap_or_else(|(_, error)| panic!("synchronous capture should retry: {error}"));
+            assert!(reconcile_test_frame(frame, &[]).valid());
+        }
+    }
 }
 
 #[test]
@@ -467,7 +542,7 @@ fn synchronous_reconciled_frame_completion_binds_its_owner_context() {
     let ctx_b = imgui::Context::create();
     let binding_b = ctx_b.binding();
     let raw_b = ctx_b.as_raw();
-    let suspended_b = ctx_b.suspend_or_panic();
+    let suspended_b = ctx_b;
 
     let mut ctx_a = imgui::Context::create();
     prepare_context(&mut ctx_a);
@@ -875,7 +950,7 @@ fn renderer_reset_commit_binds_its_owner_context() {
     let foreign = imgui::Context::create();
     let foreign_binding = foreign.binding();
     let foreign_raw = foreign.as_raw();
-    let suspended_foreign = foreign.suspend_or_panic();
+    let suspended_foreign = foreign;
 
     let mut owner = imgui::Context::create();
     prepare_context(&mut owner);

@@ -573,11 +573,6 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
                 control.observe_skip(observation, WgpuFrameSkipReason::RetiredTarget);
                 return Ok(());
             };
-            let surface = Rc::clone(data.surface.as_ref().ok_or(
-                WgpuViewportError::SurfaceOperationFailed {
-                    operation: "retain viewport surface for recording",
-                },
-            )?);
             let raw_draw_data = viewport.draw_data();
             if raw_draw_data.is_null() {
                 control.observe_skip(observation, WgpuFrameSkipReason::NoDrawData);
@@ -585,14 +580,15 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
             }
             let draw_data = unsafe { dear_imgui_rs::render::DrawData::from_raw(&*raw_draw_data) };
 
-            #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
-            let acquisition = data
-                .surface
-                .as_ref()
-                .ok_or(WgpuViewportError::SurfaceOperationFailed {
-                    operation: "acquire a released viewport surface",
-                })?
-                .get_current_texture();
+            let surface =
+                data.surface
+                    .as_ref()
+                    .ok_or(WgpuViewportError::SurfaceOperationFailed {
+                        operation: "acquire a released viewport surface",
+                    })?;
+            // Retain a shared surface only after acquisition succeeds. Recovery can then
+            // reconfigure or replace the baseline surface without a stale reference.
+            let acquisition = surface.get_current_texture();
             #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
             let (frame, reconfigure_after_present) = match acquisition {
                 wgpu::CurrentSurfaceTexture::Success(frame) => (
@@ -665,14 +661,6 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
                 }
             };
 
-            #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
-            let acquisition = data
-                .surface
-                .as_ref()
-                .ok_or(WgpuViewportError::SurfaceOperationFailed {
-                    operation: "acquire a released viewport surface",
-                })?
-                .get_current_texture();
             #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
             let (frame, reconfigure_after_present) = match acquisition {
                 Ok(frame) => {
@@ -753,7 +741,7 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
             };
             let acquired = AcquiredTarget {
                 frame: Some(frame),
-                surface: Some(surface),
+                surface: Some(Rc::clone(surface)),
                 native_window: Some(native_window),
             };
             let view = acquired

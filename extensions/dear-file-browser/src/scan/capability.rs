@@ -54,7 +54,7 @@ impl FileSystemCapability {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn background_file_system(&self) -> Option<Arc<dyn FileSystem + Send + Sync>> {
+    pub(crate) fn background_file_system(&self) -> Option<Arc<dyn FileSystem + Send + Sync>> {
         match self {
             Self::Background(filesystem) => Some(Arc::clone(filesystem)),
             Self::Blocking(_) => None,

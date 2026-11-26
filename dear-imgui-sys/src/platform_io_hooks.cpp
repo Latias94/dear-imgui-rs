@@ -9,6 +9,11 @@
 
 #ifdef IMGUI_HAS_DOCK
 
+extern "C" ImGuiContext* const* dear_imgui_rs_current_context_slot() noexcept
+{
+    return &GImGui;
+}
+
 struct DearImguiRsPlatformIoHookStorage
 {
     ImGuiPlatformIO* PlatformIO;

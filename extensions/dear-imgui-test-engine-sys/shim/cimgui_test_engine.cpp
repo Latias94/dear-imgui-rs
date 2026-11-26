@@ -1414,6 +1414,7 @@ ImGuiTestEngineStatus imgui_test_engine_clear_capture_provider(
         if (!installed) {
             return ImGuiTestEngineStatus_Success;
         }
+        abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
         if (abi::presentation_pending(engine)) {
             abi::request_capture_abort(engine);
         } else if (abi::capture_active(engine) || abi::capture_wait_pending(engine)) {

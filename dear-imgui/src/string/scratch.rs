@@ -20,6 +20,17 @@ impl Drop for ScratchBuffer<'_> {
 }
 
 impl ScratchBuffers {
+    #[inline]
+    pub(crate) fn with_c_string<R>(&self, text: &str, f: impl FnOnce(*const c_char) -> R) -> R {
+        let bytes = text.as_bytes();
+        if bytes.len() < 64 && !bytes.contains(&0) {
+            let mut buffer = [0; 64];
+            buffer[..bytes.len()].copy_from_slice(bytes);
+            return f(buffer.as_ptr().cast());
+        }
+        self.with(|buffer| f(buffer.scratch_txt(text)))
+    }
+
     // The most recently returned buffer contains the caller's staged labels. Keep it off the
     // stack during user code so AsRef, Drop, or native callbacks can use another allocation.
     pub(crate) fn with<R>(&self, f: impl FnOnce(&mut UiBuffer) -> R) -> R {

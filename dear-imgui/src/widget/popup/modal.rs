@@ -30,13 +30,12 @@ impl<'ui> ModalPopup<'ui> {
     /// Begins the modal popup
     pub fn begin(self) -> Option<ModalPopupToken<'ui>> {
         validate_window_flags("ModalPopup::begin()", self.flags);
-        let name_ptr = self.ui.scratch_txt(self.name);
         let opened_ptr = self
             .opened
             .map(|o| o as *mut bool)
             .unwrap_or(std::ptr::null_mut());
 
-        let render = self.ui.run_with_bound_context(|| unsafe {
+        let render = self.ui.with_scratch_txt(self.name, |name_ptr| unsafe {
             sys::igBeginPopupModal(name_ptr, opened_ptr, self.flags.bits())
         });
 

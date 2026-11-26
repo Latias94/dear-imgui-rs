@@ -15,10 +15,10 @@ readme = "README.md"
 features = ["imgui", "native-rfd"]
 
 [features]
-# Defaults: enable both backends and tracing. Runtime picks the best.
-default = ["imgui", "native-rfd", "tracing"]
+# Native dialogs are opt-in, including on desktop.
+default = ["imgui", "tracing"]
 # ImGui UI backend, including local file dates and scan timing.
-imgui = ["dep:jiff", "dep:regex", "dep:rustix", "dep:web-time", "dep:windows-sys"]
+imgui = ["dep:indexmap", "dep:jiff", "dep:lru", "dep:rustix", "dep:web-time", "dep:windows-sys"]
 native-rfd = ["dep:rfd"]
 tracing = ["dep:tracing"]
 thumbnails-image = ["imgui", "dep:image"]
@@ -28,13 +28,18 @@ dear-imgui-rs.workspace = true
 thiserror.workspace = true
 tracing = { workspace = true, optional = true }
 
-# Native file dialogs (desktop + wasm) — optional
-rfd = { version = "0.18", optional = true, default-features = false, features = ["xdg-portal"] }
 jiff = { version = "1.0.2", features = ["js"], optional = true }
 web-time = { workspace = true, optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
-regex = { version = "1.13", optional = true }
-indexmap = "2"
+regex = "1.13"
+indexmap = { version = "2", optional = true }
+lru = { version = "0.18.5", default-features = false, optional = true }
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+dear-imgui-rs = { workspace = true, features = ["wasm"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rfd = { version = "0.18", optional = true, default-features = false, features = ["xdg-portal"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))'.dependencies]
 rustix = { version = "1.1", features = ["fs"], optional = true }

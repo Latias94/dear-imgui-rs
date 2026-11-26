@@ -7,6 +7,45 @@ use super::{
 use crate::{FloatFormat, FloatFormatError, ItemFlags, PieChartFlags, sys};
 use std::borrow::Cow;
 
+fn validate_pie_chart<Value: Copy + Into<f64>>(
+    label_count: usize,
+    values: &[Value],
+    center: [f64; 2],
+    radius: f64,
+    angle: f64,
+) -> Result<(), PlotError> {
+    if values.is_empty() {
+        return Err(PlotError::EmptyData);
+    }
+    if label_count != values.len() {
+        return Err(PlotError::DataLengthMismatch {
+            x_len: label_count,
+            y_len: values.len(),
+        });
+    }
+    if !center.into_iter().all(f64::is_finite) || !angle.is_finite() {
+        return Err(PlotError::InvalidData(
+            "Pie chart center and start angle must be finite".into(),
+        ));
+    }
+    if !radius.is_finite() || radius <= 0.0 {
+        return Err(PlotError::InvalidData(
+            "Pie chart radius must be positive and finite".into(),
+        ));
+    }
+    if values
+        .iter()
+        .copied()
+        .map(Into::into)
+        .any(|value: f64| !value.is_finite() || value < 0.0)
+    {
+        return Err(PlotError::InvalidData(
+            "Pie chart values must be finite and nonnegative".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Builder for pie chart plots
 pub struct PieChartPlot<'a, F = &'static str> {
     label_ids: Vec<&'a str>,
@@ -134,33 +173,15 @@ impl<'a, F: AsRef<str>> PieChartPlot<'a, F> {
         self
     }
 
-    /// Validate the plot data
+    /// Check the slice values, center, radius, and start angle before plotting.
     pub fn validate(&self) -> Result<(), PlotError> {
-        if self.values.is_empty() {
-            return Err(PlotError::EmptyData);
-        }
-
-        if self.label_ids.len() != self.values.len() {
-            return Err(PlotError::DataLengthMismatch {
-                x_len: self.label_ids.len(),
-                y_len: self.values.len(),
-            });
-        }
-
-        if self.radius <= 0.0 {
-            return Err(PlotError::InvalidData(
-                "Radius must be positive".to_string(),
-            ));
-        }
-
-        // Check for negative values
-        if self.values.iter().any(|&v| v < 0.0) {
-            return Err(PlotError::InvalidData(
-                "Pie chart values cannot be negative".to_string(),
-            ));
-        }
-
-        Ok(())
+        validate_pie_chart(
+            self.label_ids.len(),
+            self.values,
+            [self.center_x, self.center_y],
+            self.radius,
+            self.angle0,
+        )
     }
 }
 
@@ -324,32 +345,15 @@ impl<'a, F: AsRef<str>> PieChartPlotF32<'a, F> {
         self
     }
 
-    /// Validate the plot data
+    /// Check the slice values, center, radius, and start angle before plotting.
     pub fn validate(&self) -> Result<(), PlotError> {
-        if self.values.is_empty() {
-            return Err(PlotError::EmptyData);
-        }
-
-        if self.label_ids.len() != self.values.len() {
-            return Err(PlotError::DataLengthMismatch {
-                x_len: self.label_ids.len(),
-                y_len: self.values.len(),
-            });
-        }
-
-        if self.radius <= 0.0 {
-            return Err(PlotError::InvalidData(
-                "Radius must be positive".to_string(),
-            ));
-        }
-
-        if self.values.iter().any(|&v| v < 0.0) {
-            return Err(PlotError::InvalidData(
-                "Pie chart values cannot be negative".to_string(),
-            ));
-        }
-
-        Ok(())
+        validate_pie_chart(
+            self.label_ids.len(),
+            self.values,
+            [self.center_x, self.center_y],
+            self.radius,
+            self.angle0,
+        )
     }
 }
 
@@ -435,5 +439,53 @@ impl<'ui> crate::PlotScope<'ui> {
         plot.validate()?;
         plot.plot(self);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PieChartPlot, PieChartPlotF32, PlotError};
+
+    #[test]
+    fn pie_charts_reject_non_finite_values_and_geometry() {
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for (center_x, center_y, radius, angle) in [
+                (invalid, 0.0, 1.0, 90.0),
+                (0.0, invalid, 1.0, 90.0),
+                (0.0, 0.0, invalid, 90.0),
+                (0.0, 0.0, 1.0, invalid),
+            ] {
+                assert!(matches!(
+                    PieChartPlot::new(vec!["slice"], &[1.0], center_x, center_y, radius)
+                        .with_start_angle(angle)
+                        .validate(),
+                    Err(PlotError::InvalidData(_))
+                ));
+                assert!(matches!(
+                    PieChartPlotF32::new(vec!["slice"], &[1.0], center_x, center_y, radius)
+                        .with_start_angle(angle)
+                        .validate(),
+                    Err(PlotError::InvalidData(_))
+                ));
+            }
+            assert!(matches!(
+                PieChartPlot::new(vec!["slice"], &[invalid], 0.0, 0.0, 1.0).validate(),
+                Err(PlotError::InvalidData(_))
+            ));
+            assert!(matches!(
+                PieChartPlotF32::new(vec!["slice"], &[invalid as f32], 0.0, 0.0, 1.0).validate(),
+                Err(PlotError::InvalidData(_))
+            ));
+        }
+        assert!(
+            PieChartPlot::new(vec!["slice"], &[1.0], 0.0, 0.0, 1.0)
+                .validate()
+                .is_ok()
+        );
+        assert!(
+            PieChartPlotF32::new(vec!["slice"], &[1.0], 0.0, 0.0, 1.0)
+                .validate()
+                .is_ok()
+        );
     }
 }

@@ -1,0 +1,35 @@
+error: imgui(auto_resize) cannot be combined with min_width
+ --> tests/ui/conflicting_attributes.rs:6:12
+  |
+6 |     value: String,
+  |            ^^^^^^
+
+error: imgui(auto_resize) cannot be combined with lines
+  --> tests/ui/conflicting_attributes.rs:12:12
+   |
+12 |     value: String,
+   |            ^^^^^^
+
+error: imgui(clamp) requires a slider or drag with a range
+  --> tests/ui/conflicting_attributes.rs:18:12
+   |
+18 |     value: f32,
+   |            ^^^
+
+error: imgui(min, max) cannot be combined with as_input
+  --> tests/ui/conflicting_attributes.rs:24:12
+   |
+24 |     value: i32,
+   |            ^^^
+
+error: duplicate imgui field attribute
+  --> tests/ui/conflicting_attributes.rs:29:35
+   |
+29 |     Value(#[imgui(name = "First", name = "Second")] i32),
+   |                                   ^^^^
+
+error: format conversion `%s` does not match the field type at byte 0
+  --> tests/ui/conflicting_attributes.rs:34:22
+   |
+34 |     #[imgui(format = "%s")]
+   |                      ^^^^

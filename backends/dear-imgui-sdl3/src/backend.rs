@@ -152,7 +152,9 @@ fn capture_renderer_frame<'ctx>(
     native_viewports: bool,
 ) -> Result<ReconciledFrame<'ctx>, Sdl3BackendError> {
     runtime.control().ensure_bound_entry()?;
-    let frame = frame.try_render(runtime.renderer_consumer())?;
+    let frame = frame
+        .try_render(runtime.renderer_consumer())
+        .map_err(|(_frame, error)| error)?;
     reconcile_renderer_frame(runtime, frame, native_viewports)
 }
 
@@ -444,7 +446,6 @@ mod viewport_route_contract_tests {
         let _guard = crate::tests::test_guard();
         let expected = Context::create();
         let expected_binding = expected.binding();
-        let expected = expected.suspend_or_panic();
         let mut foreign = Context::create();
         foreign
             .font_atlas()
@@ -812,7 +813,6 @@ mod renderer_contract_tests {
         let _guard = crate::tests::test_guard();
         let owner = Context::create();
         let owner_binding = owner.binding();
-        let _owner = owner.suspend_or_panic();
         let mut foreign = Context::create();
         foreign.io_mut().set_display_size([128.0, 128.0]);
         foreign.io_mut().set_delta_time(1.0 / 60.0);
@@ -837,7 +837,6 @@ mod renderer_contract_tests {
         let _guard = crate::tests::test_guard();
         let owner = Context::create();
         let owner_binding = owner.binding();
-        let _owner = owner.suspend_or_panic();
         let mut foreign = Context::create();
         foreign.io_mut().set_display_size([128.0, 128.0]);
         foreign.io_mut().set_delta_time(1.0 / 60.0);

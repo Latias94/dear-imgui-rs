@@ -115,20 +115,23 @@ where
     /// Returns true if the slider value was changed.
     pub fn build(self, ui: &Ui, value: &mut Data) -> bool {
         validate_slider_preconditions("VerticalSlider::build()", &self.min, &self.max, self.flags);
-        let (label, display_format) = ui.scratch_txt_with_opt(self.label, self.display_format);
         let size = sys::ImVec2::new(self.size[0], self.size[1]);
 
-        ui.run_with_bound_context(|| unsafe {
-            sys::igVSliderScalar(
-                label,
-                size,
-                Data::KIND as i32,
-                value as *mut Data as *mut c_void,
-                &self.min as *const Data as *const c_void,
-                &self.max as *const Data as *const c_void,
-                display_format,
-                self.flags.bits(),
-            )
-        })
+        ui.with_scratch_txt_with_opt(
+            self.label,
+            self.display_format,
+            |label, display_format| unsafe {
+                sys::igVSliderScalar(
+                    label,
+                    size,
+                    Data::KIND as i32,
+                    value as *mut Data as *mut c_void,
+                    &self.min as *const Data as *const c_void,
+                    &self.max as *const Data as *const c_void,
+                    display_format,
+                    self.flags.bits(),
+                )
+            },
+        )
     }
 }

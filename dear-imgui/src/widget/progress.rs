@@ -105,13 +105,9 @@ impl<'ui> ProgressBar<'ui> {
         assert_finite_vec2("ProgressBar::build()", "size", self.size);
 
         let size_vec: sys::ImVec2 = self.size.into();
-        let overlay_ptr = self
-            .overlay_text
-            .as_deref()
-            .map_or(std::ptr::null(), |txt| self.ui.scratch_txt(txt));
-
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igProgressBar(self.fraction, size_vec, overlay_ptr);
-        });
+        self.ui
+            .with_scratch_txt_opt(self.overlay_text.as_deref(), |overlay_ptr| unsafe {
+                sys::igProgressBar(self.fraction, size_vec, overlay_ptr);
+            });
     }
 }

@@ -23,11 +23,12 @@ impl Ui {
     ) -> Self {
         Ui {
             ctx,
+            native_current: unsafe { sys::current_context_slot() },
             ctx_binding,
             texture_registry,
             ime,
             native_scopes: std::cell::RefCell::new(crate::scope::NativeScopeTracker::default()),
-            scratch_buffers: std::rc::Rc::default(),
+            scratch_buffers: ScratchBuffers::default(),
         }
     }
 
@@ -45,9 +46,27 @@ impl Ui {
         self.ctx_binding.id()
     }
 
+    #[inline]
     pub(crate) fn run_with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
         self.assert_native_scopes_usable();
-        self.ctx_binding.with_bound_context(f)
+        self.with_live_context(f)
+    }
+
+    /// Enter the context owned by this live frame borrow, including during stack cleanup.
+    #[inline]
+    pub(crate) fn with_live_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        let current = unsafe {
+            if self.native_current.is_null() {
+                sys::igGetCurrentContext()
+            } else {
+                self.native_current.read()
+            }
+        };
+        if current == self.ctx {
+            f()
+        } else {
+            crate::context::binding::with_bound_context(self.ctx, f)
+        }
     }
 
     pub(crate) fn resolve_texture_ref(
@@ -96,7 +115,8 @@ impl Ui {
     /// extension crates that need to call raw Dear ImGui-adjacent FFI while
     /// still honoring the `Ui` that created the safe wrapper.
     pub fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.run_with_bound_context(f)
+        self.assert_native_scopes_usable();
+        self.ctx_binding.with_bound_context(f)
     }
 
     /// Returns an immutable reference to the inputs/outputs object
@@ -111,41 +131,64 @@ impl Ui {
         })
     }
 
-    /// Internal method to push a single text to our scratch buffer.
-    pub(crate) fn scratch_txt(&self, txt: impl AsRef<str>) -> *const std::os::raw::c_char {
-        self.with_scratch_buffer(|buf| buf.scratch_txt(txt))
-    }
-
-    /// Stages an explicit text range with a readable NUL sentinel at its end.
-    pub(crate) fn scratch_txt_range(
-        &self,
-        txt: impl AsRef<str>,
-    ) -> std::ops::Range<*const std::os::raw::c_char> {
-        self.with_scratch_buffer(|buf| buf.scratch_txt_range(txt))
-    }
-
-    /// Helper method for two strings
-    pub(crate) fn scratch_txt_two(
-        &self,
-        txt_0: impl AsRef<str>,
-        txt_1: impl AsRef<str>,
-    ) -> (*const std::os::raw::c_char, *const std::os::raw::c_char) {
-        self.with_scratch_buffer(|buf| buf.scratch_txt_two(txt_0, txt_1))
-    }
-
-    /// Helper method with one optional value
-    pub(crate) fn scratch_txt_with_opt(
-        &self,
-        txt_0: impl AsRef<str>,
-        txt_1: Option<impl AsRef<str>>,
-    ) -> (*const std::os::raw::c_char, *const std::os::raw::c_char) {
-        self.with_scratch_buffer(|buf| buf.scratch_txt_with_opt(txt_0, txt_1))
-    }
-
     /// Keeps the latest scratch allocation alive throughout `f`. Reentrant calls use another
     /// buffer. On return or unwind this buffer becomes the next one available for reuse.
     pub(crate) fn with_scratch_buffer<R>(&self, f: impl FnOnce(&mut UiBuffer) -> R) -> R {
         self.scratch_buffers.with(f)
+    }
+
+    pub(crate) fn with_scratch_c_string<R>(
+        &self,
+        text: &str,
+        f: impl FnOnce(*const std::ffi::c_char) -> R,
+    ) -> R {
+        self.scratch_buffers.with_c_string(text, f)
+    }
+
+    /// Keeps the staged C string alive while its native consumer runs.
+    pub(crate) fn with_scratch_txt<R>(
+        &self,
+        text: impl AsRef<str>,
+        f: impl FnOnce(*const std::ffi::c_char) -> R,
+    ) -> R {
+        let text = text.as_ref();
+        self.run_with_bound_context(|| self.with_scratch_c_string(text, f))
+    }
+
+    pub(crate) fn with_scratch_txt_two<R>(
+        &self,
+        first: impl AsRef<str>,
+        second: impl AsRef<str>,
+        f: impl FnOnce(*const std::ffi::c_char, *const std::ffi::c_char) -> R,
+    ) -> R {
+        self.with_scratch_txt_with_opt(first, Some(second), f)
+    }
+
+    pub(crate) fn with_scratch_txt_with_opt<R>(
+        &self,
+        first: impl AsRef<str>,
+        second: Option<impl AsRef<str>>,
+        f: impl FnOnce(*const std::ffi::c_char, *const std::ffi::c_char) -> R,
+    ) -> R {
+        let first = first.as_ref();
+        let second = second.as_ref().map(AsRef::as_ref);
+        self.run_with_bound_context(|| {
+            self.with_scratch_buffer(|buf| {
+                let (first, second) = buf.scratch_txt_with_opt(first, second);
+                f(first, second)
+            })
+        })
+    }
+
+    pub(crate) fn with_scratch_txt_opt<R>(
+        &self,
+        text: Option<&str>,
+        f: impl FnOnce(*const std::ffi::c_char) -> R,
+    ) -> R {
+        match text {
+            Some(text) => self.with_scratch_txt(text, f),
+            None => self.run_with_bound_context(|| f(std::ptr::null())),
+        }
     }
 
     /// Returns an ID from a string label in the current ID scope.
@@ -154,9 +197,13 @@ impl Ui {
     /// for widgets or dockspaces inside the current window/scope.
     #[doc(alias = "GetID")]
     pub fn get_id(&self, label: &str) -> Id {
-        let label = self.scratch_txt_range(label);
+        let start = if label.is_empty() {
+            c"".as_ptr()
+        } else {
+            label.as_ptr().cast()
+        };
         self.run_with_bound_context(|| unsafe {
-            Id::from(sys::igGetID_StrStr(label.start, label.end))
+            Id::from(sys::igGetID_StrStr(start, start.add(label.len())))
         })
     }
 }

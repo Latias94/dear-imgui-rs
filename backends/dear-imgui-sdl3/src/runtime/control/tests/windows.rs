@@ -163,6 +163,10 @@ fn native_lease_freezes_owner_changes_and_parent_retirement_does_not_destroy_chi
             .window_snapshot_for_viewport(dear_imgui_rs::Id::from(0x610002))
             .unwrap()
             .unwrap();
+        let surface_lease = adapter
+            .acquire_surface_window_lease(child_snapshot.target.instance_id)
+            .unwrap()
+            .unwrap();
         let lease = adapter
             .acquire_native_window_lease(child_snapshot.target.instance_id)
             .unwrap()
@@ -203,7 +207,17 @@ fn native_lease_freezes_owner_changes_and_parent_retirement_does_not_destroy_chi
         });
         assert!(unsafe { sdl3_sys::video::SDL_GetWindowFromID(parent_id) }.is_null());
         assert!(!unsafe { sdl3_sys::video::SDL_GetWindowFromID(child_id) }.is_null());
+        assert_eq!(
+            unsafe { sdl3_sys::video::SDL_GetWindowParent(surface_lease.as_ptr()) },
+            window.raw(),
+        );
+        assert!(backend.drain_faults().is_empty());
         drop(child);
+        assert_eq!(
+            unsafe { sdl3_sys::video::SDL_GetWindowFromID(child_id) },
+            surface_lease.as_ptr(),
+        );
+        drop(surface_lease);
         assert!(unsafe { sdl3_sys::video::SDL_GetWindowFromID(child_id) }.is_null());
         backend.shutdown(&mut context).unwrap();
     });
@@ -638,7 +652,6 @@ fn window_queries_follow_hidden_live_viewports_and_id_remaps_without_consuming_f
             [Sdl3BackendError::ViewportCreationFailed]
         ));
 
-        let suspended = context.suspend_or_panic();
         let other = Context::create();
         let foreign = NativeWindowInstanceId::allocate(other.id()).unwrap();
         assert!(
@@ -656,7 +669,6 @@ fn window_queries_follow_hidden_live_viewports_and_id_remaps_without_consuming_f
                 .is_none()
         );
         drop(other);
-        let mut context = suspended.activate().unwrap();
         backend.shutdown(&mut context).unwrap();
     });
 }

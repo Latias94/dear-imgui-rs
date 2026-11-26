@@ -1,6 +1,6 @@
 #![cfg(feature = "render")]
 
-use crate::test_util::imgui_context_guard;
+use crate::test_util::{RenderTestApp, imgui_context_guard};
 use bevy::prelude::GlobalTransform;
 use bevy_app::App;
 use bevy_asset::{AssetId, Assets};
@@ -45,8 +45,8 @@ struct BevyImageTexture {
 #[derive(Resource)]
 struct OneShotBevyImageTexture(Option<ImguiTexture>);
 
-fn app_with_render_world() -> App {
-    let mut app = App::new();
+fn app_with_render_world() -> RenderTestApp {
+    let mut app = RenderTestApp::new();
     app.add_plugins(crate::test_util::render_extraction_plugin());
     app.add_plugins(ImguiPlugin::default());
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());

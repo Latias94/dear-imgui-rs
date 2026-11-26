@@ -353,7 +353,7 @@ fn font_id_from_another_atlas_is_rejected_before_push_font_ffi() {
         let fonts = ctx_a.font_atlas();
         fonts.add_font(&[FontSource::default_font()])
     };
-    let suspended_a = ctx_a.suspend_or_panic();
+    let suspended_a = ctx_a;
 
     let mut ctx_b = crate::Context::create();
     ctx_b

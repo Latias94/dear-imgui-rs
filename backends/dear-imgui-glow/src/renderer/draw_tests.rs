@@ -1,10 +1,15 @@
-//! Exercise standard sampler commands through the production draw-list interpreter.
+//! Exercise draw commands through a fake OpenGL function table.
 
 use std::{cell::RefCell, num::NonZeroU32};
 
-use dear_imgui_rs::{Context, FramePrepareOptions, TextureId, render::RendererRenderStateGuard};
+use dear_imgui_rs::{
+    Context, FramePrepareOptions, TextureId,
+    render::{DrawCmdParams, DrawVert, RendererRenderStateGuard},
+};
 
-use super::{FramebufferExtent, GlowRenderer, VertexArrayGuard};
+use super::{
+    DrawListRenderScope, FramebufferExtent, GlowRenderer, SamplerBinding, VertexArrayGuard,
+};
 use crate::{
     GlVersion,
     renderer::{
@@ -28,6 +33,8 @@ struct DrawSample {
     min_filter: i32,
     mag_filter: i32,
     parameter_writes: usize,
+    attrib_offsets: [usize; 3],
+    index_byte_offset: usize,
 }
 
 struct FakeGl {
@@ -37,6 +44,7 @@ struct FakeGl {
     min_filter: i32,
     mag_filter: i32,
     parameter_writes: usize,
+    attrib_offsets: [usize; 3],
     draws: Vec<DrawSample>,
 }
 
@@ -49,6 +57,7 @@ impl Default for FakeGl {
             min_filter: ORIGINAL_MIN_FILTER,
             mag_filter: ORIGINAL_MAG_FILTER,
             parameter_writes: 0,
+            attrib_offsets: [0; 3],
             draws: Vec::new(),
         }
     }
@@ -97,13 +106,14 @@ unsafe extern "system" fn two_u32(_first: u32, _second: u32) {}
 unsafe extern "system" fn blend_func(_src_rgb: u32, _dst_rgb: u32, _src_a: u32, _dst_a: u32) {}
 unsafe extern "system" fn four_i32(_x: i32, _y: i32, _w: i32, _h: i32) {}
 unsafe extern "system" fn vertex_attrib(
-    _index: u32,
+    index: u32,
     _size: i32,
     _kind: u32,
     _normalized: u8,
     _stride: i32,
-    _pointer: *const std::ffi::c_void,
+    pointer: *const std::ffi::c_void,
 ) {
+    GL_STATE.with_borrow_mut(|state| state.attrib_offsets[index as usize] = pointer as usize);
 }
 unsafe extern "system" fn buffer_data(
     _target: u32,
@@ -138,7 +148,7 @@ unsafe extern "system" fn draw_elements(
     _mode: u32,
     _count: i32,
     _kind: u32,
-    _indices: *const std::ffi::c_void,
+    indices: *const std::ffi::c_void,
 ) {
     GL_STATE.with_borrow_mut(|state| {
         state.draws.push(DrawSample {
@@ -146,6 +156,8 @@ unsafe extern "system" fn draw_elements(
             min_filter: state.min_filter,
             mag_filter: state.mag_filter,
             parameter_writes: state.parameter_writes,
+            attrib_offsets: state.attrib_offsets,
+            index_byte_offset: indices as usize,
         });
     });
 }
@@ -187,7 +199,9 @@ fn fake_gl(has_sampler_objects: bool) -> glow::Context {
                 "glGetTexParameteriv" => get_texture_parameter as *const (),
                 "glTexParameteri" => texture_parameter as *const (),
                 "glDrawElements" => draw_elements as *const (),
-                "glDrawElementsBaseVertex" => draw_elements_base_vertex as *const (),
+                "glDrawElementsBaseVertex" if has_sampler_objects => {
+                    draw_elements_base_vertex as *const ()
+                }
                 _ => std::ptr::null(),
             }
             .cast()
@@ -218,6 +232,7 @@ fn renderer(gl: &glow::Context, has_sampler_objects: bool) -> GlowRenderer {
         clip_origin: Default::default(),
         has_separate_polygon_modes: false,
         has_sampler_object_support: has_sampler_objects,
+        bind_program_pipeline: None,
         gl_context: None,
         context_binding: None,
         backend_user_data: Box::default(),
@@ -374,5 +389,55 @@ fn texture_owned_sampler_preserves_mipmapped_texture_parameters_during_fallback_
         assert_eq!(state.mag_filter, ORIGINAL_MAG_FILTER);
         assert_eq!(state.parameter_writes, 8);
         assert!(state.sampler_bindings.is_empty());
+    });
+}
+
+#[test]
+fn webgl2_vertex_offset_shifts_attributes_and_returns_to_zero() {
+    GL_STATE.set(FakeGl::default());
+    let gl = fake_gl(false);
+    let mut renderer = renderer(&gl, false);
+    renderer.gl_version = GlVersion::parse("WebGL 2.0 (OpenGL ES 3.0)");
+    let texture = renderer
+        .texture_registry
+        .register_external(glow::NativeTexture(NonZeroU32::new(9).unwrap()))
+        .unwrap()
+        .texture_id();
+    let scope = DrawListRenderScope {
+        gl: &gl,
+        texture_registry: &renderer.texture_registry,
+        display_pos: [0.0, 0.0],
+        framebuffer_scale: [1.0, 1.0],
+        extent: FramebufferExtent {
+            width: 64,
+            height: 64,
+        },
+        vertices: &[DrawVert::new([0.0; 2], [0.0; 2], 0); 8],
+        indices: &[0, 1, 2, 0, 2, 3],
+    };
+    renderer.set_vertex_attrib_pointers(&gl, 0);
+    let mut bound_byte_offset = Some(0);
+    for (vtx_offset, idx_offset) in [(4, 0), (0, 3)] {
+        renderer
+            .render_elements(
+                &scope,
+                3,
+                &DrawCmdParams {
+                    clip_rect: [0.0, 0.0, 64.0, 64.0],
+                    texture_id: texture,
+                    vtx_offset,
+                    idx_offset,
+                },
+                SamplerBinding::TextureOwned,
+                &mut bound_byte_offset,
+            )
+            .unwrap();
+    }
+    GL_STATE.with_borrow(|state| {
+        assert_eq!(state.draws.len(), 2);
+        assert_eq!(state.draws[0].attrib_offsets, [80, 88, 96]);
+        assert_eq!(state.draws[0].index_byte_offset, 0);
+        assert_eq!(state.draws[1].attrib_offsets, [0, 8, 16]);
+        assert_eq!(state.draws[1].index_byte_offset, 6);
     });
 }

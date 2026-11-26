@@ -1,10 +1,9 @@
 use crate::sys;
-use std::ffi::c_int;
 use std::mem;
 
 const MAX_INPUT_BUFFER_SIZE: usize = i32::MAX as usize - 1;
 
-pub(super) fn validate_input_buffer_size(size: usize) {
+fn validate_input_buffer_size(size: usize) {
     // InputTextEx takes an int and allocates its internal TextA with buf_size + 1.
     assert!(
         size <= MAX_INPUT_BUFFER_SIZE,
@@ -43,24 +42,18 @@ impl Drop for StringInputBuffer<'_> {
     }
 }
 
-pub(super) unsafe fn resize_string_input_buffer(
+pub(super) fn resize_string_input_buffer(
     buffer: &mut Vec<u8>,
-    requested_i32: i32,
-    data: *mut sys::ImGuiInputTextCallbackData,
-) -> c_int {
-    if requested_i32 < 0 {
-        return 0;
-    }
-
-    let requested = requested_i32 as usize;
-    if requested > buffer.len() {
+    data: &mut sys::ImGuiInputTextCallbackData,
+) {
+    let requested = usize::try_from(data.BufSize).unwrap_or(0);
+    let additional = requested.saturating_sub(buffer.len());
+    if additional != 0 && buffer.try_reserve(additional).is_ok() {
         buffer.resize(requested, 0);
-        unsafe {
-            (*data).Buf = buffer.as_mut_ptr() as *mut _;
-            (*data).BufDirty = true;
-        }
+        data.BufDirty = true;
     }
-    0
+    data.Buf = buffer.as_mut_ptr().cast();
+    data.BufSize = buffer.len() as i32;
 }
 
 pub(super) fn finish_string_input_buffer(target: &mut String, mut buffer: Vec<u8>) {

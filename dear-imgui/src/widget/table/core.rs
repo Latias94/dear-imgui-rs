@@ -104,11 +104,10 @@ impl Ui {
             outer_size[0].is_finite() && outer_size[1].is_finite(),
             "Ui::begin_table_with_sizing() outer_size must contain finite values"
         );
-        let str_id_ptr = self.scratch_txt(str_id);
         let outer_size_vec: sys::ImVec2 = outer_size.into();
         let column_count = table_column_count_to_i32(column_count);
 
-        let should_render = self.run_with_bound_context(|| {
+        let should_render = self.with_scratch_txt(str_id, |str_id_ptr| {
             self.assert_can_begin_table();
             unsafe {
                 sys::igBeginTable(
@@ -254,8 +253,7 @@ impl Ui {
             | width.map_or(0, TableColumnWidth::raw_flags)
             | indent.map_or(0, TableColumnIndent::raw_flags);
         let user_data = user_data.into().get();
-        let label_ptr = self.scratch_txt(label);
-        self.run_with_bound_context(|| {
+        self.with_scratch_txt(label, |label_ptr| {
             let table = assert_current_table("Ui::table_setup_column_with_indent_and_user_data()");
             assert!(
                 unsafe { i32::from((*table).DeclColumnsCount) < (*table).ColumnsCount },
@@ -414,8 +412,7 @@ impl Ui {
     /// Panics unless a table cell is current.
     #[doc(alias = "TableHeader")]
     pub fn table_header(&self, label: impl AsRef<str>) {
-        let label_ptr = self.scratch_txt(label);
-        self.run_with_bound_context(|| {
+        self.with_scratch_txt(label, |label_ptr| {
             assert_current_table_cell("Ui::table_header()");
             unsafe { sys::igTableHeader(label_ptr) }
         });
