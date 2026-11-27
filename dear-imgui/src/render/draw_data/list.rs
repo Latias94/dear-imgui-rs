@@ -3,7 +3,9 @@ use crate::internal::RawWrapper;
 use crate::sys;
 use std::slice;
 
-/// Iterator over draw lists
+/// Iterator over draw lists.
+///
+/// A null list pointer in malformed native draw data panics when reached.
 pub struct DrawListIterator<'a> {
     iter: std::slice::Iter<'a, *mut sys::ImDrawList>,
 }
@@ -12,21 +14,19 @@ impl<'a> Iterator for DrawListIterator<'a> {
     type Item = &'a DrawList;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().and_then(|&ptr| {
-            if ptr.is_null() {
-                None
-            } else {
-                Some(unsafe { DrawList::from_raw(ptr.cast_const()) })
-            }
+        self.iter.next().map(|&ptr| {
+            assert!(!ptr.is_null(), "native draw list pointer must not be null");
+            unsafe { DrawList::from_raw(ptr.cast_const()) }
         })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
     }
 }
 
-impl<'a> ExactSizeIterator for DrawListIterator<'a> {
-    fn len(&self) -> usize {
-        self.iter.len()
-    }
-}
+impl ExactSizeIterator for DrawListIterator<'_> {}
+impl std::iter::FusedIterator for DrawListIterator<'_> {}
 
 impl<'a> DrawListIterator<'a> {
     pub(super) fn new(iter: std::slice::Iter<'a, *mut sys::ImDrawList>) -> Self {

@@ -5,10 +5,7 @@
 //!
 use crate::Ui;
 use crate::sys;
-
-fn assert_finite_f32(caller: &str, name: &str, value: f32) {
-    assert!(value.is_finite(), "{caller} {name} must be finite");
-}
+use crate::validation::assert_finite_f32;
 
 fn assert_unit_ratio(caller: &str, name: &str, value: f32) {
     assert_finite_f32(caller, name, value);

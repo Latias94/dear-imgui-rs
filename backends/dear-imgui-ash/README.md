@@ -188,15 +188,13 @@ let linear = context
     .expect("the Ash renderer must be attached");
 let ui = context.frame();
 
-unsafe {
-    ui.get_window_draw_list()
-        .add_callback(nearest, std::ptr::null_mut(), 0);
-}
+ui.with_window_draw_list(|draw_list| unsafe {
+    draw_list.add_callback(nearest, std::ptr::null_mut(), 0);
+});
 ui.image(texture, [256.0, 256.0]);
-unsafe {
-    ui.get_window_draw_list()
-        .add_callback(linear, std::ptr::null_mut(), 0);
-}
+ui.with_window_draw_list(|draw_list| unsafe {
+    draw_list.add_callback(linear, std::ptr::null_mut(), 0);
+});
 # }
 ```
 

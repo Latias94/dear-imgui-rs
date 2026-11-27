@@ -30,7 +30,6 @@ use crate::internal::RawWrapper;
 use crate::scope::NativeScopeTracker;
 use crate::string::{ScratchBuffers, UiBuffer};
 use crate::sys;
-use crate::texture::TextureRef;
 use std::cell::RefCell;
 
 pub use crate::scope::NativeWindowScope;

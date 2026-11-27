@@ -440,7 +440,7 @@ mod tests {
                 unsafe { crate::sys::igSetCurrentContext(raw_b) };
                 assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
 
-                let _ = filter.draw(&ui_a);
+                let _ = filter.draw(ui_a);
 
                 assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
             });

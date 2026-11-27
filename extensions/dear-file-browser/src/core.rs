@@ -487,6 +487,7 @@ impl Default for SortMode {
 #[derive(Clone, Debug)]
 pub struct FileDialog {
     pub(crate) backend: Backend,
+    #[cfg(all(feature = "native-rfd", not(target_arch = "wasm32")))]
     pub(crate) mode: DialogMode,
     pub(crate) start_dir: Option<PathBuf>,
     pub(crate) default_name: Option<String>,
@@ -501,6 +502,7 @@ impl FileDialog {
     pub fn new(mode: DialogMode) -> Self {
         Self {
             backend: Backend::Auto,
+            #[cfg(all(feature = "native-rfd", not(target_arch = "wasm32")))]
             mode,
             start_dir: None,
             default_name: None,

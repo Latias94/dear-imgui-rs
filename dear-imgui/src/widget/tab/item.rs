@@ -1,21 +1,23 @@
 use crate::ui::Ui;
 
-use super::{TabItemOptions, TabItemPlacement, TabItemToken};
+use super::{TabItemOptions, TabItemPlacement};
 
 /// Builder for a tab item
 #[derive(Debug)]
 #[must_use]
-pub struct TabItem<'a, T> {
+pub struct TabItem<'ui, T> {
+    ui: &'ui Ui,
     label: T,
-    opened: Option<&'a mut bool>,
+    opened: Option<&'ui mut bool>,
     options: TabItemOptions,
 }
 
-impl<'a, T: AsRef<str>> TabItem<'a, T> {
+impl<'ui, T: AsRef<str>> TabItem<'ui, T> {
     /// Creates a new tab item builder
     #[doc(alias = "BeginTabItem")]
-    pub fn new(label: T) -> Self {
+    pub fn new(ui: &'ui Ui, label: T) -> Self {
         Self {
+            ui,
             label,
             opened: None,
             options: TabItemOptions::new(),
@@ -25,7 +27,7 @@ impl<'a, T: AsRef<str>> TabItem<'a, T> {
     /// Will open or close the tab.
     ///
     /// True to display the tab. Tab item is visible by default.
-    pub fn opened(mut self, opened: &'a mut bool) -> Self {
+    pub fn opened(mut self, opened: &'ui mut bool) -> Self {
         self.opened = Some(opened);
         self
     }
@@ -44,19 +46,16 @@ impl<'a, T: AsRef<str>> TabItem<'a, T> {
         self
     }
 
-    /// Begins the tab item and returns a token if successful
-    pub fn begin(self, ui: &Ui) -> Option<TabItemToken<'_>> {
-        ui.tab_item_with_flags(self.label, self.opened, self.options)
-    }
-
     /// Creates a tab item and runs a closure to construct the contents.
     /// Returns the result of the closure, if it is called.
     ///
     /// Note: the closure is not called if the tab item is not selected
-    pub fn build<R, F: FnOnce() -> R>(self, ui: &Ui, f: F) -> Option<R> {
-        let token = self.begin(ui)?;
-        let result = f();
-        drop(token);
-        Some(result)
+    pub fn build<R>(self, f: impl FnOnce() -> R) -> Option<R> {
+        self.ui.with_bound_context(|| {
+            let _token = self
+                .ui
+                .tab_item_with_flags(self.label, self.opened, self.options)?;
+            Some(f())
+        })
     }
 }

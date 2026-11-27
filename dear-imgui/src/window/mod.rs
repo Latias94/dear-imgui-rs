@@ -46,9 +46,8 @@ use bitflags::bitflags;
 use std::f32;
 
 use crate::sys;
+use crate::validation::{assert_finite_f32, assert_finite_vec2};
 use crate::{Condition, Ui};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 mod child_window;
 pub(crate) mod content_region;
@@ -116,6 +115,7 @@ bitflags! {
     }
 }
 
+#[inline]
 pub(crate) fn validate_window_flags(caller: &str, flags: WindowFlags) {
     let unsupported = flags.bits() & !WindowFlags::all().bits();
     assert!(
@@ -124,35 +124,11 @@ pub(crate) fn validate_window_flags(caller: &str, flags: WindowFlags) {
     );
 }
 
-fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
-    assert!(
-        value[0].is_finite() && value[1].is_finite(),
-        "{caller} {name} must contain finite values"
-    );
-}
-
 #[cfg(feature = "serde")]
-impl Serialize for WindowFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_i32(self.bits())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for WindowFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let bits = i32::deserialize(deserializer)?;
-        Ok(WindowFlags::from_bits_retain(bits))
-    }
-}
+crate::validation::impl_serde_i32_flags!(WindowFlags);
 
 /// Represents a window that can be built
+#[must_use]
 pub struct Window<'ui> {
     ui: &'ui Ui,
     name: WindowLabel<'ui>,
@@ -173,6 +149,7 @@ pub struct Window<'ui> {
 
 impl<'ui> Window<'ui> {
     /// Creates a new window builder
+    #[inline]
     pub fn new(ui: &'ui Ui, name: impl Into<WindowLabel<'ui>>) -> Self {
         Self {
             ui,
@@ -214,8 +191,8 @@ impl<'ui> Window<'ui> {
 
     /// Sets window size
     #[doc(alias = "SetNextWindowSize")]
-    pub fn size(mut self, size: [f32; 2], condition: Condition) -> Self {
-        self.size = Some(size);
+    pub fn size(mut self, size: impl Into<[f32; 2]>, condition: Condition) -> Self {
+        self.size = Some(size.into());
         self.size_condition = condition;
         self
     }
@@ -225,23 +202,23 @@ impl<'ui> Window<'ui> {
     /// This is a convenience wrapper over `ImGui::SetNextWindowSizeConstraints`
     /// without a custom size callback.
     #[doc(alias = "SetNextWindowSizeConstraints")]
-    pub fn size_constraints(mut self, min: [f32; 2], max: [f32; 2]) -> Self {
-        self.size_constraints = Some((min, max));
+    pub fn size_constraints(mut self, min: impl Into<[f32; 2]>, max: impl Into<[f32; 2]>) -> Self {
+        self.size_constraints = Some((min.into(), max.into()));
         self
     }
 
     /// Sets window position
     #[doc(alias = "SetNextWindowPos")]
-    pub fn position(mut self, pos: [f32; 2], condition: Condition) -> Self {
-        self.pos = Some(pos);
+    pub fn position(mut self, pos: impl Into<[f32; 2]>, condition: Condition) -> Self {
+        self.pos = Some(pos.into());
         self.pos_condition = condition;
         self
     }
 
     /// Sets window content size
     #[doc(alias = "SetNextWindowContentSize")]
-    pub fn content_size(mut self, size: [f32; 2]) -> Self {
-        self.content_size = Some(size);
+    pub fn content_size(mut self, size: impl Into<[f32; 2]>) -> Self {
+        self.content_size = Some(size.into());
         self
     }
 
@@ -269,51 +246,62 @@ impl<'ui> Window<'ui> {
 
     /// Sets the initial scroll position for the next Begin call.
     #[doc(alias = "SetNextWindowScroll")]
-    pub fn scroll(mut self, scroll: [f32; 2]) -> Self {
-        self.scroll = Some(scroll);
+    pub fn scroll(mut self, scroll: impl Into<[f32; 2]>) -> Self {
+        self.scroll = Some(scroll.into());
         self
     }
 
-    /// Builds the window and calls the provided closure
+    /// Builds the window and calls the closure while the window's Context is current.
+    ///
+    /// # Panics
+    ///
+    /// Panics before staging any native window options if the plain title is empty,
+    /// geometry is non-finite, or the window flags are unsupported.
     pub fn build<F, R>(self, f: F) -> Option<R>
     where
         F: FnOnce() -> R,
     {
-        let token = self.begin()?;
-        let result = f();
-        drop(token);
-        Some(result)
+        self.validate();
+        self.ui.with_bound_context(|| {
+            let window = self.begin_bound()?;
+            let result = f();
+            drop(window);
+            Some(result)
+        })
     }
 
+    #[inline]
     fn validate(&self) {
-        validate_window_flags("Window::begin()", self.flags);
+        const CALLER: &str = "Window::build()";
+        assert!(
+            !matches!(&self.name, WindowLabel::Plain(title) if title.is_empty()),
+            "{CALLER} requires a non-empty plain window title"
+        );
+        validate_window_flags(CALLER, self.flags);
         if let Some(size) = self.size {
-            assert_finite_vec2("Window::begin()", "size", size);
+            assert_finite_vec2(CALLER, "size", size);
         }
         if let Some((min, max)) = self.size_constraints {
-            assert_finite_vec2("Window::begin()", "minimum size constraint", min);
-            assert_finite_vec2("Window::begin()", "maximum size constraint", max);
+            assert_finite_vec2(CALLER, "minimum size constraint", min);
+            assert_finite_vec2(CALLER, "maximum size constraint", max);
         }
         if let Some(pos) = self.pos {
-            assert_finite_vec2("Window::begin()", "position", pos);
+            assert_finite_vec2(CALLER, "position", pos);
         }
         if let Some(content_size) = self.content_size {
-            assert_finite_vec2("Window::begin()", "content size", content_size);
+            assert_finite_vec2(CALLER, "content size", content_size);
         }
         if let Some(alpha) = self.bg_alpha {
-            assert!(
-                alpha.is_finite(),
-                "Window::begin() background alpha must be finite"
-            );
+            assert_finite_f32(CALLER, "background alpha", alpha);
         }
         if let Some(scroll) = self.scroll {
-            assert_finite_vec2("Window::begin()", "scroll", scroll);
+            assert_finite_vec2(CALLER, "scroll", scroll);
         }
     }
 
-    fn begin(mut self) -> Option<WindowGuard<'ui>> {
-        self.validate();
-        self.ui.run_with_bound_context(|| unsafe {
+    #[inline]
+    fn begin_bound(mut self) -> Option<WindowGuard<'ui>> {
+        unsafe {
             if let Some(size) = self.size {
                 sys::igSetNextWindowSize(size.into(), self.size_condition as i32);
             }
@@ -361,7 +349,7 @@ impl<'ui> Window<'ui> {
                 sys::igEnd();
                 None
             }
-        })
+        }
     }
 }
 

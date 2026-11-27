@@ -1,10 +1,9 @@
 use crate::sys;
+use crate::validation::{assert_finite_vec2, assert_finite_vec4};
 
 use super::counts::DrawFlags;
 
-pub(super) fn assert_finite_f32(caller: &str, name: &str, value: f32) {
-    assert!(value.is_finite(), "{caller} {name} must be finite");
-}
+pub(super) use crate::validation::assert_finite_f32;
 
 pub(super) fn assert_non_negative_f32(caller: &str, name: &str, value: f32) {
     assert_finite_f32(caller, name, value);
@@ -21,32 +20,31 @@ pub(super) fn count_to_i32(caller: &str, name: &str, value: usize) -> i32 {
         .unwrap_or_else(|_| panic!("{caller} {name} exceeded Dear ImGui's i32 range"))
 }
 
-pub(super) fn assert_finite_vec2(caller: &str, name: &str, value: sys::ImVec2) {
-    assert!(
-        value.x.is_finite() && value.y.is_finite(),
-        "{caller} {name} must contain finite values"
-    );
-}
-
 pub(super) fn assert_non_negative_vec2(caller: &str, name: &str, value: sys::ImVec2) {
-    assert_finite_vec2(caller, name, value);
+    assert_finite_vec2(caller, name, value.into());
     assert!(
         value.x >= 0.0 && value.y >= 0.0,
         "{caller} {name} must contain non-negative values"
     );
 }
 
-pub(super) fn assert_finite_vec4(caller: &str, name: &str, value: sys::ImVec4) {
-    assert!(
-        value.x.is_finite() && value.y.is_finite() && value.z.is_finite() && value.w.is_finite(),
-        "{caller} {name} must contain finite values"
-    );
-}
-
 pub(super) fn finite_vec2(caller: &str, name: &str, value: impl Into<sys::ImVec2>) -> sys::ImVec2 {
     let value = value.into();
-    assert_finite_vec2(caller, name, value);
+    assert_finite_vec2(caller, name, value.into());
     value
+}
+
+pub(super) fn finite_point(
+    caller: &str,
+    index: usize,
+    point: impl Into<sys::ImVec2>,
+) -> sys::ImVec2 {
+    let point = point.into();
+    assert!(
+        point.x.is_finite() && point.y.is_finite(),
+        "{caller} points[{index}] must contain finite values"
+    );
+    point
 }
 
 pub(super) fn non_negative_vec2(
@@ -61,7 +59,7 @@ pub(super) fn non_negative_vec2(
 
 pub(super) fn finite_vec4(caller: &str, name: &str, value: impl Into<sys::ImVec4>) -> sys::ImVec4 {
     let value = value.into();
-    assert_finite_vec4(caller, name, value);
+    assert_finite_vec4(caller, name, value.into());
     value
 }
 

@@ -53,7 +53,7 @@ impl<'ui, Label: AsRef<str>> ComboBox<'ui, Label> {
         self.options.validate("ComboBox::begin()");
         let should_render = self.ui.with_scratch_txt_with_opt(
             self.label.as_ref(),
-            self.preview_value.as_deref(),
+            self.preview_value,
             |label_ptr, preview_ptr| unsafe {
                 sys::igBeginCombo(label_ptr, preview_ptr, self.options.raw())
             },

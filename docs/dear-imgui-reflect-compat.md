@@ -271,7 +271,7 @@ Enums
     overridden with `#[imgui(name = "...")]`.
 - [x] Enum radio style
   - Type attribute: `#[imgui(enum_style = "radio")]`.
-  - Renders one radio button per variant, using `radio_button_bool` with a
+  - Renders one radio button per variant, using `radio_button` with a
     boolean `active` state per button and mapping the chosen index back to
     the enum variant. This corresponds to ImReflect's `as_radio()` mode for
     enums (we do not currently support enum sliders or drags).

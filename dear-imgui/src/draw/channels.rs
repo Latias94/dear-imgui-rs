@@ -34,8 +34,11 @@ impl<'ui> ChannelsSplit<'ui> {
             "channel_index",
             channel_index,
         );
-        self.draw_list.assert_splitter_available();
-        unsafe { sys::ImDrawList_ChannelsSetCurrent(self.draw_list.draw_list, channel_index_i32) };
+        self.draw_list
+            .with_raw_bound("ChannelsSplit::set_current()", |draw_list| {
+                self.draw_list.assert_splitter_available();
+                unsafe { sys::ImDrawList_ChannelsSetCurrent(draw_list, channel_index_i32) };
+            });
     }
 }
 
@@ -43,6 +46,23 @@ impl<'ui> ChannelsSplit<'ui> {
 mod channels_tests {
     use super::*;
     use crate::internal::len_i32;
+
+    fn in_frame(test: impl FnOnce(&crate::Ui)) {
+        let _guard = crate::test_support::imgui_context_guard();
+        let mut context = crate::Context::create();
+        context.io_mut().set_display_size([128.0, 128.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        context
+            .set_ini_filename::<std::path::PathBuf>(None)
+            .unwrap();
+        test(context.frame());
+        assert!(context.end_frame());
+    }
 
     #[test]
     fn with_clip_rect_pops_after_panic() {
@@ -59,7 +79,7 @@ mod channels_tests {
         let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
         let ui = ctx.frame();
-        let draw_list = ui.get_window_draw_list();
+        let draw_list = DrawListMut::window(ui);
         let raw_draw_list = draw_list.draw_list;
         let initial_stack_size = unsafe { (*raw_draw_list)._ClipRectStack.Size };
 
@@ -95,7 +115,7 @@ mod channels_tests {
         let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
         let ui = ctx.frame();
-        let draw_list = ui.get_window_draw_list();
+        let draw_list = DrawListMut::window(ui);
         let raw_draw_list = draw_list.draw_list;
         let initial_stack_size = unsafe { (*raw_draw_list)._TextureStack.Size };
 
@@ -127,7 +147,7 @@ mod channels_tests {
             .build();
 
         let ui = ctx.frame();
-        let draw_list = ui.get_window_draw_list();
+        let draw_list = DrawListMut::window(ui);
         let raw = draw_list.draw_list;
         let initial = unsafe { (*raw)._ClipRectStack.Size };
         let outer = draw_list.push_clip_rect([0.0, 0.0], [64.0, 64.0], false);
@@ -159,7 +179,7 @@ mod channels_tests {
             .build();
 
         let ui = ctx.frame();
-        let draw_list = ui.get_window_draw_list();
+        let draw_list = DrawListMut::window(ui);
         let raw = draw_list.draw_list;
         let initial = unsafe { (*raw)._TextureStack.Size };
         let outer = draw_list.push_texture(crate::texture::TextureId::new(1));
@@ -198,7 +218,7 @@ mod channels_tests {
         let ui_ref: &crate::Ui = ui;
         let draw_list = ui_ref
             .window("window draw-list provenance")
-            .build(|| ui_ref.get_window_draw_list())
+            .build(|| DrawListMut::window(ui_ref))
             .expect("the source window should submit");
         let raw = draw_list.draw_list;
         let initial = unsafe { (*raw)._ClipRectStack.Size };
@@ -208,6 +228,38 @@ mod channels_tests {
         }));
         assert!(result.is_err());
         assert_eq!(unsafe { (*raw)._ClipRectStack.Size }, initial);
+    }
+
+    #[test]
+    fn window_draw_list_rejects_command_submission_from_a_nested_window() {
+        let mut context = crate::Context::create();
+        context.prepare_frame(crate::FramePrepareOptions::new([256.0, 256.0], 1.0 / 60.0));
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let ui = context.frame();
+        ui.window("Owner of draw list")
+            .build(|| {
+                ui.with_window_draw_list(|draw_list| {
+                    let commands = || unsafe { (*draw_list.draw_list).CmdBuffer.Size };
+                    let before = commands();
+                    ui.window("Another window")
+                        .build(|| {
+                            let result =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    draw_list.add_draw_cmd();
+                                }));
+                            assert!(result.is_err());
+                            assert_eq!(commands(), before);
+                        })
+                        .expect("nested window should submit");
+                    draw_list.add_draw_cmd();
+                    assert_eq!(commands(), before + 1);
+                })
+            })
+            .expect("owner window should submit");
     }
 
     #[test]
@@ -227,7 +279,7 @@ mod channels_tests {
         let ui = ctx.frame();
         let draw_list = ui
             .window("reopened window draw-list provenance")
-            .build(|| ui.get_window_draw_list())
+            .build(|| DrawListMut::window(ui))
             .expect("the source window should submit");
         let raw = draw_list.draw_list;
 
@@ -259,7 +311,7 @@ mod channels_tests {
         let ui = ctx.frame();
         let host_name = format!("WindowOverViewport_{:08X}", ui.main_viewport().id().raw());
         ui.window(host_name).build(|| {
-            let draw_list = ui.get_window_draw_list();
+            let draw_list = DrawListMut::window(ui);
             let raw = draw_list.draw_list;
             let initial = unsafe { (*raw)._ClipRectStack.Size };
 
@@ -300,116 +352,57 @@ mod channels_tests {
     }
 
     #[test]
-    fn channels_split_merges_after_panic() {
-        let shared = unsafe { sys::ImDrawListSharedData_ImDrawListSharedData() };
-        assert!(!shared.is_null());
-        let raw_draw_list = unsafe { sys::ImDrawList_ImDrawList(shared) };
-        assert!(!raw_draw_list.is_null());
-
-        unsafe { sys::ImDrawList_AddDrawCmd(raw_draw_list) };
-
-        let draw_list = DrawListMut {
-            draw_list: raw_draw_list,
-            ui: None,
-            provenance: DrawListProvenance::Frame,
-        };
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            draw_list.channels_split(2, |channels| {
-                channels.set_current(1);
-                panic!("forced panic while channels are split");
-            });
-        }));
-
-        assert!(result.is_err());
-        unsafe {
-            assert_eq!((*raw_draw_list)._Splitter._Count, 1);
-            assert_eq!((*raw_draw_list)._Splitter._Current, 0);
-        }
-
-        unsafe {
-            sys::ImDrawList_destroy(raw_draw_list);
-            sys::ImDrawListSharedData_destroy(shared);
-        }
-    }
-
-    #[test]
     fn channels_split_rejects_same_draw_list_nesting_before_ffi() {
-        let shared = unsafe { sys::ImDrawListSharedData_ImDrawListSharedData() };
-        assert!(!shared.is_null());
-        let raw_draw_list = unsafe { sys::ImDrawList_ImDrawList(shared) };
-        assert!(!raw_draw_list.is_null());
-        let draw_list = DrawListMut {
-            draw_list: raw_draw_list,
-            ui: None,
-            provenance: DrawListProvenance::Frame,
-        };
-
-        draw_list.channels_split(2, |channels| {
-            let before_count = unsafe { (*raw_draw_list)._Splitter._Count };
-            let before_current = unsafe { (*raw_draw_list)._Splitter._Current };
-            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                draw_list.channels_split(2, |_| {});
-            }))
-            .expect_err("nested split should panic");
-            let message = panic
-                .downcast_ref::<&str>()
-                .copied()
-                .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
-                .unwrap_or("non-string panic payload");
-            assert!(message.contains("does not support nested splits"));
-            assert_eq!(unsafe { (*raw_draw_list)._Splitter._Count }, before_count);
-            assert_eq!(
-                unsafe { (*raw_draw_list)._Splitter._Current },
-                before_current
-            );
-            channels.set_current(1);
+        in_frame(|ui| {
+            let draw_list = ui.get_background_draw_list();
+            let raw_draw_list = draw_list.draw_list;
+            draw_list.channels_split(2, |channels| {
+                let before_count = unsafe { (*raw_draw_list)._Splitter._Count };
+                let before_current = unsafe { (*raw_draw_list)._Splitter._Current };
+                let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    draw_list.channels_split(2, |_| {});
+                }))
+                .expect_err("nested split should panic");
+                let message = panic
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("non-string panic payload");
+                assert!(message.contains("does not support nested splits"));
+                assert_eq!(unsafe { (*raw_draw_list)._Splitter._Count }, before_count);
+                assert_eq!(
+                    unsafe { (*raw_draw_list)._Splitter._Current },
+                    before_current
+                );
+                channels.set_current(1);
+            });
+            assert_eq!(unsafe { (*raw_draw_list)._Splitter._Count }, 1);
+            assert_eq!(unsafe { (*raw_draw_list)._Splitter._Current }, 0);
         });
-
-        assert_eq!(unsafe { (*raw_draw_list)._Splitter._Count }, 1);
-        assert_eq!(unsafe { (*raw_draw_list)._Splitter._Current }, 0);
-        drop(draw_list);
-        unsafe {
-            sys::ImDrawList_destroy(raw_draw_list);
-            sys::ImDrawListSharedData_destroy(shared);
-        }
     }
 
     #[test]
     fn channels_split_allows_independent_draw_lists_to_nest() {
-        let shared_a = unsafe { sys::ImDrawListSharedData_ImDrawListSharedData() };
-        let shared_b = unsafe { sys::ImDrawListSharedData_ImDrawListSharedData() };
-        let raw_a = unsafe { sys::ImDrawList_ImDrawList(shared_a) };
-        let raw_b = unsafe { sys::ImDrawList_ImDrawList(shared_b) };
-        assert!(!raw_a.is_null() && !raw_b.is_null());
-        let draw_list_a = DrawListMut {
-            draw_list: raw_a,
-            ui: None,
-            provenance: DrawListProvenance::Frame,
-        };
-        let draw_list_b = DrawListMut {
-            draw_list: raw_b,
-            ui: None,
-            provenance: DrawListProvenance::Frame,
-        };
-
-        draw_list_a.channels_split(2, |channels_a| {
-            channels_a.set_current(1);
-            draw_list_b.channels_split(3, |channels_b| channels_b.set_current(2));
-            assert_eq!(unsafe { (*raw_b)._Splitter._Count }, 1);
-            assert_eq!(unsafe { (*raw_b)._Splitter._Current }, 0);
-            assert_eq!(unsafe { (*raw_a)._Splitter._Count }, 2);
-            assert_eq!(unsafe { (*raw_a)._Splitter._Current }, 1);
+        in_frame(|ui| {
+            let background = ui.get_background_draw_list();
+            let foreground = ui.get_foreground_draw_list();
+            background.channels_split(2, |background_channels| {
+                background_channels.set_current(1);
+                foreground.channels_split(3, |foreground_channels| {
+                    foreground_channels.set_current(2);
+                });
+                let foreground_splitter = unsafe { &(*foreground.draw_list)._Splitter };
+                let background_splitter = unsafe { &(*background.draw_list)._Splitter };
+                assert_eq!(
+                    (foreground_splitter._Count, foreground_splitter._Current),
+                    (1, 0)
+                );
+                assert_eq!(
+                    (background_splitter._Count, background_splitter._Current),
+                    (2, 1)
+                );
+            });
         });
-
-        drop(draw_list_a);
-        drop(draw_list_b);
-        unsafe {
-            sys::ImDrawList_destroy(raw_a);
-            sys::ImDrawList_destroy(raw_b);
-            sys::ImDrawListSharedData_destroy(shared_a);
-            sys::ImDrawListSharedData_destroy(shared_b);
-        }
     }
 
     #[test]

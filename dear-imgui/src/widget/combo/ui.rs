@@ -149,7 +149,7 @@ impl Ui {
         let mut result = false;
 
         let preview_value = if *current_item >= 0 {
-            items.get(*current_item as usize).map(|v| label_fn(v))
+            items.get(*current_item as usize).map(label_fn)
         } else {
             None
         };

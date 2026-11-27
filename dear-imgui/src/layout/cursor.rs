@@ -1,6 +1,6 @@
-use super::validation::{assert_finite_f32, assert_finite_vec2};
 use crate::Ui;
 use crate::sys;
+use crate::validation::{assert_finite_f32, assert_finite_vec2};
 
 impl Ui {
     /// Returns the cursor position (in window coordinates)

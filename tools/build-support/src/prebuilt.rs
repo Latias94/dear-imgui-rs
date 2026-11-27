@@ -3,7 +3,8 @@ use crate::binding;
 #[cfg(feature = "download")]
 use sha2::{Digest, Sha256};
 use std::env;
-#[cfg(feature = "archive")]
+use std::fs;
+#[cfg(feature = "download")]
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -306,6 +307,7 @@ pub fn is_offline() -> bool {
     }
 }
 
+/// Return the target/CRT directory used by the legacy extraction cache layout.
 pub fn prebuilt_extract_dir_env(cache_root: &Path, target_env: &str) -> PathBuf {
     let target = env::var("TARGET").unwrap_or_default();
     let crt_suffix = if target_env == "msvc" {
@@ -330,7 +332,21 @@ pub fn extract_archive_to_cache(
 ) -> Result<PathBuf, String> {
     #[cfg(feature = "archive")]
     {
-        extract_archive_to_cache_impl(archive_path, cache_root, lib_name)
+        println!("cargo:rerun-if-changed={}", archive_path.display());
+        if !archive_path.is_file() {
+            return Err(format!(
+                "local prebuilt archive is not a file: {}",
+                archive_path.display()
+            ));
+        }
+        let bytes = read_local_prebuilt(archive_path)?;
+        let key = local_content_key(&bytes);
+        extract_archive_to_dir(
+            &cache_root.join(format!("a-{key}")),
+            lib_name,
+            &bytes,
+            &format!("fnv1a64:{key}"),
+        )
     }
 
     #[cfg(not(feature = "archive"))]
@@ -344,137 +360,135 @@ pub fn extract_archive_to_cache(
 }
 
 #[cfg(feature = "archive")]
-fn extract_archive_to_cache_impl(
-    archive_path: &Path,
-    cache_root: &Path,
-    lib_name: &str,
-) -> Result<PathBuf, String> {
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-    let extract_dir = prebuilt_extract_dir_env(cache_root, &target_env);
-    extract_archive_to_dir(&extract_dir, lib_name, || open_local_archive(archive_path))
-}
-
-#[cfg(feature = "archive")]
-fn extract_archive_to_dir<R: Read>(
+fn extract_archive_to_dir(
     extract_dir: &Path,
     lib_name: &str,
-    open_archive: impl FnOnce() -> Result<(R, String), String>,
+    bytes: &[u8],
+    fingerprint: &str,
 ) -> Result<PathBuf, String> {
+    use std::io::Write as _;
+
     let parent = extract_dir.parent().ok_or_else(|| {
         format!(
             "prebuilt extraction directory has no parent: {}",
             extract_dir.display()
         )
     })?;
-    std::fs::create_dir_all(parent)
-        .map_err(|e| format!("create dir {}: {}", parent.display(), e))?;
-    let _extraction_lock = lock_cache_file(&extraction_lock_path(extract_dir))?;
-    let (reader, fingerprint) = open_archive()?;
-    let fingerprint_file = ".archive-fingerprint";
-    if std::fs::read_to_string(extract_dir.join(fingerprint_file))
-        .ok()
-        .as_deref()
-        == Some(fingerprint.as_str())
-        && let Some(lib_dir) = extracted_library_dir(extract_dir, lib_name)
+    fs::create_dir_all(parent).map_err(|error| format!("create {}: {error}", parent.display()))?;
+    let _lock = lock_cache_file(&extract_dir.with_extension("lock"))?;
+    const FINGERPRINT_FILE: &str = ".archive-fingerprint";
+    let marker = extract_dir.join(FINGERPRINT_FILE);
+    if let Some(lib_dir) = extracted_library_dir(extract_dir, lib_name)
+        && is_plain_file(&marker)
+        && fs::read_to_string(&marker).is_ok_and(|cached| cached == fingerprint)
     {
         return Ok(lib_dir);
     }
-    if extract_dir.exists() {
-        let stale_dir = unique_staging_path(extract_dir);
-        std::fs::rename(extract_dir, &stale_dir).map_err(|error| {
+
+    validate_archive_members(bytes)?;
+    let staging_dir = unique_staging_path(extract_dir);
+    fs::create_dir(&staging_dir)
+        .map_err(|error| format!("create {}: {error}", staging_dir.display()))?;
+    let install = || -> Result<_, String> {
+        let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes));
+        archive.set_overwrite(false);
+        archive
+            .unpack(&staging_dir)
+            .map_err(|error| format!("unpack archive into {}: {error}", staging_dir.display()))?;
+        let library_dir = extracted_library_dir(&staging_dir, lib_name)
+            .ok_or("extracted archive did not contain the expected library and manifest")?;
+        let uses_lib_subdir = library_dir != staging_dir;
+        fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(staging_dir.join(FINGERPRINT_FILE))
+            .and_then(|mut file| file.write_all(fingerprint.as_bytes()))
+            .map_err(|error| format!("write extraction cache fingerprint: {error}"))?;
+
+        match remove_cached_extraction(extract_dir) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "remove stale extraction {}: {error}",
+                    extract_dir.display()
+                ));
+            }
+        }
+        fs::rename(&staging_dir, extract_dir).map_err(|error| {
             format!(
-                "retire stale extraction directory {}: {error}",
+                "install extracted archive at {}: {error}",
                 extract_dir.display()
             )
         })?;
-        std::fs::remove_dir_all(&stale_dir)
-            .map_err(|error| format!("remove stale dir {}: {error}", stale_dir.display()))?;
-    }
-    let staging_dir = unique_staging_path(extract_dir);
-    std::fs::create_dir(&staging_dir)
-        .map_err(|e| format!("create dir {}: {}", staging_dir.display(), e))?;
-    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(reader));
-    if let Err(error) = archive.unpack(&staging_dir) {
-        let _ = std::fs::remove_dir_all(&staging_dir);
-        return Err(format!(
-            "unpack archive into {}: {error}",
-            extract_dir.display()
-        ));
-    }
-    let staged_lib_dir = extracted_library_dir(&staging_dir, lib_name).ok_or_else(|| {
-        let _ = std::fs::remove_dir_all(&staging_dir);
-        "extracted archive did not contain the expected library and manifest".to_owned()
-    })?;
-    let uses_lib_subdir = staged_lib_dir != staging_dir;
-    if let Err(error) = std::fs::write(staging_dir.join(fingerprint_file), &fingerprint) {
-        let _ = std::fs::remove_dir_all(&staging_dir);
-        return Err(format!("write extraction cache fingerprint: {error}"));
-    }
-
-    match std::fs::rename(&staging_dir, extract_dir) {
-        Ok(()) => Ok(if uses_lib_subdir {
+        Ok(if uses_lib_subdir {
             extract_dir.join("lib")
         } else {
             extract_dir.to_path_buf()
-        }),
-        Err(error) => {
-            // Another process may have completed the same extraction first. Its atomic rename is
-            // safe to reuse only after validating the expected library is present.
-            if std::fs::read_to_string(extract_dir.join(fingerprint_file))
-                .ok()
-                .as_deref()
-                == Some(fingerprint.as_str())
-                && let Some(lib_dir) = extracted_library_dir(extract_dir, lib_name)
-            {
-                let _ = std::fs::remove_dir_all(&staging_dir);
-                return Ok(lib_dir);
-            }
-            let _ = std::fs::remove_dir_all(&staging_dir);
-            Err(format!(
-                "install extracted archive at {}: {}",
-                extract_dir.display(),
-                error
-            ))
+        })
+    };
+    install().inspect_err(|_| {
+        let _ = fs::remove_dir_all(&staging_dir);
+    })
+}
+
+#[cfg(feature = "archive")]
+fn remove_cached_extraction(path: &Path) -> std::io::Result<()> {
+    let file_type = fs::symlink_metadata(path)?.file_type();
+    if file_type.is_dir() {
+        return fs::remove_dir_all(path);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTypeExt as _;
+        if file_type.is_symlink_dir() {
+            return fs::remove_dir(path);
         }
     }
+    fs::remove_file(path)
 }
 
 #[cfg(feature = "archive")]
-fn open_local_archive(path: &Path) -> Result<(std::fs::File, String), String> {
-    use std::io::Seek as _;
-    let mut file =
-        std::fs::File::open(path).map_err(|error| format!("open {}: {error}", path.display()))?;
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let count = file
-            .read(&mut buffer)
-            .map_err(|error| format!("read {}: {error}", path.display()))?;
-        if count == 0 {
-            break;
+fn validate_archive_members(bytes: &[u8]) -> Result<(), String> {
+    use std::path::Component;
+
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes));
+    let entries = archive
+        .entries()
+        .map_err(|error| format!("read tar entries: {error}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("read tar entry: {error}"))?;
+        let kind = entry.header().entry_type();
+        let path = entry
+            .path()
+            .map_err(|error| format!("read tar entry path: {error}"))?;
+        if !kind.is_file() && !kind.is_dir() {
+            return Err(format!("unsupported tar entry type {kind:?} for {path:?}"));
         }
-        for byte in &buffer[..count] {
-            hash = (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3);
+        if path.components().any(|component| match component {
+            Component::CurDir => false,
+            Component::Normal(name) => cfg!(windows) && name.as_encoded_bytes().contains(&b':'),
+            _ => true,
+        }) {
+            return Err(format!("invalid tar entry path {path:?}"));
         }
     }
-    file.rewind()
-        .map_err(|error| format!("rewind {}: {error}", path.display()))?;
-    // Local packages use a cache freshness key. Remote archives carry a verified digest.
-    Ok((file, format!("fnv1a64:{hash:016x}")))
+    Ok(())
 }
 
-#[cfg(feature = "archive")]
-fn extraction_lock_path(extract_dir: &Path) -> PathBuf {
-    let lock_name = extract_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("prebuilt");
-    extract_dir.with_file_name(format!(".{lock_name}.extract.lock"))
+fn read_local_prebuilt(path: &Path) -> Result<Vec<u8>, String> {
+    fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))
 }
 
-#[cfg(feature = "archive")]
-fn lock_cache_file(path: &Path) -> Result<std::fs::File, String> {
-    let file = std::fs::OpenOptions::new()
+fn local_content_key(bytes: &[u8]) -> String {
+    let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    });
+    format!("{hash:016x}")
+}
+
+fn lock_cache_file(path: &Path) -> Result<fs::File, String> {
+    let file = fs::OpenOptions::new()
         .create(true)
         .read(true)
         .write(true)
@@ -486,15 +500,27 @@ fn lock_cache_file(path: &Path) -> Result<std::fs::File, String> {
     Ok(file)
 }
 
+fn is_plain_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
+}
+
 #[cfg(feature = "archive")]
 fn extracted_library_dir(root: &Path, lib_name: &str) -> Option<PathBuf> {
-    if !root.join("manifest.txt").is_file() {
+    if !fs::symlink_metadata(root).is_ok_and(|metadata| metadata.is_dir())
+        || !is_plain_file(&root.join("manifest.txt"))
+    {
         return None;
     }
     let lib_dir = root.join("lib");
-    if lib_dir.join(lib_name).is_file() {
+    if fs::symlink_metadata(&lib_dir).is_ok_and(|metadata| metadata.is_dir())
+        && is_plain_file(&lib_dir.join(lib_name))
+        && match fs::symlink_metadata(&lib_dir.join("manifest.txt")) {
+            Ok(metadata) => metadata.is_file(),
+            Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+        }
+    {
         Some(lib_dir)
-    } else if root.join(lib_name).is_file() {
+    } else if is_plain_file(&root.join(lib_name)) {
         Some(root.to_path_buf())
     } else {
         None
@@ -505,15 +531,11 @@ fn unique_staging_path(destination: &Path) -> PathBuf {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_nanos();
+        .as_millis();
     static NEXT_STAGING_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let staging_id = NEXT_STAGING_ID.fetch_add(1, Ordering::Relaxed);
-    let name = destination
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("prebuilt");
     destination.with_file_name(format!(
-        ".{name}.tmp-{}-{nonce}-{staging_id}",
+        ".tmp-{:x}-{nonce:x}-{staging_id:x}",
         std::process::id()
     ))
 }
@@ -531,7 +553,6 @@ pub fn download_prebuilt(
                 path.display()
             ));
         }
-        println!("cargo:rerun-if-changed={}", path.display());
         return stage_or_extract_local(cache_root, &path, lib_name);
     }
 
@@ -605,6 +626,7 @@ fn stage_or_extract_local(
         return extract_archive_to_cache(path, cache_root, lib_name);
     }
 
+    println!("cargo:rerun-if-changed={}", path.display());
     if path
         .file_name()
         .and_then(|s| s.to_str())
@@ -616,14 +638,20 @@ fn stage_or_extract_local(
         return Ok(parent.to_path_buf());
     }
 
-    let dl_dir = cache_root.join("download");
-    let _ = std::fs::create_dir_all(&dl_dir);
-    let dst = dl_dir.join(lib_name);
-    if !dst.exists() {
-        let bytes = std::fs::read(path).map_err(|e| format!("read {}: {}", path.display(), e))?;
+    let bytes = read_local_prebuilt(path)?;
+    let dir = cache_root.join(format!("l-{}", local_content_key(&bytes)));
+    fs::create_dir_all(cache_root)
+        .map_err(|error| format!("create {}: {error}", cache_root.display()))?;
+    let _lock = lock_cache_file(&dir.with_extension("lock"))?;
+    fs::create_dir_all(&dir).map_err(|error| format!("create {}: {error}", dir.display()))?;
+    if !fs::symlink_metadata(&dir).is_ok_and(|metadata| metadata.is_dir()) {
+        return Err(format!("not a regular cache directory: {}", dir.display()));
+    }
+    let dst = dir.join(lib_name);
+    if !is_plain_file(&dst) || !fs::read(&dst).is_ok_and(|cached| cached == bytes) {
         write_atomic(&dst, &bytes)?;
     }
-    Ok(dl_dir)
+    Ok(dir)
 }
 
 fn is_archive_path(path: &Path) -> bool {
@@ -692,13 +720,9 @@ fn download_prebuilt_http(
         Err(error) => return Err(format!("read {}: {error}", archive_path.display())),
     };
 
-    let verification_failed = |error: &String| {
-        println!("cargo::error=Prebuilt verification failed: {error}");
-    };
     let (checksums, fetched_checksums) = if let Some(path) = options.checksums {
         let checksums = std::fs::read_to_string(path)
-            .map_err(|error| format!("read {SHA256SUMS_ENV} file {}: {error}", path.display()))
-            .inspect_err(verification_failed)?;
+            .map_err(|error| format!("read {SHA256SUMS_ENV} file {}: {error}", path.display()))?;
         (checksums, false)
     } else {
         let cached = match (!downloaded)
@@ -725,8 +749,7 @@ fn download_prebuilt_http(
             (checksums, true)
         }
     };
-    let digest =
-        verify_archive_sha256(&bytes, archive_name, &checksums).inspect_err(verification_failed)?;
+    let digest = verify_archive_sha256(&bytes, archive_name, &checksums)?;
     if fetched_checksums {
         // Publish the manifest first so an offline reader cannot see a new archive without it.
         write_atomic(&checksums_path, checksums.as_bytes())?;
@@ -735,11 +758,9 @@ fn download_prebuilt_http(
         write_atomic(&archive_path, &bytes)?;
     }
     drop(cache_lock);
-    let extract_dir = cache_root.join("verified").join(&digest);
-    extract_archive_to_dir(&extract_dir, lib_name, || {
-        Ok((bytes.as_slice(), format!("sha256:{digest}")))
-    })
-    .map_err(|error| format!("extract verified archive {archive_name}: {error}"))
+    let extract_dir = cache_root.join(format!("v-{}", &digest[..32]));
+    extract_archive_to_dir(&extract_dir, lib_name, &bytes, &format!("sha256:{digest}"))
+        .map_err(|error| format!("extract verified archive {archive_name}: {error}"))
 }
 
 #[cfg(feature = "download")]
@@ -769,9 +790,8 @@ fn release_archive_location(
 
 #[cfg(feature = "download")]
 fn remote_cache_root(cache_root: &Path, url: &str) -> PathBuf {
-    cache_root
-        .join("download")
-        .join(format!("{:x}", Sha256::digest(url.as_bytes())))
+    let key = format!("{:x}", Sha256::digest(url.as_bytes()));
+    cache_root.join(format!("d-{}", &key[..32]))
 }
 
 #[cfg(feature = "download")]
@@ -878,7 +898,7 @@ fn resolve_prebuilt_cache_root(
         .or_else(|| {
             read_path("OUT_DIR")
                 .filter(|dir| dir.is_absolute())
-                .map(|dir| dir.join("dear-imgui-prebuilt-cache"))
+                .map(|dir| dir.join("pb"))
         })
 }
 
@@ -972,7 +992,7 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(cache, out_dir.join("dear-imgui-prebuilt-cache"));
+        assert_eq!(cache, out_dir.join("pb"));
         std::fs::create_dir_all(&cache).unwrap();
         assert_eq!(
             std::fs::read(&blocked_target).unwrap(),
@@ -1018,7 +1038,7 @@ mod tests {
         let url = "http://127.0.0.1:9/core.tar.gz";
         let error = download_prebuilt_http(root.path(), url, "libcore.a", OFFLINE).unwrap_err();
         assert!(error.contains("require HTTPS"), "{error}");
-        assert!(!root.path().join("download").exists());
+        assert!(!remote_cache_root(root.path(), url).exists());
 
         let uri = url.parse().unwrap();
         assert_eq!(
@@ -1137,6 +1157,30 @@ mod tests {
 
     #[cfg(feature = "download")]
     #[test]
+    fn checksum_rejection_does_not_emit_a_fatal_cargo_directive() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "prebuilt::tests::cached_archive_is_reverified_before_reusing_its_extraction",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "{stdout}"
+        );
+        assert!(
+            !stdout.lines().any(|line| {
+                line.starts_with("cargo::error=") || line.starts_with("cargo:error=")
+            }),
+            "{stdout}"
+        );
+    }
+
+    #[cfg(feature = "download")]
+    #[test]
     fn offline_download_uses_the_explicit_local_checksum_manifest() {
         let root = tempfile::tempdir().unwrap();
         let cache = remote_cache_root(root.path(), ARCHIVE_URL);
@@ -1162,6 +1206,73 @@ mod tests {
         .unwrap();
         assert_eq!(std::fs::read(lib_dir.join("libcore.a")).unwrap(), b"test");
         assert!(!cache.join(SHA256SUMS).exists());
+    }
+
+    #[cfg(all(windows, feature = "download"))]
+    #[test]
+    fn explicit_download_and_extraction_fit_under_windows_max_path() {
+        use crate::native_build::explicit_cache_root;
+        use std::os::windows::ffi::OsStrExt as _;
+
+        let root = tempfile::tempdir().unwrap();
+        let path_len = |path: &Path| path.as_os_str().encode_wide().count();
+        let cargo_out = Path::new(r"target\release\build\dear-imgui-sys-0123456789abcdef\out");
+        let padding = 130_usize.saturating_sub(path_len(&root.path().join(cargo_out)) + 1);
+        let out_dir = root.path().join("x".repeat(padding)).join(cargo_out);
+        let default = resolve_prebuilt_cache_root("TEST_SYS_CACHE_DIR", "test-prebuilt", |key| {
+            (key == "OUT_DIR").then(|| out_dir.as_os_str().to_owned())
+        })
+        .unwrap();
+        let profile_cache = default.join("fnv1a64-0123456789abcdef");
+        let cache_root = explicit_cache_root(&profile_cache, ARCHIVE_URL);
+        let assert_fits = |path: &Path| {
+            let tail = path.strip_prefix(&out_dir).unwrap();
+            assert!(130 + 1 + path_len(tail) < 260, "{}", path.display());
+        };
+        let cache = remote_cache_root(&cache_root, ARCHIVE_URL);
+        let library_name = "dear_imgui_test_engine.lib";
+        let bytes = archive_bytes(&[
+            ("lib", tar::EntryType::Directory, b""),
+            (
+                &format!("lib/{library_name}"),
+                tar::EntryType::Regular,
+                b"current",
+            ),
+            ("manifest.txt", tar::EntryType::Regular, b"features=\n"),
+        ]);
+        let digest = format!("{:x}", Sha256::digest(&bytes));
+        fs::create_dir_all(&cache).unwrap();
+        let archive = cache.join("archive.tar.gz");
+        let checksums = cache.join(SHA256SUMS);
+        for path in [&archive, &checksums] {
+            assert_fits(path);
+            assert_fits(&unique_staging_path(path));
+        }
+        write_atomic(&archive, &bytes).unwrap();
+        write_atomic(&checksums, format!("{digest}  core.tar.gz\n").as_bytes()).unwrap();
+
+        let legacy = cache_root.join("verified").join(&digest);
+        fs::create_dir_all(legacy.join("lib")).unwrap();
+        let legacy_library = legacy.join("lib").join(library_name);
+        fs::write(&legacy_library, b"legacy").unwrap();
+        fs::write(legacy.join("manifest.txt"), b"features=\n").unwrap();
+        fs::write(
+            legacy.join(".archive-fingerprint"),
+            format!("sha256:{digest}"),
+        )
+        .unwrap();
+
+        let lib_dir =
+            download_prebuilt_http(&cache_root, ARCHIVE_URL, library_name, OFFLINE).unwrap();
+        let library = lib_dir.join(library_name);
+        assert_fits(&library);
+        assert_fits(
+            &unique_staging_path(lib_dir.parent().unwrap())
+                .join("lib")
+                .join(library_name),
+        );
+        assert_eq!(fs::read(&library).unwrap(), b"current");
+        assert_eq!(fs::read(&legacy_library).unwrap(), b"legacy");
     }
 
     #[test]
@@ -1222,21 +1333,130 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn renamed_local_library_refreshes_even_with_the_same_size_and_mtime() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("artifact.a");
+        let cache = root.path().join("cache");
+        let stage = || download_prebuilt(&cache, path.to_str().unwrap(), "libcore.a", "").unwrap();
+        std::fs::write(&path, b"first").unwrap();
+        let first = stage();
+        let mtime = path.metadata().unwrap().modified().unwrap();
+
+        std::fs::write(&path, b"other").unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+        let second = stage();
+        assert_eq!(std::fs::read(second.join("libcore.a")).unwrap(), b"other");
+        assert_eq!(std::fs::read(first.join("libcore.a")).unwrap(), b"first");
+        fs::write(second.join("libcore.a"), b"damaged").unwrap();
+        assert_eq!(stage(), second);
+        assert_eq!(fs::read(second.join("libcore.a")).unwrap(), b"other");
+    }
+
+    #[test]
+    fn competing_local_writers_use_complete_content_snapshots() {
+        let root = tempfile::tempdir().unwrap();
+        let cache = root.path().join("cache");
+        let inputs = [b"first", b"other", b"first"];
+        let sources: Vec<_> = inputs
+            .iter()
+            .enumerate()
+            .map(|(index, bytes)| {
+                let source = root.path().join(format!("input{index}.a"));
+                fs::write(&source, bytes).unwrap();
+                source
+            })
+            .collect();
+        let barrier = std::sync::Barrier::new(inputs.len());
+        let directories: Vec<_> = std::thread::scope(|scope| {
+            sources
+                .iter()
+                .map(|source| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        stage_or_extract_local(&cache, source, "libcore.a").unwrap()
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect()
+        });
+        assert_eq!(directories[0], directories[2]);
+        assert_ne!(directories[0], directories[1]);
+        for (directory, bytes) in directories.iter().zip(inputs) {
+            assert_eq!(fs::read(directory.join("libcore.a")).unwrap(), bytes);
+        }
+    }
+
     #[cfg(feature = "archive")]
-    fn packaged_archive_bytes(contents: &[u8]) -> Vec<u8> {
+    fn archive_bytes(entries: &[(&str, tar::EntryType, &[u8])]) -> Vec<u8> {
         let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
         let mut archive = tar::Builder::new(encoder);
-        for (name, bytes) in [
-            ("lib/libcore.a", contents),
-            ("manifest.txt", b"features=wchar32\n".as_slice()),
-        ] {
+        for &(name, kind, bytes) in entries {
             let mut header = tar::Header::new_gnu();
+            header.set_entry_type(kind);
             header.set_size(bytes.len() as u64);
-            header.set_mode(0o644);
+            if kind.is_gnu_sparse() {
+                header
+                    .as_gnu_mut()
+                    .unwrap()
+                    .set_real_size(bytes.len() as u64);
+            }
+            header.set_mode(if kind.is_dir() { 0o755 } else { 0o644 });
             header.set_cksum();
             archive.append_data(&mut header, name, bytes).unwrap();
         }
         archive.into_inner().unwrap().finish().unwrap()
+    }
+
+    #[cfg(feature = "archive")]
+    fn packaged_archive_bytes(contents: &[u8]) -> Vec<u8> {
+        archive_bytes(&[
+            ("lib", tar::EntryType::Directory, b""),
+            ("lib/libcore.a", tar::EntryType::Regular, contents),
+            (
+                "manifest.txt",
+                tar::EntryType::Regular,
+                b"features=wchar32\n",
+            ),
+        ])
+    }
+
+    #[cfg(feature = "archive")]
+    #[test]
+    fn archives_reject_special_members_without_publishing_an_extraction() {
+        for kind in [
+            tar::EntryType::Fifo,
+            tar::EntryType::Char,
+            tar::EntryType::Block,
+            tar::EntryType::Symlink,
+            tar::EntryType::Link,
+            tar::EntryType::Continuous,
+            tar::EntryType::GNUSparse,
+            tar::EntryType::new(b'V'),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let cache = root.path().join("cache");
+            let path = root.path().join("core.tar.gz");
+            let bytes = archive_bytes(&[
+                ("libcore.a", tar::EntryType::Regular, b"library"),
+                ("manifest.txt", tar::EntryType::Regular, b"features=\n"),
+                ("special", kind, b""),
+            ]);
+            std::fs::write(&path, bytes).unwrap();
+            let error = extract_archive_to_cache(&path, &cache, "libcore.a").unwrap_err();
+            assert!(error.contains("unsupported tar entry type"), "{error}");
+            let publishes_directory = fs::read_dir(&cache)
+                .unwrap()
+                .any(|entry| entry.unwrap().file_type().unwrap().is_dir());
+            assert!(!publishes_directory);
+        }
     }
 
     #[cfg(feature = "archive")]
@@ -1267,6 +1487,7 @@ mod tests {
         std::fs::write(&archive_path, packaged_archive_bytes(b"second")).unwrap();
         let second = extract_archive_to_cache(&archive_path, &cache, "libcore.a").unwrap();
         assert_eq!(std::fs::read(second.join("libcore.a")).unwrap(), b"second");
+        assert_eq!(std::fs::read(first.join("libcore.a")).unwrap(), b"first");
     }
 
     #[cfg(feature = "archive")]
@@ -1320,73 +1541,122 @@ mod tests {
     #[cfg(feature = "archive")]
     #[test]
     fn archive_extraction_lock_serializes_check_cleanup_and_install() {
-        use std::io::Write as _;
-        use std::sync::mpsc;
-
-        let root = unique_tmp_dir("locked-archive");
-        let source = root.join("source");
-        let extract_dir = root.join("cache/shared");
-        std::fs::create_dir_all(source.join("lib")).unwrap();
-        std::fs::create_dir_all(&extract_dir).unwrap();
-        std::fs::write(extract_dir.join("stale.partial"), b"partial").unwrap();
-        std::fs::write(source.join("lib/libdear_imgui.a"), b"archive").unwrap();
-        std::fs::write(source.join("manifest.txt"), b"features=wchar32\n").unwrap();
-        let archive_path = root.join("artifact.tar.gz");
-        let file = std::fs::File::create(&archive_path).unwrap();
-        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
-        let mut archive = tar::Builder::new(encoder);
-        archive
-            .append_path_with_name(source.join("lib/libdear_imgui.a"), "lib/libdear_imgui.a")
-            .unwrap();
-        archive
-            .append_path_with_name(source.join("manifest.txt"), "manifest.txt")
-            .unwrap();
-        archive
-            .into_inner()
-            .unwrap()
-            .finish()
-            .unwrap()
-            .flush()
-            .unwrap();
-
-        let (locked_tx, locked_rx) = mpsc::sync_channel(0);
-        let (release_tx, release_rx) = mpsc::sync_channel(0);
-        let first_archive = archive_path.clone();
-        let first_extract = extract_dir.clone();
-        let first = std::thread::spawn(move || {
-            extract_archive_to_dir(&first_extract, "libdear_imgui.a", || {
-                locked_tx.send(()).unwrap();
-                release_rx.recv().unwrap();
-                open_local_archive(&first_archive)
-            })
+        let root = tempfile::tempdir().unwrap();
+        let extract_dir = root.path().join("cache/shared");
+        let bytes = packaged_archive_bytes(b"archive");
+        fs::create_dir_all(&extract_dir).unwrap();
+        fs::write(extract_dir.join("stale.partial"), b"partial").unwrap();
+        let barrier = std::sync::Barrier::new(2);
+        let extract = || {
+            barrier.wait();
+            extract_archive_to_dir(&extract_dir, "libcore.a", &bytes, "fingerprint").unwrap()
+        };
+        let (first_lib_dir, second_lib_dir) = std::thread::scope(|scope| {
+            let worker = scope.spawn(&extract);
+            let library_dir = extract();
+            (worker.join().unwrap(), library_dir)
         });
-        locked_rx.recv().unwrap();
-
-        let lock_path = extraction_lock_path(&extract_dir);
-        let competing_lock = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&lock_path)
-            .unwrap();
-        assert!(matches!(
-            competing_lock.try_lock(),
-            Err(std::fs::TryLockError::WouldBlock)
-        ));
-
-        release_tx.send(()).unwrap();
-        let first_lib_dir = first.join().unwrap().unwrap();
-        let second_lib_dir = extract_archive_to_dir(&extract_dir, "libdear_imgui.a", || {
-            open_local_archive(&archive_path)
-        })
-        .unwrap();
-
         assert_eq!(first_lib_dir, second_lib_dir);
         assert_eq!(
-            std::fs::read(second_lib_dir.join("libdear_imgui.a")).unwrap(),
+            fs::read(second_lib_dir.join("libcore.a")).unwrap(),
             b"archive"
         );
         assert!(!extract_dir.join("stale.partial").exists());
-        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(feature = "archive")]
+    #[test]
+    fn cached_archive_replaces_a_file_at_the_extraction_root() {
+        let root = tempfile::tempdir().unwrap();
+        let cache = root.path().join("cache");
+        fs::write(&cache, b"stale file").unwrap();
+        let bytes = packaged_archive_bytes(b"archive");
+        let lib_dir = extract_archive_to_dir(&cache, "libcore.a", &bytes, "fingerprint").unwrap();
+        assert_eq!(fs::read(lib_dir.join("libcore.a")).unwrap(), b"archive");
+    }
+
+    #[cfg(all(any(unix, windows), feature = "archive"))]
+    #[test]
+    fn cached_archive_does_not_reuse_symlinked_paths() {
+        #[cfg(unix)]
+        use std::os::unix::fs::{symlink as symlink_dir, symlink as symlink_file};
+        #[cfg(windows)]
+        use std::os::windows::fs::{symlink_dir, symlink_file};
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = root.path().join("other");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("libcore.a"), b"other").unwrap();
+        fs::write(outside.join("manifest.txt"), b"features=other\n").unwrap();
+        let cache = root.path().join("cache");
+        let bytes = packaged_archive_bytes(b"archive");
+        let extract =
+            || extract_archive_to_dir(&cache, "libcore.a", &bytes, "fingerprint").unwrap();
+        let library_dir = extract();
+
+        let library = library_dir.join("libcore.a");
+        fs::remove_file(&library).unwrap();
+        if let Err(error) = symlink_file(outside.join("libcore.a"), &library) {
+            #[cfg(windows)]
+            if error.raw_os_error() == Some(1314) {
+                eprintln!("Skipping symlink checks without Windows symlink privileges");
+                return;
+            }
+            panic!("{error}");
+        }
+        assert_eq!(extract(), library_dir);
+        assert_eq!(fs::read(&library).unwrap(), b"archive");
+
+        let secondary_manifest = library_dir.join("manifest.txt");
+        symlink_file(outside.join("manifest.txt"), &secondary_manifest).unwrap();
+        assert_eq!(extract(), library_dir);
+        assert!(!secondary_manifest.exists());
+
+        fs::remove_dir_all(&library_dir).unwrap();
+        symlink_dir(&outside, &library_dir).unwrap();
+        assert_eq!(fs::read(extract().join("libcore.a")).unwrap(), b"archive");
+
+        fs::write(outside.join(".archive-fingerprint"), b"fingerprint").unwrap();
+        fs::remove_dir_all(&cache).unwrap();
+        symlink_dir(&outside, &cache).unwrap();
+        assert_eq!(fs::read(extract().join("libcore.a")).unwrap(), b"archive");
+
+        fs::remove_dir_all(&cache).unwrap();
+        symlink_file(outside.join("libcore.a"), &cache).unwrap();
+        assert_eq!(fs::read(extract().join("libcore.a")).unwrap(), b"archive");
+        assert_eq!(fs::read(outside.join("libcore.a")).unwrap(), b"other");
+    }
+
+    #[cfg(all(windows, feature = "archive"))]
+    #[test]
+    fn cached_archive_replaces_a_junction_without_touching_its_target() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = root.path().join("other");
+        let outside_library = extract_archive_to_dir(
+            &outside,
+            "libcore.a",
+            &packaged_archive_bytes(b"other"),
+            "fingerprint",
+        )
+        .unwrap()
+        .join("libcore.a");
+        let result = std::process::Command::new("cmd.exe")
+            .current_dir(root.path())
+            .args(["/D", "/C", "mklink", "/J", "cache", "other"])
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{result:?}");
+
+        let cache = root.path().join("cache");
+        let lib_dir = extract_archive_to_dir(
+            &cache,
+            "libcore.a",
+            &packaged_archive_bytes(b"archive"),
+            "fingerprint",
+        )
+        .unwrap();
+        assert_eq!(fs::read(lib_dir.join("libcore.a")).unwrap(), b"archive");
+        assert_eq!(fs::read(outside_library).unwrap(), b"other");
     }
 
     #[cfg(windows)]

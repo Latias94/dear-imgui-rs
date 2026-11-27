@@ -1,5 +1,5 @@
-use super::validation::assert_finite_vec2;
 use crate::sys;
+use crate::validation::{assert_finite_f32, assert_finite_vec2};
 use crate::{Id, Ui};
 use std::ffi::c_void;
 
@@ -127,7 +127,7 @@ impl Ui {
     /// because Dear ImGui itself does not ship `BeginHorizontal`.
     /// Panics if the resolved ID has already been used in the current window and frame.
     #[doc(alias = "BeginHorizontal")]
-    pub fn begin_horizontal_stack_layout<'ui, 'id>(
+    pub fn begin_horizontal<'ui, 'id>(
         &'ui self,
         id: impl Into<StackLayoutId<'id>>,
         size: impl Into<[f32; 2]>,
@@ -137,44 +137,13 @@ impl Ui {
             id.into(),
             size.into(),
             align,
-            "Ui::begin_horizontal_stack_layout()",
+            "Ui::begin_horizontal()",
             sys::ImGuiStack_BeginHorizontal_Id,
         );
         HorizontalStackLayoutToken::new(self)
     }
 
-    /// Starts a stack-layout horizontal group.
-    ///
-    /// Alias for [`Self::begin_horizontal_stack_layout`] with the upstream
-    /// naming used by imgui-node-editor examples.
-    #[doc(alias = "BeginHorizontal")]
-    pub fn begin_horizontal<'ui, 'id>(
-        &'ui self,
-        id: impl Into<StackLayoutId<'id>>,
-        size: impl Into<[f32; 2]>,
-        align: f32,
-    ) -> HorizontalStackLayoutToken<'ui> {
-        self.begin_horizontal_stack_layout(id, size, align)
-    }
-
     /// Runs a closure inside a stack-layout horizontal group.
-    #[doc(alias = "BeginHorizontal", alias = "EndHorizontal")]
-    pub fn horizontal_stack_layout<'id, R>(
-        &self,
-        id: impl Into<StackLayoutId<'id>>,
-        size: impl Into<[f32; 2]>,
-        align: f32,
-        f: impl FnOnce() -> R,
-    ) -> R {
-        let token = self.begin_horizontal_stack_layout(id, size, align);
-        let result = f();
-        token.end();
-        result
-    }
-
-    /// Runs a closure inside a stack-layout horizontal group.
-    ///
-    /// Alias for [`Self::horizontal_stack_layout`].
     #[doc(alias = "BeginHorizontal", alias = "EndHorizontal")]
     pub fn horizontal<'id, R>(
         &self,
@@ -183,7 +152,12 @@ impl Ui {
         align: f32,
         f: impl FnOnce() -> R,
     ) -> R {
-        self.horizontal_stack_layout(id, size, align, f)
+        self.run_with_bound_context(|| {
+            let token = self.begin_horizontal(id, size, align);
+            let result = f();
+            token.end();
+            result
+        })
     }
 
     /// Starts a stack-layout vertical group.
@@ -193,7 +167,7 @@ impl Ui {
     /// because Dear ImGui itself does not ship `BeginVertical`.
     /// Panics if the resolved ID has already been used in the current window and frame.
     #[doc(alias = "BeginVertical")]
-    pub fn begin_vertical_stack_layout<'ui, 'id>(
+    pub fn begin_vertical<'ui, 'id>(
         &'ui self,
         id: impl Into<StackLayoutId<'id>>,
         size: impl Into<[f32; 2]>,
@@ -203,44 +177,13 @@ impl Ui {
             id.into(),
             size.into(),
             align,
-            "Ui::begin_vertical_stack_layout()",
+            "Ui::begin_vertical()",
             sys::ImGuiStack_BeginVertical_Id,
         );
         VerticalStackLayoutToken::new(self)
     }
 
-    /// Starts a stack-layout vertical group.
-    ///
-    /// Alias for [`Self::begin_vertical_stack_layout`] with the upstream naming
-    /// used by imgui-node-editor examples.
-    #[doc(alias = "BeginVertical")]
-    pub fn begin_vertical<'ui, 'id>(
-        &'ui self,
-        id: impl Into<StackLayoutId<'id>>,
-        size: impl Into<[f32; 2]>,
-        align: f32,
-    ) -> VerticalStackLayoutToken<'ui> {
-        self.begin_vertical_stack_layout(id, size, align)
-    }
-
     /// Runs a closure inside a stack-layout vertical group.
-    #[doc(alias = "BeginVertical", alias = "EndVertical")]
-    pub fn vertical_stack_layout<'id, R>(
-        &self,
-        id: impl Into<StackLayoutId<'id>>,
-        size: impl Into<[f32; 2]>,
-        align: f32,
-        f: impl FnOnce() -> R,
-    ) -> R {
-        let token = self.begin_vertical_stack_layout(id, size, align);
-        let result = f();
-        token.end();
-        result
-    }
-
-    /// Runs a closure inside a stack-layout vertical group.
-    ///
-    /// Alias for [`Self::vertical_stack_layout`].
     #[doc(alias = "BeginVertical", alias = "EndVertical")]
     pub fn vertical<'id, R>(
         &self,
@@ -249,7 +192,12 @@ impl Ui {
         align: f32,
         f: impl FnOnce() -> R,
     ) -> R {
-        self.vertical_stack_layout(id, size, align, f)
+        self.run_with_bound_context(|| {
+            let token = self.begin_vertical(id, size, align);
+            let result = f();
+            token.end();
+            result
+        })
     }
 
     /// Inserts a spring into the current stack layout.
@@ -259,28 +207,13 @@ impl Ui {
     /// layout extension semantics.
     /// Panics if the current window has no active, unsuspended stack layout.
     #[doc(alias = "Spring")]
-    pub fn stack_layout_spring(&self, weight: f32, spacing: f32) {
-        assert!(
-            weight.is_finite(),
-            "Ui::stack_layout_spring() weight must be finite"
-        );
-        assert!(
-            spacing.is_finite(),
-            "Ui::stack_layout_spring() spacing must be finite"
-        );
+    pub fn spring(&self, weight: f32, spacing: f32) {
+        assert_finite_f32("Ui::spring()", "weight", weight);
+        assert_finite_f32("Ui::spring()", "spacing", spacing);
         self.run_with_bound_context(|| {
             self.assert_stack_layout_active();
             unsafe { sys::ImGuiStack_Spring(weight, spacing) };
         });
-    }
-
-    /// Inserts a spring into the current stack layout.
-    ///
-    /// Alias for [`Self::stack_layout_spring`] with the upstream naming used by
-    /// imgui-node-editor examples.
-    #[doc(alias = "Spring")]
-    pub fn spring(&self, weight: f32, spacing: f32) {
-        self.stack_layout_spring(weight, spacing)
     }
 
     /// Suspends the current stack layout until the returned token is dropped.

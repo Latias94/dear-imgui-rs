@@ -5,181 +5,116 @@
 use std::borrow::Cow;
 
 use crate::Ui;
+use crate::scope::{NativeScopePop, NativeScopeToken};
 use crate::sys;
-
-fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
-    assert!(
-        value[0].is_finite() && value[1].is_finite(),
-        "{caller} {name} must contain finite values"
-    );
-}
+use crate::validation::assert_finite_vec2;
 
 /// # List Box Widgets
 impl Ui {
     /// Constructs a new list box builder.
-    pub fn list_box_config<T: AsRef<str>>(&self, label: T) -> ListBox<T> {
-        ListBox::new(label)
+    #[doc(alias = "ListBox")]
+    pub fn list_box_config<T: AsRef<str>>(&self, label: T) -> ListBox<'_, T> {
+        ListBox {
+            ui: self,
+            label,
+            size: [0.0, 0.0],
+        }
     }
 }
 
 /// Builder for a list box widget
 #[derive(Clone, Debug)]
 #[must_use]
-pub struct ListBox<T> {
+pub struct ListBox<'ui, T> {
+    ui: &'ui Ui,
     label: T,
     size: [f32; 2],
 }
 
-impl<T: AsRef<str>> ListBox<T> {
-    /// Constructs a new list box builder.
-    #[doc(alias = "ListBoxHeaderVec2", alias = "ListBoxHeaderInt")]
-    pub fn new(label: T) -> ListBox<T> {
-        ListBox {
-            label,
-            size: [0.0, 0.0],
-        }
-    }
-
-    /// Sets the list box size based on the given width and height
-    /// If width or height are 0 or smaller, a default value is calculated
-    /// Helper to calculate the size of a listbox and display a label on the right.
-    /// Tip: To have a list filling the entire window width, PushItemWidth(-1) and pass an non-visible label e.g. "##empty"
-    ///
-    /// Default: [0.0, 0.0], in which case the combobox calculates a sensible width and height
+impl<T: AsRef<str>> ListBox<'_, T> {
+    /// Sets the width and height. Zero uses the corresponding default dimension.
+    /// A negative dimension aligns that edge relative to the available content region.
     #[inline]
     pub fn size(mut self, size: impl Into<[f32; 2]>) -> Self {
         self.size = size.into();
         self
     }
-    /// Creates a list box and starts appending to it.
-    ///
-    /// Returns `Some(ListBoxToken)` if the list box is open. After content has been
-    /// rendered, the token must be ended by calling `.end()`.
-    ///
-    /// Returns `None` if the list box is not open and no content should be rendered.
-    #[must_use]
-    #[doc(alias = "BeginListBox", alias = "ListBox")]
-    pub fn begin(self, ui: &Ui) -> Option<ListBoxToken<'_>> {
-        assert_finite_vec2("ListBox::begin()", "size", self.size);
-        let size_vec = sys::ImVec2 {
-            x: self.size[0],
-            y: self.size[1],
-        };
-        let should_render = ui.with_scratch_txt(self.label, |label_ptr| unsafe {
-            sys::igBeginListBox(label_ptr, size_vec)
-        });
-        if should_render {
-            Some(ListBoxToken::new(ui))
-        } else {
-            None
-        }
-    }
-    /// Creates a list box and runs a closure to construct the list contents.
-    /// Returns the result of the closure, if it is called.
-    ///
-    /// Note: the closure is not called if the list box is not open.
-    pub fn build<R, F: FnOnce() -> R>(self, ui: &Ui, f: F) -> Option<R> {
-        let token = self.begin(ui)?;
-        let result = f();
-        drop(token);
-        Some(result)
-    }
-}
 
-/// Tracks a list box that can be ended by calling `.end()`
-/// or by dropping.
-///
-/// The token must finish after every nested window-like scope and in the exact window `Begin`
-/// scope that created it. Prefer [`ListBox::build`] for ordinary use.
-#[must_use]
-#[doc(alias = "EndListBox")]
-pub struct ListBoxToken<'ui> {
-    scope: crate::scope::NativeScopeToken<'ui>,
-}
-
-impl<'ui> ListBoxToken<'ui> {
-    /// Creates a new list box token
-    pub(crate) fn new(ui: &'ui Ui) -> Self {
-        Self {
-            scope: ui.begin_native_scope(crate::scope::NativeScopePop::EndListBox, "ListBoxToken"),
-        }
+    /// Builds the visible list box and runs `f` with its owning Context current.
+    ///
+    /// Returns `None` without calling `f` if the list box is clipped.
+    #[doc(alias = "BeginListBox", alias = "EndListBox")]
+    pub fn build<R>(self, f: impl FnOnce() -> R) -> Option<R> {
+        assert_finite_vec2("ListBox::build()", "size", self.size);
+        let ui = self.ui;
+        let label = self.label.as_ref();
+        ui.with_bound_context(|| {
+            let visible = ui.with_scratch_c_string(label, |label| unsafe {
+                sys::igBeginListBox(label, self.size.into())
+            });
+            if !visible {
+                return None;
+            }
+            let guard = ListBoxGuard(ui.begin_native_scope(NativeScopePop::EndListBox, "ListBox"));
+            let result = f();
+            drop(guard);
+            Some(result)
+        })
     }
 
-    /// Ends the list box
-    ///
-    /// # Panics
-    ///
-    /// Panics before FFI if a nested window-like scope is active or this token is no longer in its
-    /// originating window `Begin` scope.
-    pub fn end(self) {
-        // The drop implementation will handle the actual ending
-    }
-}
-
-impl<'ui> Drop for ListBoxToken<'ui> {
-    fn drop(&mut self) {
-        self.scope.finish();
-    }
-}
-
-/// # Convenience functions
-impl<T: AsRef<str>> ListBox<T> {
     /// Builds a simple list box for choosing from a slice of values
-    pub fn build_simple<V, L>(
-        self,
-        ui: &Ui,
-        current_item: &mut usize,
-        items: &[V],
-        label_fn: &L,
-    ) -> bool
+    pub fn build_simple<V, L>(self, current_item: &mut usize, items: &[V], label_fn: &L) -> bool
     where
         for<'b> L: Fn(&'b V) -> Cow<'b, str>,
     {
-        let mut result = false;
-        let lb = self;
-        if let Some(_cb) = lb.begin(ui) {
+        let ui = self.ui;
+        self.build(|| {
+            let mut changed = false;
             for (idx, item) in items.iter().enumerate() {
                 let text = label_fn(item);
                 let selected = idx == *current_item;
                 if ui.selectable_config(&text).selected(selected).build() {
                     *current_item = idx;
-                    result = true;
+                    changed = true;
                 }
             }
-        }
-        result
+            changed
+        })
+        .unwrap_or(false)
     }
 
     /// Builds a simple list box for choosing from a slice of values using an `i32` index.
     ///
     /// This is useful when you want to represent \"no selection\" with `-1`, matching Dear ImGui's
     /// list-box patterns that use an `int*` index.
-    pub fn build_simple_i32<V, L>(
-        self,
-        ui: &Ui,
-        current_item: &mut i32,
-        items: &[V],
-        label_fn: &L,
-    ) -> bool
+    pub fn build_simple_i32<V, L>(self, current_item: &mut i32, items: &[V], label_fn: &L) -> bool
     where
         for<'b> L: Fn(&'b V) -> Cow<'b, str>,
     {
-        let mut result = false;
-        let lb = self;
-        if let Some(_cb) = lb.begin(ui) {
+        let ui = self.ui;
+        self.build(|| {
+            let mut changed = false;
             for (idx, item) in items.iter().enumerate() {
-                if idx > i32::MAX as usize {
+                let Ok(index) = i32::try_from(idx) else {
                     break;
-                }
-                let idx_i32 = idx as i32;
+                };
                 let text = label_fn(item);
-                let selected = idx_i32 == *current_item;
+                let selected = index == *current_item;
                 if ui.selectable_config(&text).selected(selected).build() {
-                    *current_item = idx_i32;
-                    result = true;
+                    *current_item = index;
+                    changed = true;
                 }
             }
-        }
-        result
+            changed
+        })
+        .unwrap_or(false)
+    }
+}
+
+struct ListBoxGuard<'ui>(NativeScopeToken<'ui>);
+
+impl Drop for ListBoxGuard<'_> {
+    fn drop(&mut self) {
+        self.0.finish();
     }
 }

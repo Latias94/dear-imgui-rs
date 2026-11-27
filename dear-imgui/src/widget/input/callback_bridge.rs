@@ -1,4 +1,4 @@
-use super::buffers::{StringInputBuffer, resize_string_input_buffer};
+use super::buffers::{MAX_INPUT_BUFFER_SIZE, StringInputBuffer, resize_string_input_buffer};
 use super::callbacks::{HistoryDirection, InputTextCallbackHandler, TextCallbackData};
 use crate::sys;
 use std::any::Any;
@@ -18,13 +18,13 @@ pub(super) fn with_string_input_buffer<T: InputTextCallbackHandler>(
     build: impl FnOnce(*mut c_char, usize, sys::ImGuiInputTextCallback, *mut c_void) -> bool,
 ) -> bool {
     let mut input = StringInputBuffer::new(target, capacity_hint);
+    let size = input.bytes.len();
+    let ptr = input.bytes.as_mut_ptr().cast();
     let mut state = StringCallbackState {
         buffer: &raw mut input.bytes,
         handler,
         panic: None,
     };
-    let size = input.bytes.len();
-    let ptr = input.bytes.as_mut_ptr().cast();
     let changed = build(
         ptr,
         size,
@@ -52,8 +52,27 @@ unsafe extern "C" fn string_callback_router<T: InputTextCallbackHandler>(
         return 0;
     };
     let event = unsafe { (*data).EventFlag };
-    if event == sys::ImGuiInputTextFlags_CallbackResize as i32 {
-        unsafe { resize_string_input_buffer(&mut *state.buffer, &mut *data) };
+    if event == sys::ImGuiInputTextFlags_CallbackResize {
+        let buffer = unsafe { &mut *state.buffer };
+        let requested = unsafe { (*data).BufSize };
+        let previous_len = buffer.len();
+        let resized = catch_unwind(AssertUnwindSafe(|| {
+            resize_string_input_buffer(buffer, requested);
+        }));
+        unsafe {
+            if buffer.len() != previous_len {
+                (*data).BufDirty = true;
+            }
+            (*data).Buf = buffer.as_mut_ptr().cast();
+            (*data).BufSize = buffer.len().min(MAX_INPUT_BUFFER_SIZE) as i32;
+        }
+        if let Err(payload) = resized {
+            if state.panic.is_none() {
+                state.panic = Some(payload);
+            } else {
+                std::mem::forget(payload);
+            }
+        }
         return 0;
     }
 
@@ -133,13 +152,14 @@ mod tests {
     #[test]
     fn string_callback_router_dispatches_char_filter_and_history() {
         let mut buffer = b"abc\0".to_vec();
+        let ptr = buffer.as_mut_ptr();
         let mut state = StringCallbackState {
             buffer: &raw mut buffer,
             handler: RecordingHandler::default(),
             panic: None,
         };
         let mut data = sys::ImGuiInputTextCallbackData {
-            Buf: buffer.as_mut_ptr().cast(),
+            Buf: ptr.cast(),
             BufTextLen: 3,
             BufSize: 4,
             UserData: (&raw mut state).cast(),
@@ -176,13 +196,14 @@ mod tests {
         }
 
         let mut buffer = b"abc\0".to_vec();
+        let ptr = buffer.as_mut_ptr();
         let mut state = StringCallbackState {
             buffer: &raw mut buffer,
             handler: PanicOnCharacter(0),
             panic: None,
         };
         let mut data = sys::ImGuiInputTextCallbackData {
-            Buf: buffer.as_mut_ptr().cast(),
+            Buf: ptr.cast(),
             BufTextLen: 3,
             BufSize: 4,
             UserData: (&raw mut state).cast(),
@@ -213,5 +234,33 @@ mod tests {
             state.panic.unwrap().downcast_ref::<&str>().copied(),
             Some("character filter panicked")
         );
+    }
+
+    #[test]
+    fn invalid_resize_requests_keep_the_original_buffer() {
+        let mut text = String::from("abc");
+        with_string_input_buffer(
+            &mut text,
+            None,
+            super::super::callbacks::PassthroughCallback,
+            |original, size, callback, userdata| {
+                for requested in [-1, i32::MAX] {
+                    let mut data = sys::ImGuiInputTextCallbackData {
+                        Buf: original,
+                        BufTextLen: 3,
+                        BufSize: requested,
+                        UserData: userdata,
+                        EventFlag: sys::ImGuiInputTextFlags_CallbackResize,
+                        ..Default::default()
+                    };
+                    assert_eq!(unsafe { callback.unwrap()(&mut data) }, 0);
+                    assert_eq!(data.Buf, original);
+                    assert_eq!(data.BufSize, i32::try_from(size).unwrap());
+                    assert!(!data.BufDirty);
+                }
+                false
+            },
+        );
+        assert_eq!(text, "abc");
     }
 }

@@ -2,12 +2,12 @@ use std::ffi::c_char;
 use std::ptr;
 
 use crate::sys;
+use crate::validation::{assert_finite_f32, assert_finite_vec2};
 
 use super::loader::{FontLoader, FontLoaderFlags};
 use super::validation::{
-    RASTERIZER_MULTIPLY_MAX, assert_finite_f32, assert_finite_vec2, assert_non_negative_f32,
-    assert_non_negative_i8, assert_positive_f32, assert_reference_font_size_for_metrics,
-    encode_glyph_ranges, validate_font_size_pixels,
+    RASTERIZER_MULTIPLY_MAX, assert_non_negative_f32, assert_non_negative_i8, assert_positive_f32,
+    assert_reference_font_size_for_metrics, encode_glyph_ranges, validate_font_size_pixels,
 };
 
 /// Font configuration for loading fonts with v1.92+ features

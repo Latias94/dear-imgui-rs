@@ -18,6 +18,18 @@ fn ui_buffer_sanitizes_interior_nul() {
 }
 
 #[test]
+fn scoped_c_strings_sanitize_interior_nul_on_both_paths() {
+    let scratch = ScratchBuffers::default();
+    for prefix in [0, 64] {
+        let label = format!("{}a\0b", "x".repeat(prefix));
+        scratch.with_c_string(&label, |ptr| {
+            let text = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
+            assert_eq!(text, label.replace('\0', "?"));
+        });
+    }
+}
+
+#[test]
 fn ui_buffer_text_range_preserves_bytes_and_appends_readable_nul() {
     let mut buf = UiBuffer::new(1024);
     let range = buf.scratch_txt_range("a\0b#");

@@ -1,6 +1,6 @@
-use super::validation::assert_finite_vec2;
 use crate::Ui;
 use crate::sys;
+use crate::validation::assert_finite_vec2;
 
 fn validate_invisible_button_flags(caller: &str, flags: ButtonFlags) {
     let unsupported = flags.bits() & !ButtonFlags::all().bits();
@@ -74,15 +74,16 @@ impl Default for InvisibleButtonMouseButtons {
     }
 }
 
-impl From<crate::MouseButton> for InvisibleButtonMouseButtons {
-    fn from(button: crate::MouseButton) -> Self {
+impl TryFrom<crate::MouseButton> for InvisibleButtonMouseButtons {
+    type Error = crate::MouseButton;
+
+    /// Returns the unsupported button on failure.
+    fn try_from(button: crate::MouseButton) -> Result<Self, Self::Error> {
         match button {
-            crate::MouseButton::Left => Self::LEFT,
-            crate::MouseButton::Right => Self::RIGHT,
-            crate::MouseButton::Middle => Self::MIDDLE,
-            crate::MouseButton::Extra1 | crate::MouseButton::Extra2 => {
-                panic!("Dear ImGui invisible buttons only support left, right, and middle buttons")
-            }
+            crate::MouseButton::Left => Ok(Self::LEFT),
+            crate::MouseButton::Right => Ok(Self::RIGHT),
+            crate::MouseButton::Middle => Ok(Self::MIDDLE),
+            crate::MouseButton::Extra1 | crate::MouseButton::Extra2 => Err(button),
         }
     }
 }
@@ -112,11 +113,6 @@ impl InvisibleButtonOptions {
         self
     }
 
-    pub fn mouse_button(mut self, button: crate::MouseButton) -> Self {
-        self.mouse_buttons = button.into();
-        self
-    }
-
     /// Returns the raw `ImGuiButtonFlags` bits assembled for `InvisibleButton()`.
     pub fn bits(self) -> i32 {
         self.raw()
@@ -143,12 +139,6 @@ impl From<ButtonFlags> for InvisibleButtonOptions {
 impl From<InvisibleButtonMouseButtons> for InvisibleButtonOptions {
     fn from(buttons: InvisibleButtonMouseButtons) -> Self {
         Self::new().mouse_buttons(buttons)
-    }
-}
-
-impl From<crate::MouseButton> for InvisibleButtonOptions {
-    fn from(button: crate::MouseButton) -> Self {
-        Self::new().mouse_button(button)
     }
 }
 

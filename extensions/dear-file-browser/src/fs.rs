@@ -55,20 +55,12 @@ pub(crate) fn canonical_entry(fs: &dyn FileSystem, path: &Path) -> io::Result<Pa
     Ok(fs.canonicalize(parent)?.join(name))
 }
 
-fn is_link(metadata: &std::fs::Metadata) -> bool {
-    #[cfg(windows)]
-    if windows::is_directory_reparse_point(metadata) {
-        return true;
-    }
-    metadata.file_type().is_symlink()
-}
-
 /// Minimal file metadata used by the in-UI file browser.
 #[derive(Clone, Debug)]
 pub struct FsMetadata {
     /// Whether the path refers to a directory.
     pub is_dir: bool,
-    /// Whether the path itself is a symbolic link or a Windows directory reparse point.
+    /// Whether the path itself is a symbolic link or a Windows name-surrogate reparse point.
     pub is_symlink: bool,
 }
 
@@ -90,7 +82,7 @@ pub struct FsEntry {
     pub path: PathBuf,
     /// Whether this entry is a directory.
     pub is_dir: bool,
-    /// Whether this entry itself is a symbolic link or a Windows directory reparse point.
+    /// Whether this entry itself is a symbolic link or a Windows name-surrogate reparse point.
     pub is_symlink: bool,
     /// File size in bytes (files and file-links only; `None` for directories or when unavailable).
     pub size: Option<u64>,
@@ -108,7 +100,7 @@ impl FsEntry {
                 .into_owned(),
             path,
             is_dir: metadata.is_dir(),
-            is_symlink: is_link(&metadata),
+            is_symlink: metadata.is_symlink(),
             size: metadata.is_file().then_some(metadata.len()),
             modified: metadata.modified().ok(),
         }
@@ -205,7 +197,7 @@ pub trait FileSystem {
             Err(e) => Err(e),
         }
     }
-    /// Remove a file or the link itself, including a Windows directory reparse point.
+    /// Remove a file or the link itself, including a Windows junction.
     fn remove_file(&self, path: &Path) -> std::io::Result<()>;
     /// Remove an empty directory.
     fn remove_dir(&self, path: &Path) -> std::io::Result<()>;
@@ -219,8 +211,10 @@ pub trait FileSystem {
 
 /// Default filesystem implementation using native filesystem operations.
 ///
-/// On Unix, `rename_noreplace` requires native support for an exclusive rename.
-/// It fails if the operation cannot be performed atomically.
+/// On Unix, `rename_noreplace` prefers a native exclusive rename. Where that
+/// is unavailable, regular files can be hard-linked to a vacant destination
+/// and unlinked from the source. This fallback requires a stable source name
+/// and can leave both names on error. Other entry types require native support.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StdFileSystem;
 
@@ -292,7 +286,7 @@ impl FileSystem for StdFileSystem {
         let link_md = std::fs::symlink_metadata(path)?;
         Ok(FsMetadata {
             is_dir: md.is_dir(),
-            is_symlink: is_link(&link_md),
+            is_symlink: link_md.is_symlink(),
         })
     }
 
@@ -328,32 +322,29 @@ impl FileSystem for StdFileSystem {
         std::fs::rename(from, to)
     }
 
-    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+    #[cfg(unix)]
     fn rename_noreplace(&self, from: &Path, to: &Path) -> std::io::Result<()> {
-        use rustix::fs::{CWD, RenameFlags, renameat_with};
-        use rustix::io::Errno;
+        #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+        {
+            use rustix::fs::{CWD, RenameFlags, renameat_with};
+            use rustix::io::Errno;
 
-        renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE).map_err(|error| {
-            let cause = io::Error::from(error);
-            if error == Errno::NOSYS
-                || error == Errno::OPNOTSUPP
-                || cause.kind() == io::ErrorKind::Unsupported
-            {
-                return io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    format!("atomic no-replace rename is unavailable: {cause}"),
-                );
+            match renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE) {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    let cause = io::Error::from(error);
+                    if !matches!(error, Errno::NOSYS | Errno::INVAL | Errno::OPNOTSUPP)
+                        && cause.kind() != io::ErrorKind::Unsupported
+                    {
+                        return Err(cause);
+                    }
+                }
             }
-            // EINVAL can also describe an invalid move. Preserve it and EXDEV,
-            // which is what lets a cross-device cut proceed by copying.
-            cause
-        })
+        }
+        link_unlink_noreplace(from, to)
     }
 
-    #[cfg(all(
-        unix,
-        not(any(target_os = "linux", target_os = "android", target_vendor = "apple"))
-    ))]
+    #[cfg(not(any(unix, windows)))]
     fn rename_noreplace(&self, _from: &Path, _to: &Path) -> std::io::Result<()> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
@@ -368,8 +359,15 @@ impl FileSystem for StdFileSystem {
 
     fn remove_file(&self, path: &Path) -> std::io::Result<()> {
         #[cfg(windows)]
-        if windows::is_directory_reparse_point(&std::fs::symlink_metadata(path)?) {
-            return std::fs::remove_dir(path);
+        {
+            use std::os::windows::fs::FileTypeExt;
+
+            if std::fs::symlink_metadata(path)?
+                .file_type()
+                .is_symlink_dir()
+            {
+                return std::fs::remove_dir(path);
+            }
         }
         std::fs::remove_file(path)
     }
@@ -393,11 +391,100 @@ impl FileSystem for StdFileSystem {
     }
 }
 
+#[cfg(unix)]
+fn link_unlink_noreplace(from: &Path, to: &Path) -> io::Result<()> {
+    use std::fs::{self, Metadata};
+    use std::os::unix::fs::MetadataExt;
+
+    let source = fs::symlink_metadata(from)?;
+    if !source.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "moving non-regular entries requires atomic no-replace rename",
+        ));
+    }
+
+    fs::hard_link(from, to)?;
+    let remove_source = || {
+        let same_file = |metadata: Metadata| {
+            metadata.is_file() && metadata.dev() == source.dev() && metadata.ino() == source.ino()
+        };
+        if !same_file(fs::symlink_metadata(to)?) || !same_file(fs::symlink_metadata(from)?) {
+            return Err(io::Error::other(
+                "source or destination changed during move",
+            ));
+        }
+        fs::remove_file(from)
+    };
+    remove_source().map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "destination {} was linked but source {} could not be removed: {error}",
+                to.display(),
+                from.display()
+            ),
+        )
+    })
+}
+
 #[cfg(all(test, any(unix, windows)))]
 mod tests {
     use super::*;
     use crate::fs_ops::tests::TempDir;
     use std::fs;
+
+    #[cfg(unix)]
+    #[test]
+    fn link_unlink_fallback_preserves_an_occupied_destination_and_moves_to_a_vacant_one() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new();
+        let source = temp.path().join("source");
+        let target = temp.path().join("target");
+        let missing = temp.path().join("missing");
+        fs::write(&source, b"source").unwrap();
+        fs::write(&target, b"target").unwrap();
+
+        assert_eq!(
+            link_unlink_noreplace(&source, &target).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(fs::read(&target).unwrap(), b"target");
+        fs::remove_file(&target).unwrap();
+        symlink(&missing, &target).unwrap();
+        assert_eq!(
+            link_unlink_noreplace(&source, &target).unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(fs::read_link(&target).unwrap(), missing);
+
+        link_unlink_noreplace(&source, &missing).unwrap();
+        assert!(!source.exists());
+        assert_eq!(fs::read(&missing).unwrap(), b"source");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_unlink_fallback_leaves_directories_and_symlinks_untouched() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new();
+        let source = temp.path().join("directory");
+        let link = temp.path().join("link");
+        let target = temp.path().join("target");
+        fs::create_dir(&source).unwrap();
+        symlink(&source, &link).unwrap();
+        for entry in [&source, &link] {
+            assert_eq!(
+                link_unlink_noreplace(entry, &target).unwrap_err().kind(),
+                io::ErrorKind::Unsupported
+            );
+        }
+        assert!(!target.exists());
+        assert!(source.is_dir());
+        assert_eq!(fs::read_link(&link).unwrap(), source);
+    }
 
     #[test]
     fn native_scan_and_strict_enumeration_handle_a_vanished_child() {

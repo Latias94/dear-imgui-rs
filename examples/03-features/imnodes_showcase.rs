@@ -798,7 +798,7 @@ impl AppWindow {
                         ui.child_window("advanced_style_controls")
                             .size([controls_w, avail[1]])
                             .border(true)
-                            .build(&ui, || {
+                            .build(|| {
                                 ui.text("Style Flags");
                                 ui.checkbox("Grid Lines", &mut self.node_options.show_grid);
                                 ui.checkbox("Primary Lines", &mut self.node_options.primary_lines);
@@ -911,7 +911,7 @@ impl AppWindow {
                         ui.child_window("advanced_style_preview")
                             .size([0.0, avail[1]])
                             .border(true)
-                            .build(&ui, || {
+                            .build(|| {
                                 ui.text("Preview");
 
                                 let editor = ui.imnodes_editor(

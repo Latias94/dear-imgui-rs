@@ -492,7 +492,7 @@ mod tests {
                 });
 
                 editor.group_hint(node_a, |_| ());
-                let _ = editor.node_background_draw_list(node_a);
+                let _ = editor.with_node_background_draw_list(node_a, |_| ());
                 let _ = editor.link(link, output_pin, input_pin);
                 let _ = editor.link_pins(link);
                 let _ = editor.node_has_any_links(node_a);
@@ -546,13 +546,18 @@ mod tests {
                 .size([500.0, 350.0], dear_imgui_rs::Condition::Always)
                 .build(|| {
                     ui.with_node_editor(&context, "background", [400.0, 260.0], |frame| {
-                        assert!(frame.node_background_draw_list(node_id).is_none());
+                        assert!(
+                            frame
+                                .with_node_background_draw_list(node_id, |_| ())
+                                .is_none()
+                        );
                         if frame_index == 0 {
                             frame.node(node_id, |_| {
                                 ui.text("Node");
                                 assert!(
                                     catch_unwind(AssertUnwindSafe(|| {
-                                        let _ = frame.node_background_draw_list(node_id);
+                                        let _ =
+                                            frame.with_node_background_draw_list(node_id, |_| ());
                                     }))
                                     .is_err()
                                 );
@@ -563,7 +568,11 @@ mod tests {
                                     .is_err()
                                 );
                             });
-                            assert!(frame.node_background_draw_list(node_id).is_some());
+                            assert!(
+                                frame
+                                    .with_node_background_draw_list(node_id, |_| ())
+                                    .is_some()
+                            );
                         }
                     });
                 });
@@ -622,7 +631,7 @@ mod tests {
                             );
                             assert!(
                                 catch_unwind(AssertUnwindSafe(|| {
-                                    let _ = frame.node_background_draw_list(node_id);
+                                    let _ = frame.with_node_background_draw_list(node_id, |_| ());
                                 }))
                                 .is_err()
                             );
@@ -636,21 +645,17 @@ mod tests {
                                         ._Current
                                 })
                             };
-                            let foreground = {
-                                let _foreground = hint.foreground_draw_list();
-                                channel()
-                            };
-                            let host_draw_list = ui.get_window_draw_list();
-                            assert!(
-                                catch_unwind(AssertUnwindSafe(|| {
-                                    drop(hint.background_draw_list());
-                                }))
-                                .is_err()
-                            );
-                            assert_eq!(channel(), foreground);
-                            drop(host_draw_list);
-                            let _background = hint.background_draw_list();
-                            assert_ne!(channel(), foreground);
+                            let foreground = hint.with_foreground_draw_list(|_| channel());
+                            ui.with_window_draw_list(|_| {
+                                assert!(
+                                    catch_unwind(AssertUnwindSafe(|| {
+                                        hint.with_background_draw_list(|_| ());
+                                    }))
+                                    .is_err()
+                                );
+                                assert_eq!(channel(), foreground);
+                            });
+                            hint.with_background_draw_list(|_| assert_ne!(channel(), foreground));
                         })
                         .expect("zoomed-out group has a hint");
 

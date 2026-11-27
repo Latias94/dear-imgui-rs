@@ -2,7 +2,7 @@
 //!
 //! Collection of common Dear ImGui widgets exposed with an idiomatic Rust
 //! API. Most widgets follow a small builder pattern for configuration, and
-//! also provide convenience methods on [`Ui`].
+//! also provide convenience methods on [`crate::Ui`].
 //!
 //! Examples:
 //! ```no_run
@@ -23,7 +23,7 @@
 //!
 //! Submodules group related widgets: `button`, `color`, `combo`, `drag`,
 //! `image`, `input`, `list_box`, `menu`, `misc`, `plot`, `popup`, `progress`,
-//! `selectable`, `slider`, `tab`, `table`, `text`, `tooltip`, `tree`.
+//! `selectable`, `slider`, `tab`, `table`, `tooltip`, `tree`.
 //!
 
 pub mod button;
@@ -43,33 +43,57 @@ pub mod selectable;
 pub mod slider;
 pub mod tab;
 pub mod table;
-pub mod text;
+mod text;
 pub mod tooltip;
 pub mod tree;
 
-// Re-export important types
-pub use popup::{PopupContextFlags, PopupOpenFlags, PopupQueryFlags};
-pub use table::{TableBgTarget, TableBuilder, TableColumnSetup, TableColumnUserData};
-
-// Widget implementations
-pub use self::button::*;
-pub use self::color::*;
-pub use self::combo::*;
-pub use self::drag::*;
-pub use self::image::*;
-pub use self::input::*;
-pub use self::list_box::*;
-pub use self::menu::*;
-pub use self::misc::*;
-pub use self::multi_select::*;
-pub use self::plot::*;
-pub use self::popup::*;
-pub use self::progress::*;
-pub use self::selectable::*;
-pub use self::slider::*;
-pub use self::tab::*;
-pub use self::table::*;
-pub use self::tooltip::*;
-pub use self::tree::*;
-
-// ButtonFlags is defined in misc.rs and re-exported
+pub use self::button::Button;
+pub use self::color::{
+    ColorButton, ColorButtonFlags, ColorButtonOptions, ColorDataType, ColorDisplayMode, ColorEdit3,
+    ColorEdit4, ColorEditFlags, ColorEditOptions, ColorInputMode, ColorPicker3, ColorPicker4,
+    ColorPickerDisplayFlags, ColorPickerFlags, ColorPickerMode, ColorPickerOptions,
+};
+pub use self::combo::{
+    ComboBox, ComboBoxFlags, ComboBoxHeight, ComboBoxOptions, ComboBoxPreviewMode, ComboBoxToken,
+};
+pub use self::drag::{Drag, DragFlags, DragRange};
+pub use self::image::{Image, ImageButton};
+pub use self::input::{
+    HistoryDirection, InputDouble, InputFloat, InputFloat2, InputFloat3, InputFloat4, InputInt,
+    InputInt2, InputInt3, InputInt4, InputScalar, InputScalarN, InputText, InputTextCallback,
+    InputTextCallbackHandler, InputTextMultiline, InputTextMultilineWithCb, PassthroughCallback,
+    TextCallbackData,
+};
+pub use self::list_box::ListBox;
+pub use self::menu::{MainMenuBarToken, MenuBarToken, MenuToken};
+pub use self::misc::{
+    ButtonFlags, ButtonRepeatToken, DisabledToken, InvisibleButtonMouseButtons,
+    InvisibleButtonOptions,
+};
+pub use self::multi_select::{
+    BasicSelection, BasicSelectionIter, KeySetSelection, MultiSelectBoxSelect,
+    MultiSelectClickPolicy, MultiSelectFlags, MultiSelectIndexStorage, MultiSelectOptions,
+    MultiSelectRangeDirection, MultiSelectRequest, MultiSelectResult, MultiSelectScope,
+    MultiSelectScopeKind, MultiSelectUserData,
+};
+pub use self::plot::{PlotHistogram, PlotLines, PlotValueOffset};
+pub use self::popup::{
+    ModalPopup, ModalPopupToken, PopupContextFlags, PopupContextMouseButton, PopupContextOptions,
+    PopupOpenFlags, PopupQueryFlags, PopupToken,
+};
+pub use self::progress::ProgressBar;
+pub use self::selectable::{Selectable, SelectableFlags};
+pub use self::slider::{AngleSlider, Slider, SliderFlags, VerticalSlider};
+pub use self::tab::{
+    TabBar, TabBarFittingPolicy, TabBarFlags, TabBarOptions, TabBarToken, TabItem, TabItemFlags,
+    TabItemOptions, TabItemPlacement, TabItemToken,
+};
+pub use self::table::{
+    ColumnBuilder, SortDirection, TableBgTarget, TableBuilder, TableColumnFlags, TableColumnIndent,
+    TableColumnIndex, TableColumnRef, TableColumnSetup, TableColumnSortSpec, TableColumnStateFlags,
+    TableColumnUserData, TableColumnWidth, TableContextMenuTarget, TableFlags, TableHeaderData,
+    TableHoveredColumn, TableHoveredRow, TableOptions, TableRowFlags, TableRowIndex,
+    TableSizingPolicy, TableSortSpecs, TableToken,
+};
+pub use self::tooltip::TooltipToken;
+pub use self::tree::{TreeNode, TreeNodeFlags, TreeNodeId, TreeNodeToken};

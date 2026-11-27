@@ -9,11 +9,12 @@
 //! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
 //! # let ui = ctx.frame();
-//! let dl = ui.get_window_draw_list();
-//! dl.add_line([10.0, 10.0], [100.0, 100.0], [1.0, 1.0, 1.0, 1.0])
-//!     .thickness(2.0)
-//!     .build();
-//! dl.add_text([12.0, 12.0], [1.0, 0.8, 0.2, 1.0], "Hello DrawList");
+//! ui.with_window_draw_list(|dl| {
+//!     dl.add_line([10.0, 10.0], [100.0, 100.0], [1.0, 1.0, 1.0, 1.0])
+//!         .thickness(2.0)
+//!         .build();
+//!     dl.add_text([12.0, 12.0], [1.0, 0.8, 0.2, 1.0], "Hello DrawList");
+//! });
 //! ```
 //!
 //! The old public text pixel-snap token and push method were removed. The closure scope is the
@@ -44,12 +45,8 @@ mod list;
 mod primitives;
 mod util;
 
-#[allow(unused_imports)]
 pub use channels::ChannelsSplit;
 pub use color::ImColor32;
 pub use counts::{DrawFlags, DrawNgonSegmentCount, DrawSegmentCount};
-#[allow(unused_imports)]
-pub use list::DrawListClipRectToken;
-pub use list::{DrawListMut, DrawListTextureToken, RawDrawCallback};
-#[allow(unused_imports)]
+pub use list::{DrawListClipRectToken, DrawListMut, DrawListTextureToken, RawDrawCallback};
 pub use primitives::{BezierCurve, Circle, Line, Polyline, Rect, Triangle};

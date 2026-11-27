@@ -1299,35 +1299,34 @@ fn demo_custom_rendering(ui: &Ui, plot_ui: &Plot3DUi) {
             // Draw the helix
             Line3D::f32("Helix", &xs, &ys, &zs).plot(plot);
 
-            // Custom rendering: highlight start and end points
-            let draw_list = plot.plot_draw_list();
-
             // Convert 3D points to 2D screen coordinates
             let start_pixel = plot.plot_to_pixels([xs[0], ys[0], zs[0]]);
             let end_pixel = plot.plot_to_pixels([xs[99], ys[99], zs[99]]);
 
-            // Draw circles at start and end
-            draw_list
-                .add_circle([start_pixel[0], start_pixel[1]], 10.0, [0.0, 1.0, 0.0, 1.0])
-                .filled(true)
-                .build();
+            plot.with_plot_draw_list(|draw_list| {
+                // Draw circles at start and end
+                draw_list
+                    .add_circle([start_pixel[0], start_pixel[1]], 10.0, [0.0, 1.0, 0.0, 1.0])
+                    .filled(true)
+                    .build();
 
-            draw_list
-                .add_circle([end_pixel[0], end_pixel[1]], 10.0, [1.0, 0.0, 0.0, 1.0])
-                .filled(true)
-                .build();
+                draw_list
+                    .add_circle([end_pixel[0], end_pixel[1]], 10.0, [1.0, 0.0, 0.0, 1.0])
+                    .filled(true)
+                    .build();
 
-            // Add text labels
-            draw_list.add_text(
-                [start_pixel[0] + 15.0, start_pixel[1]],
-                [0.0, 1.0, 0.0, 1.0],
-                "Start",
-            );
-            draw_list.add_text(
-                [end_pixel[0] + 15.0, end_pixel[1]],
-                [1.0, 0.0, 0.0, 1.0],
-                "End",
-            );
+                // Add text labels
+                draw_list.add_text(
+                    [start_pixel[0] + 15.0, start_pixel[1]],
+                    [0.0, 1.0, 0.0, 1.0],
+                    "Start",
+                );
+                draw_list.add_text(
+                    [end_pixel[0] + 15.0, end_pixel[1]],
+                    [1.0, 0.0, 0.0, 1.0],
+                    "End",
+                );
+            });
         },
     );
 }

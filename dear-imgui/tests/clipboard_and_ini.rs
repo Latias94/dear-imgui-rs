@@ -57,7 +57,7 @@ fn moving_a_context_preserves_published_strings_and_clipboard() {
     let _guard = test_guard();
     let mut contexts = Vec::with_capacity(1);
     contexts.push(configured_context());
-    let mut moved = Box::new(contexts.pop().unwrap());
+    let moved = Box::new(contexts.pop().unwrap());
     let read_native = |context: &imgui::Context| {
         let io = unsafe { imgui::sys::igGetIO_ContextPtr(context.as_raw()) };
         [
@@ -77,7 +77,7 @@ fn moving_a_context_preserves_published_strings_and_clipboard() {
     assert_eq!(read_native(&moved_again), published);
     moved_again.set_clipboard_text("updated");
     assert_eq!(moved_again.clipboard_text().as_deref(), Some("updated"));
-    moved = Box::new(moved_again);
+    let moved = Box::new(moved_again);
     assert_eq!(read_native(&moved), published);
 }
 

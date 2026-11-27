@@ -350,13 +350,13 @@ fn parse_flag(name: &str, value: Option<&str>) -> Result<bool, String> {
     }
 }
 
-fn explicit_cache_root(root: &Path, source: &str) -> PathBuf {
+pub(super) fn explicit_cache_root(root: &Path, source: &str) -> PathBuf {
     let hash = source
         .bytes()
         .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
             (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
         });
-    root.join(format!("explicit-{hash:016x}"))
+    root.join(format!("x-{hash:016x}"))
 }
 
 /// Diagnose an extraction root without silently changing the user's explicit selection.
@@ -387,10 +387,9 @@ mod tests {
 
     #[test]
     fn auto_is_source_capable_without_a_download_opt_in() {
-        assert_eq!(
-            options().resolve("IMGUI_SYS").unwrap().mode,
-            NativeBuildMode::Auto
-        );
+        let plan = options().resolve("IMGUI_SYS").unwrap();
+        assert_eq!(plan.mode(), NativeBuildMode::Auto);
+        assert!(!plan.finish_prebuilt_lookup(false).unwrap());
     }
 
     #[test]

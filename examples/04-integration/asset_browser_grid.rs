@@ -408,7 +408,7 @@ impl AppWindow {
                     .input_text("Filter", &mut self.browser.filter)
                     .hint("substring...")
                     .build();
-                ui.slider("Thumb Size", 64.0, 256.0, &mut self.browser.thumb_size);
+                ui.slider("Thumb Size", &mut self.browser.thumb_size, 64.0, 256.0);
 
                 ui.separator();
                 let avail = ui.content_region_avail();
@@ -417,7 +417,7 @@ impl AppWindow {
                 let cols = (avail[0] / cell_w).max(1.0).floor() as i32;
                 let mut cur_col = 0i32;
 
-                ui.child_window("grid").size([0.0, 0.0]).build(&ui, || {
+                ui.child_window("grid").size([0.0, 0.0]).build(|| {
                     let filter = self.browser.filter.to_lowercase();
                     for (i, it) in self.browser.assets.iter().enumerate() {
                         let name = it.path.file_name().and_then(|s| s.to_str()).unwrap_or("?");

@@ -601,10 +601,10 @@ impl ManagedTextureRegistry {
                     unsafe {
                         texture.set_status(TextureStatus::Destroyed);
                     }
-                    if let SnapshotTextureId::User(id) = key.texture {
-                        if let TextureSlot::Retiring(entry) = &mut self.slots[id.slot() as usize] {
-                            entry.destroy_ack_epoch = Some(epoch);
-                        }
+                    if let SnapshotTextureId::User(id) = key.texture
+                        && let TextureSlot::Retiring(entry) = &mut self.slots[id.slot() as usize]
+                    {
+                        entry.destroy_ack_epoch = Some(epoch);
                     }
                     self.sync.forget(key.texture);
                 }

@@ -67,17 +67,10 @@ impl Color {
         )
     }
 
-    /// Pack to ImGui ImU32 ABGR order `(A<<24)|(B<<16)|(G<<8)|R`.
+    /// Clamp and round the channels to the nearest byte, packed in ImGui's ABGR order.
     #[doc(alias = "ColorConvertFloat4ToU32")]
     pub fn to_imgui_u32(self) -> u32 {
-        unsafe {
-            sys::igColorConvertFloat4ToU32(sys::ImVec4_c {
-                x: self.r,
-                y: self.g,
-                z: self.b,
-                w: self.a,
-            })
-        }
+        crate::draw::ImColor32::from(self).to_bits()
     }
     pub fn to_array(self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]
@@ -127,6 +120,7 @@ impl Color {
         Self::rgb(r, g, b)
     }
 
+    /// Convert RGB to HSV with hue in degrees in `[0, 360)`.
     pub fn to_hsv(self) -> (f32, f32, f32) {
         let max = self.r.max(self.g).max(self.b);
         let min = self.r.min(self.g).min(self.b);
@@ -134,7 +128,7 @@ impl Color {
         let h = if delta == 0.0 {
             0.0
         } else if max == self.r {
-            60.0 * (((self.g - self.b) / delta) % 6.0)
+            60.0 * ((self.g - self.b) / delta).rem_euclid(6.0)
         } else if max == self.g {
             60.0 * (((self.b - self.r) / delta) + 2.0)
         } else {
@@ -142,10 +136,12 @@ impl Color {
         };
         let s = if max == 0.0 { 0.0 } else { delta / max };
         let v = max;
-        (h, s, v)
+        (if h == 360.0 { 0.0 } else { h }, s, v)
     }
+
+    /// Convert HSV to RGB, wrapping hue in degrees around the color wheel.
     pub fn from_hsv(h: f32, s: f32, v: f32) -> Self {
-        let h = h % 360.0;
+        let h = h.rem_euclid(360.0);
         let c = v * s;
         let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
         let m = v - c;
@@ -186,6 +182,22 @@ impl From<(f32, f32, f32, f32)> for Color {
         Self::new(r, g, b, a)
     }
 }
+impl From<sys::ImVec4> for Color {
+    fn from(value: sys::ImVec4) -> Self {
+        Self::from_array(value.into())
+    }
+}
+impl From<mint::Vector4<f32>> for Color {
+    fn from(value: mint::Vector4<f32>) -> Self {
+        Self::from_array(value.into())
+    }
+}
+#[cfg(feature = "glam")]
+impl From<glam::Vec4> for Color {
+    fn from(value: glam::Vec4) -> Self {
+        Self::from_array(value.to_array())
+    }
+}
 impl From<Color> for (f32, f32, f32, f32) {
     fn from(color: Color) -> Self {
         (color.r, color.g, color.b, color.a)
@@ -213,4 +225,37 @@ impl Color {
     pub const YELLOW: Color = Color::new(1.0, 1.0, 0.0, 1.0);
     pub const CYAN: Color = Color::new(0.0, 1.0, 1.0, 1.0);
     pub const MAGENTA: Color = Color::new(1.0, 0.0, 1.0, 1.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Color;
+    use crate::draw::ImColor32;
+
+    #[test]
+    fn hsv_degrees_wrap_on_both_sides_of_red() {
+        for (color, expected_hue) in [
+            (Color::RED, 0.0),
+            (Color::YELLOW, 60.0),
+            (Color::GREEN, 120.0),
+            (Color::CYAN, 180.0),
+            (Color::BLUE, 240.0),
+            (Color::MAGENTA, 300.0),
+            (Color::rgb(1.0, 0.0, 0.5), 330.0),
+        ] {
+            let (hue, saturation, value) = color.to_hsv();
+            assert_eq!(hue, expected_hue);
+            assert_eq!(Color::from_hsv(hue, saturation, value), color);
+        }
+        assert_eq!(Color::from_hsv(-60.0, 1.0, 1.0), Color::MAGENTA);
+        assert_eq!(Color::from_hsv(360.0, 1.0, 1.0), Color::RED);
+        assert!((0.0..360.0).contains(&Color::rgb(1.0, 0.0, f32::EPSILON / 2.0).to_hsv().0));
+    }
+
+    #[test]
+    fn float_colors_pack_to_abgr_with_the_same_rounding() {
+        let color = Color::new(0.5, -0.25, 1.25, 0.5);
+        assert_eq!(color.to_imgui_u32(), 0x80_FF_00_80);
+        assert_eq!(ImColor32::from(color).to_bits(), 0x80_FF_00_80);
+    }
 }

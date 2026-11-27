@@ -612,6 +612,10 @@ impl RawBoundContextGuard {
             }
         }
     }
+
+    pub(super) fn keep_current(mut self) {
+        self.restore = false;
+    }
 }
 
 impl Drop for RawBoundContextGuard {

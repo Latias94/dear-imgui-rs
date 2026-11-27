@@ -68,10 +68,11 @@ impl<'ui> DrawListMut<'ui> {
     /// ```no_run
     /// # use dear_imgui_rs::*;
     /// # fn demo(ui: &Ui) {
-    /// let dl = ui.get_window_draw_list();
-    /// let tex = texture::TextureId::new(1);
-    /// let _texture = dl.push_texture(tex);
-    /// dl.add_image(tex, [10.0,10.0], [110.0,110.0], [0.0,0.0], [1.0,1.0], Color::WHITE);
+    /// ui.with_window_draw_list(|dl| {
+    ///     let tex = texture::TextureId::new(1);
+    ///     let _texture = dl.push_texture(tex);
+    ///     dl.add_image(tex, [10.0,10.0], [110.0,110.0], [0.0,0.0], [1.0,1.0], Color::WHITE);
+    /// });
     /// # }
     /// ```
     #[doc(alias = "PushTexture")]
@@ -80,17 +81,16 @@ impl<'ui> DrawListMut<'ui> {
         texture: impl Into<crate::texture::TextureRef<'tex>>,
     ) -> DrawListTextureToken<'_, 'tex> {
         let texture = texture.into();
-        self.assert_scope("DrawListMut::push_texture()");
-        self.ui().run_with_bound_context(|| {
+        self.with_raw_bound("DrawListMut::push_texture()", |draw_list| {
             let tex_ref = self
                 .ui()
                 .resolve_texture_ref(texture)
                 .unwrap_or_else(|error| {
                     panic!("DrawListMut::push_texture() rejected texture: {error}")
                 });
-            unsafe { sys::ImDrawList_PushTexture(self.draw_list, tex_ref) };
-        });
-        DrawListTextureToken::new(self.ui(), self.draw_list, self.is_window_scoped())
+            unsafe { sys::ImDrawList_PushTexture(draw_list, tex_ref) };
+            DrawListTextureToken::new(self.ui(), draw_list, self.is_window_scoped())
+        })
     }
 
     /// Push a texture, run `f`, then pop the texture.

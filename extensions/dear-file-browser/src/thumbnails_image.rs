@@ -1,5 +1,6 @@
-use std::fs::{self, File};
-use std::io::{Cursor, Read};
+use std::fs::File;
+use std::io::{self, Cursor, Read};
+use std::path::Path;
 
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageDecoder, ImageReader, Limits};
@@ -53,6 +54,25 @@ impl ImageThumbnailProvider {
     }
 }
 
+fn open_thumbnail(path: &Path) -> io::Result<File> {
+    #[cfg(unix)]
+    {
+        use rustix::fs::{Mode, OFlags, open};
+
+        let flags = OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC;
+        Ok(File::from(open(path, flags, Mode::empty())?))
+    }
+    #[cfg(not(unix))]
+    File::open(path)
+}
+
+fn rgba8_fits_decode_budget(width: u32, height: u32) -> bool {
+    let pixels = u64::from(width) * u64::from(height);
+    pixels
+        .checked_mul(4)
+        .is_some_and(|bytes| bytes <= MAX_DECODE_BYTES)
+}
+
 impl ThumbnailProvider for ImageThumbnailProvider {
     fn decode(&mut self, req: &ThumbnailRequest) -> Result<DecodedRgbaImage, String> {
         let path = &req.path;
@@ -66,8 +86,10 @@ impl ThumbnailProvider for ImageThumbnailProvider {
                 path.display()
             ));
         }
-        let metadata =
-            fs::metadata(path).map_err(|e| format!("inspect {}: {e}", path.display()))?;
+        let file = open_thumbnail(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+        let metadata = file
+            .metadata()
+            .map_err(|e| format!("inspect {}: {e}", path.display()))?;
         if !metadata.is_file() {
             return Err(format!("expected a regular file: {}", path.display()));
         }
@@ -82,9 +104,8 @@ impl ThumbnailProvider for ImageThumbnailProvider {
             return Err(too_large());
         }
 
-        let file = File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
         let mut bytes = Vec::new();
-        // Bound the read even if the file grows or is replaced after the metadata lookup.
+        // Bound the read even if the opened file grows after the metadata lookup.
         file.take(self.max_bytes.saturating_add(1))
             .read_to_end(&mut bytes)
             .map_err(|e| format!("read {}: {e}", path.display()))?;
@@ -104,9 +125,7 @@ impl ThumbnailProvider for ImageThumbnailProvider {
             .into_decoder()
             .map_err(|e| format!("decode {}: {e}", path.display()))?;
         let (width, height) = decoder.dimensions();
-        if decoder.total_bytes() > MAX_DECODE_BYTES
-            || u64::from(width) * u64::from(height) * 4 > MAX_DECODE_BYTES
-        {
+        if decoder.total_bytes() > MAX_DECODE_BYTES || !rgba8_fits_decode_budget(width, height) {
             return Err(format!(
                 "decoded thumbnail exceeds {MAX_DECODE_BYTES} bytes: {}",
                 path.display()
@@ -134,6 +153,7 @@ impl ThumbnailProvider for ImageThumbnailProvider {
 mod tests {
     use super::*;
     use crate::fs_ops::tests::TempDir;
+    use std::fs;
 
     #[test]
     fn decodes_and_downscales_png() {
@@ -188,5 +208,35 @@ mod tests {
             .decode(&ThumbnailRequest::new(path, [8, 8]))
             .unwrap_err();
         assert!(error.starts_with("thumbnail input exceeds 33554432 bytes"));
+    }
+
+    #[test]
+    fn rejects_rgba_sizes_over_the_budget_including_overflow() {
+        assert!(rgba8_fits_decode_budget(8_192, 4_096));
+        assert!(!rgba8_fits_decode_budget(8_192, 4_097));
+        assert!(!rgba8_fits_decode_budget(u32::MAX, u32::MAX));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn rejects_fifo_without_waiting_for_a_writer() {
+        use rustix::fs::{CWD, Mode, mkfifoat};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let temp = TempDir::new();
+        let path = temp.path().join("pipe.png");
+        mkfifoat(CWD, &path, Mode::RUSR | Mode::WUSR).unwrap();
+        let (finished, result) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = finished.send(
+                ImageThumbnailProvider::default().decode(&ThumbnailRequest::new(path, [8, 8])),
+            );
+        });
+        let error = result
+            .recv_timeout(Duration::from_secs(5))
+            .expect("thumbnail decoder blocked opening a FIFO")
+            .unwrap_err();
+        assert!(error.starts_with("expected a regular file"));
     }
 }

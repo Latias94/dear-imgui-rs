@@ -21,7 +21,7 @@ impl StandardSampler {
 
 impl DrawListMut<'_> {
     fn set_standard_sampler(&self, sampler: StandardSampler) {
-        self.ui().run_with_bound_context(|| {
+        self.with_raw_bound("DrawListMut::set_standard_sampler()", |draw_list| {
             let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
             assert!(
                 !platform_io.is_null(),
@@ -44,7 +44,7 @@ impl DrawListMut<'_> {
 
             unsafe {
                 sys::ImDrawList_AddCallback(
-                    self.draw_list,
+                    draw_list,
                     Some(callback),
                     std::ptr::null_mut(),
                     0,

@@ -52,7 +52,7 @@ impl NativeWindowScope<'_> {
     ///
     /// Panics if called from a different window or table cell, or during scope order recovery.
     pub fn run<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.ui.run_with_bound_context(|| {
+        self.ui.with_bound_context(|| {
             assert!(
                 self.is_current_bound(),
                 "native extension requires its own window scope and table cell"
@@ -83,7 +83,7 @@ impl Ui {
     ///
     /// Panics without a current window, between table cells, or during scope order recovery.
     pub fn with_native_window_scope<R>(&self, f: impl FnOnce(&NativeWindowScope<'_>) -> R) -> R {
-        self.run_with_bound_context(|| {
+        self.with_bound_context(|| {
             let host = self.current_native_scope();
             assert!(
                 host.window.is_some(),
@@ -161,29 +161,30 @@ impl<'ui> WindowBoundaryGuard<'ui> {
 impl Drop for WindowBoundaryGuard<'_> {
     fn drop(&mut self) {
         let ui = self.0;
-        // Both constructors keep the Ui's context bound until this guard has dropped.
-        {
-            let mut tracker = ui.native_scopes.borrow_mut();
-            let first = tracker
-                .window_boundaries
-                .last()
-                .expect("active native window scope")
-                .first_id;
-            tracker.abandon_since(first);
-            tracker.refresh_pending_recovery();
-        }
-        ui.finish_abandoned_native_scopes();
-        {
-            let mut tracker = ui.native_scopes.borrow_mut();
-            tracker
-                .window_boundaries
-                .pop()
-                .expect("active native window scope");
-            tracker.refresh_pending_recovery();
-        }
-        // The native extension has finished its work at this depth. Restore the clipper
-        // temporary stack before releasing any enclosing window or table that was deferred.
-        unsafe { crate::list_clipper::drain_finished_clippers(ui) };
-        ui.finish_abandoned_native_scopes();
+        ui.with_live_context(|| {
+            {
+                let mut tracker = ui.native_scopes.borrow_mut();
+                let first = tracker
+                    .window_boundaries
+                    .last()
+                    .expect("active native window scope")
+                    .first_id;
+                tracker.abandon_since(first);
+                tracker.refresh_pending_recovery();
+            }
+            ui.finish_abandoned_native_scopes();
+            {
+                let mut tracker = ui.native_scopes.borrow_mut();
+                tracker
+                    .window_boundaries
+                    .pop()
+                    .expect("active native window scope");
+                tracker.refresh_pending_recovery();
+            }
+            // The native extension has finished its work at this depth. Restore the clipper
+            // temporary stack before releasing any enclosing window or table that was deferred.
+            unsafe { crate::list_clipper::drain_finished_clippers(ui) };
+            ui.finish_abandoned_native_scopes();
+        });
     }
 }

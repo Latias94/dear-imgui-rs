@@ -1,9 +1,5 @@
 use super::*;
-
-enum CallbackDispatch<R> {
-    Completed(R),
-    Rejected,
-}
+use dear_imgui_rs::ffi::guard_native_callback;
 
 pub(in super::super) fn run_callback<R>(
     name: &'static str,
@@ -19,34 +15,36 @@ fn run_callback_with_failure<R>(
     failure: impl FnOnce(),
     callback: impl FnOnce(&Rc<RuntimeControl>) -> R,
 ) -> R {
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        with_current_runtime(|control| {
-            let authorized_destroy =
-                name == "Platform_DestroyWindow" && control.teardown_callbacks_active();
-            if !authorized_destroy {
-                let contract = control
-                    .platform_control()
-                    .and_then(|platform| platform.validate_complete_contract_in_current_context());
-                if let Err(error) = contract {
-                    control.record_terminal_fault(error);
-                    return CallbackDispatch::Rejected;
+    let result = guard_native_callback(
+        None,
+        || {
+            with_current_runtime(|control| {
+                let authorized_destroy =
+                    name == "Platform_DestroyWindow" && control.teardown_callbacks_active();
+                if !authorized_destroy {
+                    let contract = control.platform_control().and_then(|platform| {
+                        platform.validate_complete_contract_in_current_context()
+                    });
+                    if let Err(error) = contract {
+                        control.record_terminal_fault(error);
+                        return None;
+                    }
                 }
-            }
-            CallbackDispatch::Completed(callback(control))
-        })
-    }));
-    match result {
-        Ok(Some(CallbackDispatch::Completed(value))) => value,
-        Ok(Some(CallbackDispatch::Rejected)) | Ok(None) => {
-            failure();
-            fallback
-        }
-        Err(_) => {
+                Some(callback(control))
+            })
+            .flatten()
+        },
+        || {
             let _ = with_current_runtime(|control| {
                 control
                     .record_terminal_fault(WinitPlatformError::CallbackPanicked { callback: name });
             });
-            failure();
+        },
+    );
+    match result {
+        Some(value) => value,
+        None => {
+            guard_native_callback((), failure, || {});
             fallback
         }
     }

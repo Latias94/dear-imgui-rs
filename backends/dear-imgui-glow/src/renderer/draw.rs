@@ -14,7 +14,7 @@ use crate::{
     error::{RenderError, RenderResult},
     state::{
         FramebufferSrgbScope, GlStateGuard, GlowRenderStateStorage, GlowSamplerStrategy,
-        map_renderer_render_state_error,
+        map_renderer_render_state_error, supports_program_pipeline,
     },
     texture::TextureRegistry,
 };
@@ -615,6 +615,12 @@ impl GlowRenderer {
                 [(r + l) / (l - r), (t + b) / (b - t), 0.0, 1.0],
             ];
 
+            if let Some(bind) = self
+                .bind_program_pipeline
+                .filter(|_| supports_program_pipeline(gl))
+            {
+                bind(0);
+            }
             gl.use_program(self.shaders.program);
             if let Some(location) = self.shaders.attrib_location_tex.as_ref() {
                 gl.uniform_1_i32(Some(location), 0);

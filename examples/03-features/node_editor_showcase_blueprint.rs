@@ -270,43 +270,42 @@ impl<'ui, 'frame> BlueprintNodeBuilder<'ui, 'frame> {
             self.header_color[2],
             alpha,
         ];
-        let Some(draw_list) = self.editor.node_background_draw_list(self.current_node_id) else {
-            return;
-        };
-
-        draw_list.add_image_rounded(
-            header_texture,
-            [
-                self.header_min[0] - (8.0 - half_border_width),
-                self.header_min[1] - (4.0 - half_border_width),
-            ],
-            [
-                self.header_max[0] + (8.0 - half_border_width),
-                self.header_max[1],
-            ],
-            [0.0, 0.0],
-            uv,
-            header_color,
-            node_style.node_rounding,
-            DrawFlags::ROUND_TOP,
-        );
-
-        if self.content_min[1] > self.header_max[1] {
-            draw_list
-                .add_line(
+        self.editor
+            .with_node_background_draw_list(self.current_node_id, |draw_list| {
+                draw_list.add_image_rounded(
+                    header_texture,
                     [
                         self.header_min[0] - (8.0 - half_border_width),
-                        self.header_max[1] - 0.5,
+                        self.header_min[1] - (4.0 - half_border_width),
                     ],
                     [
                         self.header_max[0] + (8.0 - half_border_width),
-                        self.header_max[1] - 0.5,
+                        self.header_max[1],
                     ],
-                    [1.0, 1.0, 1.0, alpha * 32.0 / 255.0],
-                )
-                .thickness(1.0)
-                .build();
-        }
+                    [0.0, 0.0],
+                    uv,
+                    header_color,
+                    node_style.node_rounding,
+                    DrawFlags::ROUND_TOP,
+                );
+
+                if self.content_min[1] > self.header_max[1] {
+                    draw_list
+                        .add_line(
+                            [
+                                self.header_min[0] - (8.0 - half_border_width),
+                                self.header_max[1] - 0.5,
+                            ],
+                            [
+                                self.header_max[0] + (8.0 - half_border_width),
+                                self.header_max[1] - 0.5,
+                            ],
+                            [1.0, 1.0, 1.0, alpha * 32.0 / 255.0],
+                        )
+                        .thickness(1.0)
+                        .build();
+                }
+            });
     }
 }
 
@@ -329,16 +328,17 @@ pub fn icon(
 ) {
     if ui.is_rect_visible_with_size(size) {
         let cursor_pos = ui.cursor_screen_pos();
-        let draw_list = ui.get_window_draw_list();
-        draw_icon(
-            &draw_list,
-            cursor_pos,
-            [cursor_pos[0] + size[0], cursor_pos[1] + size[1]],
-            icon_type,
-            filled,
-            color,
-            inner_color,
-        );
+        ui.with_window_draw_list(|draw_list| {
+            draw_icon(
+                draw_list,
+                cursor_pos,
+                [cursor_pos[0] + size[0], cursor_pos[1] + size[1]],
+                icon_type,
+                filled,
+                color,
+                inner_color,
+            );
+        });
     }
 
     ui.dummy(size);

@@ -71,7 +71,7 @@ fn main() -> Result<(), RunError> {
                                 .speed(0.1)
                                 .try_display_format("%.2f")
                                 .expect("static numeric format is valid")
-                                .build(ui, &mut properties.speed);
+                                .build(&mut properties.speed);
                         });
                         property_row(ui, "Size", || {
                             ui.input_float2("##size", &mut properties.size).build();

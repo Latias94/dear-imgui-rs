@@ -1,20 +1,22 @@
 use crate::ui::Ui;
 
-use super::{TabBarFittingPolicy, TabBarFlags, TabBarOptions, TabBarToken};
+use super::{TabBarFittingPolicy, TabBarFlags, TabBarOptions};
 
 /// Builder for a tab bar
 #[derive(Debug)]
 #[must_use]
-pub struct TabBar<T> {
+pub struct TabBar<'ui, T> {
+    ui: &'ui Ui,
     id: T,
     options: TabBarOptions,
 }
 
-impl<T: AsRef<str>> TabBar<T> {
+impl<'ui, T: AsRef<str>> TabBar<'ui, T> {
     /// Creates a new tab bar builder
     #[doc(alias = "BeginTabBar")]
-    pub fn new(id: T) -> Self {
+    pub fn new(ui: &'ui Ui, id: T) -> Self {
         Self {
+            ui,
             id,
             options: TabBarOptions::new(),
         }
@@ -46,19 +48,14 @@ impl<T: AsRef<str>> TabBar<T> {
         self
     }
 
-    /// Begins the tab bar and returns a token if successful
-    pub fn begin(self, ui: &Ui) -> Option<TabBarToken<'_>> {
-        ui.tab_bar_with_flags(self.id, self.options)
-    }
-
     /// Creates a tab bar and runs a closure to construct the contents.
     /// Returns the result of the closure, if it is called.
     ///
     /// Note: the closure is not called if no tabbar content is visible
-    pub fn build<R, F: FnOnce() -> R>(self, ui: &Ui, f: F) -> Option<R> {
-        let token = self.begin(ui)?;
-        let result = f();
-        drop(token);
-        Some(result)
+    pub fn build<R>(self, f: impl FnOnce() -> R) -> Option<R> {
+        self.ui.with_bound_context(|| {
+            let _token = self.ui.tab_bar_with_flags(self.id, self.options)?;
+            Some(f())
+        })
     }
 }

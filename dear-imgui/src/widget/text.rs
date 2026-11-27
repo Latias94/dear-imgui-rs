@@ -14,11 +14,21 @@
 //! ui.text_wrapped("very long text that will wrap when needed...");
 //! ```
 //!
-use crate::Ui;
 use crate::style::{StyleColor, validate_style_color};
 use crate::sys;
+use crate::validation::assert_finite_f32;
+use crate::{Color, Ui};
 
 impl Ui {
+    /// Displays unformatted text without allocating.
+    #[doc(alias = "Text", alias = "TextUnformatted")]
+    pub fn text(&self, text: impl AsRef<str>) {
+        let range = text.as_ref().as_bytes().as_ptr_range();
+        self.run_with_bound_context(|| unsafe {
+            sys::igTextUnformatted(range.start.cast(), range.end.cast());
+        });
+    }
+
     /// Calculates the size required to render text with the current font and font size.
     ///
     /// This is equivalent to [`Ui::calc_text_size_with_opts`] with
@@ -44,7 +54,7 @@ impl Ui {
         hide_text_after_double_hash: bool,
         wrap_width: f32,
     ) -> [f32; 2] {
-        Self::assert_finite_f32("Ui::calc_text_size_with_opts()", "wrap_width", wrap_width);
+        assert_finite_f32("Ui::calc_text_size_with_opts()", "wrap_width", wrap_width);
         let text = text.as_ref();
 
         self.run_with_bound_context(|| unsafe {
@@ -100,7 +110,8 @@ impl Ui {
     /// ui.text_colored([0.0, 1.0, 0.0, 1.0], "Green text");
     /// ```
     #[doc(alias = "TextColored")]
-    pub fn text_colored(&self, color: [f32; 4], text: impl AsRef<str>) {
+    pub fn text_colored(&self, color: impl Into<Color>, text: impl AsRef<str>) {
+        let color = color.into().to_array();
         validate_style_color("Ui::text_colored()", "color", color);
         let text = text.as_ref().as_bytes().as_ptr_range();
         self.run_with_bound_context(|| unsafe {

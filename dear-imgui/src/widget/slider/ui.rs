@@ -8,9 +8,9 @@ impl Ui {
     pub fn slider<T: AsRef<str>, K: DataTypeKind>(
         &self,
         label: T,
+        value: &mut K,
         min: K,
         max: K,
-        value: &mut K,
     ) -> bool {
         self.slider_config(label, min, max).build(value)
     }
@@ -35,13 +35,13 @@ impl Ui {
     /// Creates a float slider
     #[doc(alias = "SliderFloat")]
     pub fn slider_f32(&self, label: impl AsRef<str>, value: &mut f32, min: f32, max: f32) -> bool {
-        self.slider_config(label, min, max).build(value)
+        self.slider(label, value, min, max)
     }
 
     /// Creates an integer slider
     #[doc(alias = "SliderInt")]
     pub fn slider_i32(&self, label: impl AsRef<str>, value: &mut i32, min: i32, max: i32) -> bool {
-        self.slider_config(label, min, max).build(value)
+        self.slider(label, value, min, max)
     }
 
     /// Creates a float2 slider
@@ -132,7 +132,7 @@ impl Ui {
         min: f32,
         max: f32,
     ) -> bool {
-        VerticalSlider::new(label, size, min, max).build(self, value)
+        self.v_slider_config(label, size, min, max).build(value)
     }
 
     /// Creates a vertical integer slider
@@ -145,12 +145,29 @@ impl Ui {
         min: i32,
         max: i32,
     ) -> bool {
-        VerticalSlider::new(label, size, min, max).build(self, value)
+        self.v_slider_config(label, size, min, max).build(value)
+    }
+
+    /// Creates a vertical slider builder with the given size and range.
+    #[doc(alias = "VSliderScalar")]
+    pub fn v_slider_config<T: AsRef<str>, K: DataTypeKind>(
+        &self,
+        label: T,
+        size: impl Into<[f32; 2]>,
+        min: K,
+        max: K,
+    ) -> VerticalSlider<'_, T, K> {
+        VerticalSlider::new(self, label, size, min, max)
     }
 
     /// Creates an angle slider (value in radians)
     #[doc(alias = "SliderAngle")]
     pub fn slider_angle(&self, label: impl AsRef<str>, value_rad: &mut f32) -> bool {
-        AngleSlider::new(label).build(self, value_rad)
+        self.slider_angle_config(label).build(value_rad)
+    }
+
+    /// Creates an angle slider builder with a default range of -360 to 360 degrees.
+    pub fn slider_angle_config<T: AsRef<str>>(&self, label: T) -> AngleSlider<'_, T> {
+        AngleSlider::new(self, label)
     }
 }

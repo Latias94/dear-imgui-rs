@@ -1,6 +1,6 @@
 use std::ffi::c_void;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use dear_imgui_rs::ffi::guard_native_callback;
 use dear_imgui_rs::internal::RawCast;
 use dear_imgui_rs::{BackendFlags, Context, ViewportFlags, render::DrawData, sys};
 
@@ -269,22 +269,22 @@ pub(crate) unsafe extern "C" fn renderer_render_window_sys(
     _render_argument: *mut c_void,
 ) {
     let context_raw = unsafe { sys::igGetCurrentContext() };
-    let Some(control) = runtime_for_context(context_raw) else {
-        return;
-    };
-    if !control.is_callback_accessible() {
-        return;
-    }
-
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        if !runtime_dependencies_are_intact(&control) {
-            return;
-        }
-        let _ = with_current_runtime(|active| render_viewport(active, viewport));
-    }));
-    if result.is_err() {
-        control.record_dependency_fault(GlowViewportError::CallbackPanicked {
-            callback: "Renderer_RenderWindow",
-        });
-    }
+    guard_native_callback(
+        (),
+        || {
+            let Some(control) = runtime_for_context(context_raw) else {
+                return;
+            };
+            if control.is_callback_accessible() && runtime_dependencies_are_intact(&control) {
+                let _ = with_current_runtime(|active| render_viewport(active, viewport));
+            }
+        },
+        || {
+            if let Some(control) = runtime_for_context(context_raw) {
+                control.record_dependency_fault(GlowViewportError::CallbackPanicked {
+                    callback: "Renderer_RenderWindow",
+                });
+            }
+        },
+    );
 }

@@ -1,5 +1,5 @@
-use super::validation::assert_finite_vec2;
 use crate::sys;
+use crate::validation::assert_finite_vec2;
 
 impl crate::ui::Ui {
     /// Test if rectangle (of given size, starting from cursor position) is visible / not clipped.

@@ -179,7 +179,7 @@ fn set_framebuffer_srgb(gl: &Context, enabled: bool) {
 
 pub(crate) type BindProgramPipeline = unsafe extern "system" fn(u32);
 
-fn supports_program_pipeline(gl: &Context) -> bool {
+pub(crate) fn supports_program_pipeline(gl: &Context) -> bool {
     let version = gl.version();
     let extensions = gl.supported_extensions();
     if version.is_embedded {

@@ -957,10 +957,11 @@ impl<S: ViewportScenario> MainData<S> {
                 ui.separator();
                 ui.text("Drag this window outside the main viewport to spawn an OS window.");
                 scenario.extend_main_window(ui, &mut viewport_count);
-                let draw_list = ui.get_window_draw_list();
-                draw_list.set_sampler_nearest();
-                ui.image(external_texture.texture_id(), [64.0, 64.0]);
-                draw_list.set_sampler_linear();
+                ui.with_window_draw_list(|draw_list| {
+                    draw_list.set_sampler_nearest();
+                    ui.image(external_texture.texture_id(), [64.0, 64.0]);
+                    draw_list.set_sampler_linear();
+                });
             });
         self.scenario.after_ui(ui, external_texture.texture_id())?;
 

@@ -14,7 +14,6 @@ mod input;
 mod item;
 mod logging;
 mod style_color;
-mod validation;
 mod visibility;
 mod window;
 

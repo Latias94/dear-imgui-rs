@@ -12,9 +12,10 @@ use serde::{Deserialize, Serialize};
 /// This controls which built-in Dear ImGui color set is used as a starting
 /// point before applying any overrides.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub enum ThemePreset {
     /// Do not touch existing style colors; only apply explicit overrides.
+    #[default]
     None,
     /// Use Dear ImGui's built-in dark preset.
     Dark,
@@ -22,12 +23,6 @@ pub enum ThemePreset {
     Light,
     /// Use Dear ImGui's classic preset.
     Classic,
-}
-
-impl Default for ThemePreset {
-    fn default() -> Self {
-        ThemePreset::None
-    }
 }
 
 /// A single color override for a given [`StyleColor`] entry.
@@ -44,7 +39,7 @@ pub struct ColorOverride {
 ///
 /// This does not expose the full `ImGuiStyle` surface, only the most commonly
 /// themed fields. All fields are optional; `None` means "leave unchanged".
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct StyleTweaks {
@@ -75,36 +70,6 @@ pub struct StyleTweaks {
 
     pub anti_aliased_lines: Option<bool>,
     pub anti_aliased_fill: Option<bool>,
-}
-
-impl Default for StyleTweaks {
-    fn default() -> Self {
-        Self {
-            window_rounding: None,
-            frame_rounding: None,
-            tab_rounding: None,
-            window_padding: None,
-            frame_padding: None,
-            cell_padding: None,
-            item_spacing: None,
-            item_inner_spacing: None,
-            scrollbar_size: None,
-            grab_min_size: None,
-            indent_spacing: None,
-            separator_size: None,
-            scrollbar_rounding: None,
-            grab_rounding: None,
-            window_border_size: None,
-            child_border_size: None,
-            popup_border_size: None,
-            frame_border_size: None,
-            tab_border_size: None,
-            child_rounding: None,
-            popup_rounding: None,
-            anti_aliased_lines: None,
-            anti_aliased_fill: None,
-        }
-    }
 }
 
 impl StyleTweaks {

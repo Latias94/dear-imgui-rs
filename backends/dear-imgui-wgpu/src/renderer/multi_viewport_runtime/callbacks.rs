@@ -1,8 +1,8 @@
 //! Dear ImGui renderer callback ownership and C ABI entry points.
 
 use std::ffi::c_void;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use dear_imgui_rs::ffi::guard_native_callback;
 use dear_imgui_rs::internal::RawCast;
 use dear_imgui_rs::platform_io::{PlatformIo, Viewport};
 use dear_imgui_rs::{BackendFlags, Context};
@@ -522,7 +522,7 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
     };
     let data = unsafe { &mut *data_pointer };
     let observation = control.start_observation(data.native_target);
-    let result = catch_unwind(AssertUnwindSafe(|| {
+    let render_window = || {
         control.with_renderer_callback("Renderer_RenderWindow", |renderer, globals| {
             let backend = renderer
                 .gpu
@@ -800,27 +800,30 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
                     timestamp_writes: None,
                 });
                 let mut dependencies = crate::WgpuDrawDependencies::default();
-                let recording_result = catch_unwind(AssertUnwindSafe(|| {
-                    renderer.render_read_only_draw_data_with_fb_size(
-                        draw_data,
-                        &mut render_pass,
-                        targets.config.width,
-                        targets.config.height,
-                        false,
-                        unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() },
-                        control.observation_scope().unwrap_or(WgpuFrameScope {
-                            context_id: control.binding().id(),
-                            epoch: None,
-                            frame_count: draw_data.frame_count(),
-                        }),
-                        &mut dependencies,
-                    )
-                }));
+                let recording_result = guard_native_callback(
+                    None,
+                    || {
+                        Some(renderer.render_read_only_draw_data_with_fb_size(
+                            draw_data,
+                            &mut render_pass,
+                            targets.config.width,
+                            targets.config.height,
+                            false,
+                            unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() },
+                            control.observation_scope().unwrap_or(WgpuFrameScope {
+                                context_id: control.binding().id(),
+                                epoch: None,
+                                frame_count: draw_data.frame_count(),
+                            }),
+                            &mut dependencies,
+                        ))
+                    },
+                    || {},
+                );
                 control.observe_dependencies(observation, dependencies);
-                let recording =
-                    recording_result.map_err(|_| WgpuViewportError::CallbackPanicked {
-                        callback: "record secondary viewport commands",
-                    })??;
+                let recording = recording_result.ok_or(WgpuViewportError::CallbackPanicked {
+                    callback: "record secondary viewport commands",
+                })??;
                 control.observe_recording(observation, recording);
             }
             let command_buffer = encoder.finish();
@@ -832,13 +835,14 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
             });
             Ok(())
         })
-    }));
-    let result = match result {
-        Ok(result) => result,
-        Err(_) => Err(WgpuViewportError::CallbackPanicked {
+    };
+    let result = guard_native_callback(
+        Err(WgpuViewportError::CallbackPanicked {
             callback: "Renderer_RenderWindow",
         }),
-    };
+        render_window,
+        || {},
+    );
     if let Err(error) = result {
         control.observe_failure(observation, "render secondary viewport", &error);
         control.record_entry_fault(error);
@@ -864,13 +868,10 @@ pub(super) unsafe fn renderer_swap_buffers(control: &RuntimeControl, viewport: *
 }
 
 fn run_work_callback(callback_name: &'static str, callback: impl FnOnce(&RuntimeControl)) {
-    let Some(control) = runtime_for_context(current_context()) else {
-        return;
-    };
-    if !control.is_callback_accessible() {
-        return;
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
+    guard_renderer_callback(callback_name, |control| {
+        if !control.is_callback_accessible() {
+            return;
+        }
         let _ = with_current_runtime(|active| {
             // Validate the whole runtime contract before touching a viewport. A foreign caller
             // can replace a different slot or clear a capability bit without invoking this
@@ -883,38 +884,44 @@ fn run_work_callback(callback_name: &'static str, callback: impl FnOnce(&Runtime
             active.maybe_panic_callback_for_test();
             callback(active);
         });
-    }));
-    if result.is_err() {
-        control.record_entry_fault(WgpuViewportError::CallbackPanicked {
-            callback: callback_name,
-        });
-    }
+    });
 }
 
 fn run_cleanup_callback(callback_name: &'static str, callback: impl FnOnce(&RuntimeControl)) {
-    let Some(control) = runtime_for_context(current_context()) else {
-        return;
-    };
-    if !control.is_cleanup_callback_accessible() {
-        return;
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
+    guard_renderer_callback(callback_name, |control| {
+        if !control.is_cleanup_callback_accessible() {
+            return;
+        }
         let _ = control.binding().try_with_bound_context(|| {
             // While attached, detect drift first but continue into cleanup if validation moves the
             // runtime to ShuttingDown. Cleanup relies only on sidecar identity, not revoked flags.
             if control.should_detect_callback_drift() {
-                detect_runtime_contract_drift(&control);
+                detect_runtime_contract_drift(control);
             }
             if control.is_cleanup_callback_accessible() {
-                callback(&control);
+                callback(control);
             }
         });
-    }));
-    if result.is_err() {
-        control.record_entry_fault(WgpuViewportError::CallbackPanicked {
-            callback: callback_name,
-        });
-    }
+    });
+}
+
+fn guard_renderer_callback(callback_name: &'static str, callback: impl FnOnce(&RuntimeControl)) {
+    let context = current_context();
+    guard_native_callback(
+        (),
+        || {
+            if let Some(control) = runtime_for_context(context) {
+                callback(&control);
+            }
+        },
+        || {
+            if let Some(control) = runtime_for_context(context) {
+                control.record_entry_fault(WgpuViewportError::CallbackPanicked {
+                    callback: callback_name,
+                });
+            }
+        },
+    );
 }
 
 pub(super) unsafe extern "C" fn renderer_create_window_sys(

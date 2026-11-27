@@ -143,6 +143,7 @@ pub(super) struct PreparedRenderState {
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: Option<wgpu::Buffer>,
     index_buffer: Option<wgpu::Buffer>,
+    supports_base_vertex: bool,
     linear_common_bind_group: wgpu::BindGroup,
     nearest_common_bind_group: wgpu::BindGroup,
 }
@@ -428,6 +429,7 @@ impl WgpuRenderer {
             .clone();
         let device = backend_data.device.clone();
         let queue = backend_data.queue.clone();
+        let supports_base_vertex = backend_data.supports_base_vertex;
         let frame_resources = backend_data.acquire_frame_resources()?;
         Self::prepare_frame_resources_static(draw_data, frame_resources, &device, &queue)?;
         let vertex_buffer = frame_resources.vertex_buffer().cloned();
@@ -449,6 +451,7 @@ impl WgpuRenderer {
             pipeline,
             vertex_buffer,
             index_buffer,
+            supports_base_vertex,
             linear_common_bind_group: uniform.bind_group().clone(),
             nearest_common_bind_group: frame_resources.nearest_common_bind_group()?.clone(),
         })
@@ -479,33 +482,42 @@ impl WgpuRenderer {
         device: &wgpu::Device,
     ) -> RendererResult<()> {
         unsafe {
-            RendererRenderStateGuard::<crate::WgpuRenderStateStorage>::preflight(platform_io)
+            RendererRenderStateGuard::<crate::WgpuRenderStateStorage<'_, '_>>::preflight(
+                platform_io,
+            )
         }
         .map_err(super::map_renderer_render_state_error)?;
-        let mut callback_state = crate::WgpuRenderStateStorage::new(device, render_pass);
-        let guard = unsafe { RendererRenderStateGuard::install(platform_io, &mut callback_state) }
-            .map_err(super::map_renderer_render_state_error)?;
 
-        Self::execute_prepared_commands(prepared, state, extent, render_pass, |callback| {
-            unsafe { callback.invoke() };
-            guard
-                .validate()
-                .map_err(super::map_renderer_render_state_error)
-        })?;
-
-        guard
-            .finish()
-            .map_err(super::map_renderer_render_state_error)
+        Self::execute_prepared_commands(
+            prepared,
+            state,
+            extent,
+            render_pass,
+            |callback, render_pass| {
+                let mut callback_state = crate::WgpuRenderStateStorage::new(device, render_pass);
+                let guard =
+                    unsafe { RendererRenderStateGuard::install(platform_io, &mut callback_state) }
+                        .map_err(super::map_renderer_render_state_error)?;
+                unsafe { callback.invoke() };
+                guard
+                    .finish()
+                    .map_err(super::map_renderer_render_state_error)
+            },
+        )
     }
-    pub(super) fn execute_prepared_commands<'draw>(
+
+    pub(super) fn execute_prepared_commands<'draw, 'encoder>(
         prepared: PreparedDrawData<'draw>,
         state: &PreparedRenderState,
         extent: FramebufferExtent,
-        render_pass: &mut wgpu::RenderPass<'_>,
-        mut raw_callback: impl FnMut(RawCallbackCommand<'draw>) -> RendererResult<()>,
+        render_pass: &mut wgpu::RenderPass<'encoder>,
+        mut raw_callback: impl FnMut(
+            RawCallbackCommand<'draw>,
+            &mut wgpu::RenderPass<'encoder>,
+        ) -> RendererResult<()>,
     ) -> RendererResult<()> {
         Self::setup_prepared_render_state(render_pass, extent, state);
-        let mut bound_vertex_offset = 0;
+        let mut bound_vertex_offset = Some(0);
         for command in prepared.commands {
             match command {
                 PreparedDrawCommand::Elements {
@@ -514,29 +526,27 @@ impl WgpuRenderer {
                     indices,
                     base_vertex,
                 } => {
-                    // WebGL2 has no base-vertex draw. Each ImGui index is relative to
-                    // its command's vertex range, so bind the range at slot zero instead.
-                    let base_vertex = if cfg!(target_arch = "wasm32") {
-                        if base_vertex != bound_vertex_offset {
-                            let buffer = state.vertex_buffer.as_ref().ok_or_else(|| {
-                                RendererError::InvalidRenderState("Missing vertex buffer".into())
-                            })?;
-                            let offset = base_vertex as u64
-                                * size_of::<dear_imgui_rs::render::DrawVert>() as u64;
-                            render_pass.set_vertex_buffer(0, buffer.slice(offset..));
-                            bound_vertex_offset = base_vertex;
-                        }
-                        0
+                    let (vertex_offset, draw_base_vertex) = if state.supports_base_vertex {
+                        (0, base_vertex)
                     } else {
-                        base_vertex
+                        (base_vertex, 0)
                     };
+                    if bound_vertex_offset != Some(vertex_offset) {
+                        let buffer = state.vertex_buffer.as_ref().ok_or_else(|| {
+                            RendererError::InvalidRenderState("Missing vertex buffer".into())
+                        })?;
+                        let offset = vertex_offset as u64
+                            * size_of::<dear_imgui_rs::render::DrawVert>() as u64;
+                        render_pass.set_vertex_buffer(0, buffer.slice(offset..));
+                        bound_vertex_offset = Some(vertex_offset);
+                    }
                     render_pass.set_bind_group(1, &image_bind_group, &[]);
                     render_pass.set_scissor_rect(scissor[0], scissor[1], scissor[2], scissor[3]);
-                    render_pass.draw_indexed(indices, base_vertex, 0..1);
+                    render_pass.draw_indexed(indices, draw_base_vertex, 0..1);
                 }
                 PreparedDrawCommand::ResetRenderState => {
                     Self::setup_prepared_render_state(render_pass, extent, state);
-                    bound_vertex_offset = 0;
+                    bound_vertex_offset = Some(0);
                 }
                 PreparedDrawCommand::SetSampler(sampler) => {
                     let bind_group = match sampler {
@@ -546,7 +556,8 @@ impl WgpuRenderer {
                     render_pass.set_bind_group(0, bind_group, &[]);
                 }
                 PreparedDrawCommand::RawCallback(callback) => {
-                    raw_callback(callback)?;
+                    raw_callback(callback, render_pass)?;
+                    bound_vertex_offset = None;
                 }
             }
         }

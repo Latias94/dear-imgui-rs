@@ -679,19 +679,20 @@ unsafe extern "C" fn autocomplete_trampoline(
     userdata: *mut c_void,
     state: *mut sys::DearImGuiCteAutocompleteState,
 ) {
-    let Some(slot) = (unsafe {
-        userdata
-            .cast::<CallbackSlot<AutocompleteCallback>>()
-            .as_ref()
-    }) else {
-        return;
-    };
     let Some(raw) = NonNull::new(state) else {
         return;
     };
-    abort_on_panic("dear-imgui-cte: panic in autocomplete callback", || {
-        slot.invoke((), |callback| callback(raw));
-    });
+    abort_on_panic(
+        "dear-imgui-cte: panic in autocomplete callback",
+        || unsafe {
+            CallbackSlot::invoke(
+                userdata.cast::<CallbackSlot<AutocompleteCallback>>(),
+                |callback| {
+                    callback(raw);
+                },
+            );
+        },
+    );
 }
 
 unsafe fn bytes_from_raw<'a>(

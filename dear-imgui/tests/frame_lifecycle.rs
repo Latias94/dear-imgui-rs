@@ -464,14 +464,136 @@ fn frame_token_captures_font_managed_draws_with_a_context_consumer() {
 }
 
 #[test]
+fn top_level_frame_submission_keeps_its_context_current() {
+    let _guard = test_guard();
+    let mut owner = imgui::Context::create();
+    prepare_context(&mut owner);
+    let _consumer = owner.create_synchronous_renderer_consumer().unwrap();
+    let owner_raw = owner.as_raw();
+    let foreign = imgui::Context::create();
+    let current = || unsafe { imgui::sys::igGetCurrentContext() };
+    assert_eq!(current(), foreign.as_raw());
+
+    let ui = owner.frame();
+    assert_eq!(current(), owner_raw);
+    ui.text("direct submission");
+    assert!(owner.end_frame());
+
+    unsafe { imgui::sys::igSetCurrentContext(foreign.as_raw()) };
+    let frame = owner.begin_frame();
+    assert_eq!(current(), owner_raw);
+    frame.ui().text("token submission");
+    drop(frame);
+}
+
+#[test]
+fn a_nested_frame_keeps_the_outer_binding_current() {
+    let _guard = test_guard();
+    let mut owner = imgui::Context::create();
+    prepare_context(&mut owner);
+    let _consumer = owner.create_synchronous_renderer_consumer().unwrap();
+    let owner_raw = owner.as_raw();
+    let outer = imgui::Context::create();
+    let current = || unsafe { imgui::sys::igGetCurrentContext() };
+
+    outer.binding().with_bound_context(|| {
+        let frame = owner.begin_frame();
+        assert_eq!(current(), outer.as_raw());
+        frame.with_ui(|ui| {
+            assert_eq!(current(), owner_raw);
+            ui.text("nested submission");
+        });
+        assert_eq!(current(), outer.as_raw());
+        drop(frame);
+        assert_eq!(current(), outer.as_raw());
+    });
+}
+
+#[test]
+fn lexical_ui_builders_keep_their_owner_current_during_nested_frames() {
+    let _guard = test_guard();
+    let mut owner = imgui::Context::create();
+    prepare_context(&mut owner);
+    let _owner_consumer = owner.create_synchronous_renderer_consumer().unwrap();
+    let owner_raw = owner.as_raw();
+    let mut foreign = imgui::Context::create();
+    prepare_context(&mut foreign);
+    let _foreign_consumer = foreign.create_synchronous_renderer_consumer().unwrap();
+
+    let ui = owner.frame();
+    let mut check_binding = || {
+        foreign.frame().text("nested frame");
+        let current = unsafe { imgui::sys::igGetCurrentContext() };
+        assert!(foreign.end_frame());
+        assert_eq!(current, owner_raw);
+        ui.text("owning frame");
+    };
+
+    ui.window("Window")
+        .size([300.0, 200.0], imgui::Condition::Always)
+        .build(&mut check_binding)
+        .unwrap();
+    ui.child_window("Child")
+        .size([160.0, 60.0])
+        .build(&mut check_binding)
+        .unwrap();
+    ui.list_box_config("List box")
+        .size([160.0, 60.0])
+        .build(&mut check_binding)
+        .unwrap();
+    ui.with_window_draw_list(|_| check_binding());
+    ui.get_background_draw_list()
+        .channels_split(2, |_| check_binding());
+    assert!(owner.end_frame());
+}
+
+#[test]
+fn failed_frame_entry_and_unwinding_frame_callback_restore_the_previous_context() {
+    let _guard = test_guard();
+    let mut owner = imgui::Context::create();
+    let owner_raw = owner.as_raw();
+    let previous = imgui::Context::create();
+    let current = || unsafe { imgui::sys::igGetCurrentContext() };
+
+    assert_panics!({
+        let _ = owner.try_frame();
+    });
+    assert_eq!(current(), previous.as_raw());
+    assert_eq!(
+        owner.frame_lifecycle_state(),
+        imgui::FrameLifecycleState::Idle
+    );
+
+    prepare_context(&mut owner);
+    let consumer = owner.create_synchronous_renderer_consumer().unwrap();
+    assert_panics!({
+        let _ = owner.frame_with_result(&consumer, |_ui| {
+            assert_eq!(current(), owner_raw);
+            panic!("abort frame callback");
+        });
+    });
+    assert_eq!(current(), previous.as_raw());
+    assert_eq!(
+        owner.frame_lifecycle_state(),
+        imgui::FrameLifecycleState::Idle
+    );
+}
+
+#[test]
 fn frame_with_result_lets_engines_run_multiple_ui_steps_before_rendering() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
     let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
+    let owner_raw = ctx.as_raw();
+    let previous = imgui::Context::create();
+    let previous_raw = previous.as_raw();
+    let current = || unsafe { imgui::sys::igGetCurrentContext() };
+    assert_eq!(current(), previous_raw);
 
     let result = ctx.frame_with_result(&consumer, |ui| {
+        assert_eq!(current(), owner_raw);
         ui.text("system A");
         ui.text("system B");
         42usize
@@ -479,6 +601,7 @@ fn frame_with_result_lets_engines_run_multiple_ui_steps_before_rendering() {
     let (value, pending_frame) = result.into_parts();
 
     assert_eq!(value, 42);
+    assert_eq!(current(), previous_raw);
     let feedback = pending_frame
         .texture_requests()
         .iter()

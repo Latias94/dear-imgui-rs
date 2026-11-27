@@ -17,7 +17,9 @@ use crate::render::{DrawData, SnapshotError, SynchronousRendererConsumer};
 use crate::sys;
 
 use super::Context;
-use super::binding::{CTX_MUTEX, RawBoundContextGuard, with_bound_context};
+use super::binding::{
+    CTX_MUTEX, RawBoundContextGuard, bound_context_scope_active, with_bound_context,
+};
 
 /// Runtime state for a Dear ImGui frame owned by an external engine schedule.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -193,7 +195,8 @@ impl Context {
     ///
     /// Engine integrations should prefer this when the frame is owned by a schedule rather than a
     /// single function. Draw UI through [`FrameToken::ui`] and then consume the token with
-    /// [`FrameToken::render`] or [`FrameToken::render_snapshot`].
+    /// [`FrameToken::render`] or [`FrameToken::render_snapshot`]. The Context binding follows
+    /// [`Self::frame`].
     pub fn begin_frame(&mut self) -> FrameToken<'_> {
         self.try_begin_frame()
             .unwrap_or_else(|error| panic!("Context::begin_frame() rejected completion: {error}"))
@@ -214,6 +217,9 @@ impl Context {
     ///
     /// Note: you must update `io.DisplaySize` (and usually `io.DeltaTime`) before calling this,
     /// unless you are using a platform backend that does it for you (e.g. `dear-imgui-winit`).
+    ///
+    /// At the top level this leaves the frame's Context current for UI submission. Inside an
+    /// existing Context binding scope, it preserves the outer binding.
     #[doc(alias = "NewFrame")]
     pub fn frame(&mut self) -> &crate::ui::Ui {
         self.try_frame()
@@ -225,9 +231,11 @@ impl Context {
     /// Native frame-order, display-size, docking, and font-atlas programmer errors retain their
     /// documented panic behavior. This method makes the asynchronous renderer completion boundary
     /// fallible so event-loop and engine integrations can recover without a later panic.
+    /// Successful calls follow the binding behavior of [`Self::frame`].
     pub fn try_frame(&mut self) -> Result<&crate::ui::Ui, crate::render::RendererConsumerError> {
         let _guard = CTX_MUTEX.lock();
-        let _bound = RawBoundContextGuard::bind(self.raw);
+        let keep_current = !bound_context_scope_active();
+        let bound = RawBoundContextGuard::bind(self.raw);
         self.assert_can_begin_frame_unlocked("Context::try_frame()");
         self.poll_snapshot_completions_unlocked()?;
         self.collect_retired_textures();
@@ -267,6 +275,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
                 .finish_frame_removals(self.snapshot_hub.completion_watermark());
             sys::igNewFrame();
         }
+        if keep_current {
+            bound.keep_current();
+        }
         Ok(&self.ui)
     }
 
@@ -286,11 +297,11 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         );
     }
 
-    /// Begin a frame, run a UI-building closure, render the frame, and return both values.
+    /// Begin a frame, run a UI-building closure with this Context current, and return both values.
     ///
     /// This is a convenience for callers that want the old callback style but also want the draw
     /// data produced by closing the frame. Use [`Context::begin_frame`] when the UI is built across
-    /// several engine systems.
+    /// several engine systems. The preceding Context is restored when this call returns or unwinds.
     pub fn frame_with_result<F, R>(
         &mut self,
         consumer: &crate::render::SynchronousRendererConsumer,
@@ -299,13 +310,15 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     where
         F: FnOnce(&crate::ui::Ui) -> R,
     {
-        let frame = self.begin_frame();
-        let value = f(frame.ui());
-        let pending_frame = frame.render(consumer);
-        FrameResult {
-            value,
-            pending_frame,
-        }
+        self.binding().with_bound_context(|| {
+            let frame = self.begin_frame();
+            let value = f(frame.ui());
+            let pending_frame = frame.render(consumer);
+            FrameResult {
+                value,
+                pending_frame,
+            }
+        })
     }
 
     /// Render a managed-texture frame and return its non-drawable pending capability.
@@ -539,6 +552,19 @@ impl<'ctx> FrameToken<'ctx> {
             .as_deref()
             .expect("frame token owns its context")
             .ui
+    }
+
+    /// Run a UI-building step with the frame's Context current.
+    ///
+    /// The previous native Context is restored on return or unwind. Use this for a system
+    /// that submits several widgets to a Context that may not already be current.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`Self::ui`].
+    pub fn with_ui<R>(&self, f: impl FnOnce(&crate::ui::Ui) -> R) -> R {
+        let ui = self.ui();
+        ui.with_bound_context(|| f(ui))
     }
 
     /// Return the lifecycle state while this token owns the open frame.

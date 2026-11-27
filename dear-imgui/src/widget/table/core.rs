@@ -472,7 +472,7 @@ impl Ui {
         })
     }
 
-    /// Return the flags of a column by index.
+    /// Return the public flags of a column by index, omitting native implementation bits.
     ///
     /// Returns empty flags when no table is current.
     ///
@@ -490,7 +490,9 @@ impl Ui {
                 return TableColumnStateFlags::empty();
             };
             let column_n = resolve_table_column(table, column, "Ui::table_get_column_flags()");
-            unsafe { TableColumnStateFlags::from_bits_retain(sys::igTableGetColumnFlags(column_n)) }
+            unsafe {
+                TableColumnStateFlags::from_bits_truncate(sys::igTableGetColumnFlags(column_n))
+            }
         })
     }
 

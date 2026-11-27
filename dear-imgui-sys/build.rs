@@ -1371,22 +1371,11 @@ fn prebuilt_cache_root(cfg: &BuildConfig) -> PathBuf {
         "IMGUI_SYS_CACHE_DIR",
         "dear-imgui-prebuilt",
     );
-    let mut profile = if cfg!(feature = "stack-layout") {
-        "stack-layout".to_string()
-    } else {
-        "standard".to_string()
-    };
-    if cfg!(feature = "freetype") {
-        profile.push_str("+freetype");
-    }
-    if cfg!(feature = "test-engine") {
-        profile.push_str("+test-engine");
-    }
     let identity = cfg
         .artifact_profile()
         .deterministic_hash()
         .replace(':', "-");
-    root.join(profile).join(identity)
+    root.join(identity)
 }
 
 fn use_pregenerated_bindings(cfg: &BuildConfig) -> bool {

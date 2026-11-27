@@ -510,8 +510,9 @@ fn custom_line_numbers_render_copied_events_and_release_replaced_callbacks() {
     editor
         .set_custom_line_number_callback(move |ui, event| {
             let _ = &token;
-            ui.get_window_draw_list()
-                .add_text(event.position, event.color, event.line.to_string());
+            ui.with_window_draw_list(|draw_list| {
+                draw_list.add_text(event.position, event.color, event.line.to_string());
+            });
             recorded.borrow_mut().push(event);
         })
         .unwrap();

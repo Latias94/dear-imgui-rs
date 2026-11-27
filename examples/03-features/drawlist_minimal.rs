@@ -15,7 +15,7 @@ fn main() -> Result<(), RunError> {
         ui.window("Draw List")
             .size([720.0, 500.0], Condition::FirstUseEver)
             .build(|| {
-                ui.slider("Thickness", 1.0, 10.0, &mut thickness);
+                ui.slider("Thickness", &mut thickness, 1.0, 10.0);
                 ui.separator();
 
                 let size = ui.content_region_avail();
@@ -23,56 +23,57 @@ fn main() -> Result<(), RunError> {
                     return;
                 }
 
-                let draw_list = ui.get_window_draw_list();
                 let origin = ui.cursor_screen_pos();
                 let [width, height] = size;
-                draw_list
-                    .add_rect(
-                        origin,
-                        [origin[0] + width, origin[1] + height],
-                        [0.15, 0.16, 0.19, 1.0],
-                    )
-                    .filled(true)
-                    .build();
-                draw_list
-                    .add_line(
-                        [origin[0] + 20.0, origin[1] + 20.0],
-                        [origin[0] + width - 20.0, origin[1] + 20.0],
-                        [0.9, 0.7, 0.2, 1.0],
-                    )
-                    .thickness(thickness)
-                    .build();
-                draw_list
-                    .add_rect(
-                        [origin[0] + 40.0, origin[1] + 60.0],
-                        [origin[0] + 200.0, origin[1] + 160.0],
-                        [0.2, 0.7, 0.9, 1.0],
-                    )
-                    .rounding(8.0)
-                    .thickness(thickness)
-                    .build();
-                draw_list
-                    .add_rect(
-                        [origin[0] + 220.0, origin[1] + 60.0],
-                        [origin[0] + 380.0, origin[1] + 160.0],
-                        [0.2, 0.9, 0.5, 1.0],
-                    )
-                    .filled(true)
-                    .rounding(8.0)
-                    .build();
-                draw_list
-                    .add_circle(
-                        [origin[0] + 500.0, origin[1] + 110.0],
-                        50.0,
-                        [0.95, 0.4, 0.3, 1.0],
-                    )
-                    .thickness(thickness)
-                    .build();
-                draw_list.add_text(
-                    [origin[0] + 20.0, origin[1] + height - 30.0],
-                    [1.0, 1.0, 1.0, 1.0],
-                    "Draw-list primitives",
-                );
+                ui.with_window_draw_list(|draw_list| {
+                    draw_list
+                        .add_rect(
+                            origin,
+                            [origin[0] + width, origin[1] + height],
+                            [0.15, 0.16, 0.19, 1.0],
+                        )
+                        .filled(true)
+                        .build();
+                    draw_list
+                        .add_line(
+                            [origin[0] + 20.0, origin[1] + 20.0],
+                            [origin[0] + width - 20.0, origin[1] + 20.0],
+                            [0.9, 0.7, 0.2, 1.0],
+                        )
+                        .thickness(thickness)
+                        .build();
+                    draw_list
+                        .add_rect(
+                            [origin[0] + 40.0, origin[1] + 60.0],
+                            [origin[0] + 200.0, origin[1] + 160.0],
+                            [0.2, 0.7, 0.9, 1.0],
+                        )
+                        .rounding(8.0)
+                        .thickness(thickness)
+                        .build();
+                    draw_list
+                        .add_rect(
+                            [origin[0] + 220.0, origin[1] + 60.0],
+                            [origin[0] + 380.0, origin[1] + 160.0],
+                            [0.2, 0.9, 0.5, 1.0],
+                        )
+                        .filled(true)
+                        .rounding(8.0)
+                        .build();
+                    draw_list
+                        .add_circle(
+                            [origin[0] + 500.0, origin[1] + 110.0],
+                            50.0,
+                            [0.95, 0.4, 0.3, 1.0],
+                        )
+                        .thickness(thickness)
+                        .build();
+                    draw_list.add_text(
+                        [origin[0] + 20.0, origin[1] + height - 30.0],
+                        [1.0, 1.0, 1.0, 1.0],
+                        "Draw-list primitives",
+                    );
+                });
             });
     })
 }

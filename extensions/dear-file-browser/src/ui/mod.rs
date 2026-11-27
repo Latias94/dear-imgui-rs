@@ -302,7 +302,6 @@ fn draw_contents_with_hooks(
     let mut confirm_gate = ConfirmGate::default();
 
     state.ui.thumbnails.advance_frame();
-    state.core.places.poll_system_places();
     ops::poll_file_operation(state);
     header::draw_chrome(ui, state, has_thumbnail_backend);
 
@@ -322,7 +321,7 @@ fn draw_contents_with_hooks(
     };
     ui.child_window(child_id)
         .size([width, content_h])
-        .build(ui, || {
+        .build(|| {
             confirm_gate = draw_file_list_and_pane(
                 ui,
                 state,
@@ -378,7 +377,7 @@ fn draw_places_split(ui: &Ui, state: &mut FileDialogState, [width, height]: [f32
     ui.child_window("places_pane")
         .size([places_width, height])
         .border(true)
-        .build(ui, || destination = places::draw_places_pane(ui, state));
+        .build(|| destination = places::draw_places_pane(ui, state));
     if let Some(path) = destination {
         let _ = state.core.handle_event(CoreEvent::NavigateTo(path));
     }
@@ -442,7 +441,7 @@ fn draw_file_list_and_pane(
             let table_width = (width - pane_width - splitter).max(0.0);
             ui.child_window("file_table_rightdock")
                 .size([table_width, height])
-                .build(ui, || {
+                .build(|| {
                     file_table::draw_file_table(
                         ui,
                         state,
@@ -464,7 +463,7 @@ fn draw_file_list_and_pane(
     ui.child_window(pane_id)
         .size(pane_size)
         .border(true)
-        .build(ui, || {
+        .build(|| {
             let selected_entry_ids = state.core.selected_entry_ids();
             let selected_paths = state.core.selected_entry_paths();
             let (selected_files_count, selected_dirs_count) = state.core.selected_entry_counts();

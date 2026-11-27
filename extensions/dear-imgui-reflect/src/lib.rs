@@ -232,7 +232,7 @@
 //!             // Left side: list of enemies with selection.
 //!             ui.child_window("EnemyList")
 //!                 .size([200.0, 0.0])
-//!                 .build(ui, || {
+//!                 .build(|| {
 //!                     for (i, enemy) in self.enemies.iter().enumerate() {
 //!                         let label = format!("{i}: {}", enemy.name);
 //!                         if ui.selectable_config(&label)
@@ -249,7 +249,7 @@
 //!             // Right side: reflected editor for the selected enemy.
 //!             ui.child_window("EnemyInspector")
 //!                 .size([0.0, 0.0])
-//!                 .build(ui, || {
+//!                 .build(|| {
 //!                     if let Some(enemy) = self.enemies.get_mut(self.selected) {
 //!                         inspector.input("Enemy", enemy);
 //!                     } else {

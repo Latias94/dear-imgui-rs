@@ -1,7 +1,7 @@
 use super::counts::non_negative_count_from_i32;
-use super::validation::assert_finite_f32;
 use crate::input::{Key, MouseButton};
 use crate::sys;
+use crate::validation::assert_finite_f32;
 
 impl crate::ui::Ui {
     /// Returns the number of times the key was pressed in the current frame

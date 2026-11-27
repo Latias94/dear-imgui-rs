@@ -736,20 +736,20 @@ mod tests {
         giz.set_rect(0.0, 0.0, 800.0, 600.0);
         giz.set_orthographic(false);
         giz.set_drawlist_window();
-        let draw = ui.get_window_draw_list();
         let raw = unsafe { imgui_sys::igGetWindowDrawList() };
-        draw.with_clip_rect([0.0, 0.0], [120.0, 120.0], || {
-            let clips = unsafe { (*raw)._ClipRectStack.Size };
-            let identity = <[f32; 16] as Mat4Like>::identity();
-            let mut model = identity;
-            model[14] = -5.0;
-            assert!(
-                !giz.manipulate_config(&identity, &identity, &mut model)
-                    .build()
-            );
-            assert_eq!(unsafe { (*raw)._ClipRectStack.Size }, clips);
+        ui.with_window_draw_list(|draw| {
+            draw.with_clip_rect([0.0, 0.0], [120.0, 120.0], || {
+                let clips = unsafe { (*raw)._ClipRectStack.Size };
+                let identity = <[f32; 16] as Mat4Like>::identity();
+                let mut model = identity;
+                model[14] = -5.0;
+                assert!(
+                    !giz.manipulate_config(&identity, &identity, &mut model)
+                        .build()
+                );
+                assert_eq!(unsafe { (*raw)._ClipRectStack.Size }, clips);
+            })
         });
-        drop(draw);
         assert!(ctx.end_frame());
     }
 

@@ -56,7 +56,7 @@ pub(crate) struct ClipboardContext {
 
 impl ClipboardContext {
     /// Creates a new ClipboardContext
-    pub fn new<T: ClipboardBackend>(backend: T) -> ClipboardContext {
+    pub(crate) fn new<T: ClipboardBackend>(backend: T) -> ClipboardContext {
         ClipboardContext {
             borrowed: AtomicBool::new(false),
             backend: RefCell::new(Box::new(backend)),
@@ -65,7 +65,7 @@ impl ClipboardContext {
     }
 
     /// Creates a dummy clipboard context that doesn't actually interact with the system clipboard
-    pub fn dummy() -> ClipboardContext {
+    pub(crate) fn dummy() -> ClipboardContext {
         Self::new(DummyClipboardBackend)
     }
 

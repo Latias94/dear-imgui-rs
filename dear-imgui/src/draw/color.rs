@@ -25,14 +25,10 @@ impl ImColor32 {
         Self::from_rgba(r, g, b, 0xff)
     }
 
-    /// Construct from f32 values in range 0.0..=1.0
+    /// Clamp each channel to `0.0..=1.0` and round to the nearest byte.
     pub fn from_rgba_f32s(r: f32, g: f32, b: f32, a: f32) -> Self {
-        Self::from_rgba(
-            (r.clamp(0.0, 1.0) * 255.0) as u8,
-            (g.clamp(0.0, 1.0) * 255.0) as u8,
-            (b.clamp(0.0, 1.0) * 255.0) as u8,
-            (a.clamp(0.0, 1.0) * 255.0) as u8,
-        )
+        let quantize = |channel: f32| (channel.clamp(0.0, 1.0) * 255.0).round() as u8;
+        Self::from_rgba(quantize(r), quantize(g), quantize(b), quantize(a))
     }
 
     /// Return the bits of the color as a u32

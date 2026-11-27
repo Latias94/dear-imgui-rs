@@ -20,7 +20,11 @@ pub(crate) struct RenderTestApp(bevy_app::App);
 #[cfg(feature = "render")]
 impl RenderTestApp {
     pub(crate) fn new() -> Self {
-        Self(bevy_app::App::new())
+        Self::from_app(bevy_app::App::new())
+    }
+
+    pub(crate) fn from_app(app: bevy_app::App) -> Self {
+        Self(app)
     }
 }
 

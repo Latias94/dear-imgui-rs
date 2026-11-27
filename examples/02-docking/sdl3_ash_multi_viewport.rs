@@ -1985,14 +1985,15 @@ impl App {
                     ui.checkbox("Use linear sampler", &mut use_linear);
                     external.use_linear_sampler = use_linear;
 
-                    let draw_list = ui.get_window_draw_list();
-                    if use_linear {
+                    ui.with_window_draw_list(|draw_list| {
+                        if use_linear {
+                            draw_list.set_sampler_linear();
+                        } else {
+                            draw_list.set_sampler_nearest();
+                        }
+                        ui.image(external.tex_id, [256.0, 256.0]);
                         draw_list.set_sampler_linear();
-                    } else {
-                        draw_list.set_sampler_nearest();
-                    }
-                    ui.image(external.tex_id, [256.0, 256.0]);
-                    draw_list.set_sampler_linear();
+                    });
                 } else {
                     ui.separator();
                     ui.text("External texture not available.");

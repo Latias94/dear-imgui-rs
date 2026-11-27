@@ -75,38 +75,40 @@ impl<'ui> DrawListMut<'ui> {
             clip_rect_max,
         );
 
-        self.assert_scope("DrawListMut::push_clip_rect()");
-        self.ui().run_with_bound_context(|| unsafe {
-            sys::ImDrawList_PushClipRect(
-                self.draw_list,
-                clip_rect_min,
-                clip_rect_max,
-                intersect_with_current,
-            )
-        });
-        DrawListClipRectToken::new(self.ui(), self.draw_list, self.is_window_scoped())
+        self.with_raw_bound("DrawListMut::push_clip_rect()", |draw_list| {
+            unsafe {
+                sys::ImDrawList_PushClipRect(
+                    draw_list,
+                    clip_rect_min,
+                    clip_rect_max,
+                    intersect_with_current,
+                )
+            };
+            DrawListClipRectToken::new(self.ui(), draw_list, self.is_window_scoped())
+        })
     }
 
     /// Push a full-screen clip rectangle.
     #[doc(alias = "PushClipRectFullScreen")]
     pub fn push_clip_rect_full_screen(&self) -> DrawListClipRectToken<'_> {
-        self.assert_scope("DrawListMut::push_clip_rect_full_screen()");
-        self.ui().run_with_bound_context(|| unsafe {
-            sys::ImDrawList_PushClipRectFullScreen(self.draw_list)
-        });
-        DrawListClipRectToken::new(self.ui(), self.draw_list, self.is_window_scoped())
+        self.with_raw_bound("DrawListMut::push_clip_rect_full_screen()", |draw_list| {
+            unsafe { sys::ImDrawList_PushClipRectFullScreen(draw_list) };
+            DrawListClipRectToken::new(self.ui(), draw_list, self.is_window_scoped())
+        })
     }
 
     /// Get current minimum clip rectangle point.
     pub fn clip_rect_min(&self) -> [f32; 2] {
-        let out = unsafe { sys::ImDrawList_GetClipRectMin(self.draw_list) };
-        out.into()
+        self.with_raw_bound("DrawListMut::clip_rect_min()", |draw_list| unsafe {
+            sys::ImDrawList_GetClipRectMin(draw_list).into()
+        })
     }
 
     /// Get current maximum clip rectangle point.
     pub fn clip_rect_max(&self) -> [f32; 2] {
-        let out = unsafe { sys::ImDrawList_GetClipRectMax(self.draw_list) };
-        out.into()
+        self.with_raw_bound("DrawListMut::clip_rect_max()", |draw_list| unsafe {
+            sys::ImDrawList_GetClipRectMax(draw_list).into()
+        })
     }
 
     /// Convenience: push a clip rect, run f, pop.

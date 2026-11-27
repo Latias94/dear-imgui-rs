@@ -272,76 +272,62 @@ fn style_stack_rejects_invalid_values_before_push_and_leaves_style_unchanged() {
     prepare_context(&mut ctx);
 
     let ui = ctx.frame();
-    let baseline = unsafe { ui.style().clone() };
+    let style = ui.style();
+    let baseline = style.clone();
 
     let token = ui.push_style_var(imgui::StyleVar::Alpha(0.25));
-    assert_eq!(unsafe { ui.style().alpha() }, 0.25);
+    assert_eq!(style.alpha(), 0.25);
     token.pop();
-    assert_eq!(unsafe { ui.style().alpha() }, baseline.alpha());
+    assert_eq!(style.alpha(), baseline.alpha());
 
     let token = ui.push_style_var(imgui::StyleVar::WindowMinSize([0.0, 0.0]));
-    assert_eq!(unsafe { ui.style().window_min_size() }, [0.0, 0.0]);
+    assert_eq!(style.window_min_size(), [0.0, 0.0]);
     token.pop();
-    assert_eq!(
-        unsafe { ui.style().window_min_size() },
-        baseline.window_min_size()
-    );
+    assert_eq!(style.window_min_size(), baseline.window_min_size());
 
     let token = ui.push_style_color(imgui::StyleColor::Text, [0.0, 1.0, 0.0, 1.0]);
-    assert_eq!(
-        unsafe { ui.style().color(imgui::StyleColor::Text) },
-        [0.0, 1.0, 0.0, 1.0]
-    );
+    assert_eq!(style.color(imgui::StyleColor::Text), [0.0, 1.0, 0.0, 1.0]);
     token.pop();
     assert_eq!(
-        unsafe { ui.style().color(imgui::StyleColor::Text) },
+        style.color(imgui::StyleColor::Text),
         baseline.color(imgui::StyleColor::Text)
     );
 
     assert_panics!({
         let _ = ui.push_style_var(imgui::StyleVar::Alpha(f32::NAN));
     });
-    assert_eq!(unsafe { ui.style().alpha() }, baseline.alpha());
+    assert_eq!(style.alpha(), baseline.alpha());
 
     assert_panics!({
         let _ = ui.push_style_var(imgui::StyleVar::WindowPadding([-1.0, 0.0]));
     });
-    assert_eq!(
-        unsafe { ui.style().window_padding() },
-        baseline.window_padding()
-    );
+    assert_eq!(style.window_padding(), baseline.window_padding());
 
     assert_panics!({
         let _ = ui.push_style_var(imgui::StyleVar::TableAngledHeadersAngle(1.0));
     });
     assert_eq!(
-        unsafe { ui.style().table_angled_headers_angle() },
+        style.table_angled_headers_angle(),
         baseline.table_angled_headers_angle()
     );
 
     let token = ui.push_style_var(imgui::StyleVar::DragDropTargetRounding(-1.0));
-    assert_eq!(unsafe { ui.style().drag_drop_target_rounding() }, -1.0);
+    assert_eq!(style.drag_drop_target_rounding(), -1.0);
     token.pop();
     assert_eq!(
-        unsafe { ui.style().drag_drop_target_rounding() },
+        style.drag_drop_target_rounding(),
         baseline.drag_drop_target_rounding()
     );
 
     let token = ui.push_style_var(imgui::StyleVar::MenuItemRounding(4.0));
-    assert_eq!(unsafe { ui.style().menu_item_rounding() }, 4.0);
+    assert_eq!(style.menu_item_rounding(), 4.0);
     token.pop();
-    assert_eq!(
-        unsafe { ui.style().menu_item_rounding() },
-        baseline.menu_item_rounding()
-    );
+    assert_eq!(style.menu_item_rounding(), baseline.menu_item_rounding());
 
     let token = ui.push_style_var(imgui::StyleVar::SelectableRounding(5.0));
-    assert_eq!(unsafe { ui.style().selectable_rounding() }, 5.0);
+    assert_eq!(style.selectable_rounding(), 5.0);
     token.pop();
-    assert_eq!(
-        unsafe { ui.style().selectable_rounding() },
-        baseline.selectable_rounding()
-    );
+    assert_eq!(style.selectable_rounding(), baseline.selectable_rounding());
 
     assert_panics!({
         let _ = ui.push_style_var(imgui::StyleVar::MenuItemRounding(-0.1));
@@ -354,7 +340,7 @@ fn style_stack_rejects_invalid_values_before_push_and_leaves_style_unchanged() {
         let _ = ui.push_style_var(imgui::StyleVar::DragDropTargetRounding(f32::NAN));
     });
     assert_eq!(
-        unsafe { ui.style().drag_drop_target_rounding() },
+        style.drag_drop_target_rounding(),
         baseline.drag_drop_target_rounding()
     );
 
@@ -362,7 +348,7 @@ fn style_stack_rejects_invalid_values_before_push_and_leaves_style_unchanged() {
         let _ = ui.push_style_color(imgui::StyleColor::Text, [0.0, f32::NAN, 0.0, 1.0]);
     });
     assert_eq!(
-        unsafe { ui.style().color(imgui::StyleColor::Text) },
+        style.color(imgui::StyleColor::Text),
         baseline.color(imgui::StyleColor::Text)
     );
 }
@@ -416,7 +402,7 @@ fn ui_native_scope_tokens_reject_out_of_order_drop_before_ffi_and_recover() {
     prepare_context(&mut ctx);
 
     let ui = ctx.frame();
-    let baseline = unsafe { ui.style().clone() };
+    let baseline = ui.clone_style();
     let _ = ui.window("native scope order").build(|| {
         let outer = ui.push_style_color(imgui::StyleColor::Text, [0.2, 0.3, 0.4, 1.0]);
         let inner = ui.push_style_color(imgui::StyleColor::Button, [0.4, 0.3, 0.2, 1.0]);
@@ -433,11 +419,11 @@ fn ui_native_scope_tokens_reject_out_of_order_drop_before_ffi_and_recover() {
 
         drop(inner);
         assert_eq!(
-            unsafe { ui.style().color(imgui::StyleColor::Text) },
+            ui.style().color(imgui::StyleColor::Text),
             baseline.color(imgui::StyleColor::Text)
         );
         assert_eq!(
-            unsafe { ui.style().color(imgui::StyleColor::Button) },
+            ui.style().color(imgui::StyleColor::Button),
             baseline.color(imgui::StyleColor::Button)
         );
         ui.text("scope tracker recovered");
@@ -452,14 +438,14 @@ fn independent_native_stacks_can_be_ended_in_either_order() {
     prepare_context(&mut ctx);
 
     let ui = ctx.frame();
-    let baseline = unsafe { ui.style().clone() };
+    let baseline = ui.clone_style();
     let _ = ui.window("independent native stacks").build(|| {
         let color = ui.push_style_color(imgui::StyleColor::Text, [0.2, 0.3, 0.4, 1.0]);
         let id = ui.push_id("independent-id");
 
         color.pop();
         assert_eq!(
-            unsafe { ui.style().color(imgui::StyleColor::Text) },
+            ui.style().color(imgui::StyleColor::Text),
             baseline.color(imgui::StyleColor::Text)
         );
         ui.text("ID stack remains active");
@@ -476,21 +462,18 @@ fn style_tokens_may_span_nested_windows_without_escaping_their_source_scope() {
     prepare_context(&mut ctx);
 
     let ui = ctx.frame();
-    let baseline = unsafe { ui.style().color(imgui::StyleColor::Text) };
+    let baseline = ui.style().color(imgui::StyleColor::Text);
     let color = ui.push_style_color(imgui::StyleColor::Text, [0.2, 0.3, 0.4, 1.0]);
 
     let _ = ui.window("nested style consumer").build(|| {
         assert_eq!(
-            unsafe { ui.style().color(imgui::StyleColor::Text) },
+            ui.style().color(imgui::StyleColor::Text),
             [0.2, 0.3, 0.4, 1.0]
         );
         ui.text("the outer style remains active");
     });
     color.pop();
-    assert_eq!(
-        unsafe { ui.style().color(imgui::StyleColor::Text) },
-        baseline
-    );
+    assert_eq!(ui.style().color(imgui::StyleColor::Text), baseline);
 }
 
 #[test]
@@ -501,7 +484,7 @@ fn style_tokens_cannot_be_popped_from_a_nested_window() {
     prepare_context(&mut ctx);
 
     let ui = ctx.frame();
-    let baseline = unsafe { ui.style().color(imgui::StyleColor::Text) };
+    let baseline = ui.style().color(imgui::StyleColor::Text);
     let color = ui.push_style_color(imgui::StyleColor::Text, [0.2, 0.3, 0.4, 1.0]);
 
     let _ = ui.window("foreign style consumer").build(|| {
@@ -510,10 +493,7 @@ fn style_tokens_cannot_be_popped_from_a_nested_window() {
         assert!(panic_message(panic).contains("outside its original frame and window Begin scope"));
     });
 
-    assert_eq!(
-        unsafe { ui.style().color(imgui::StyleColor::Text) },
-        baseline
-    );
+    assert_eq!(ui.style().color(imgui::StyleColor::Text), baseline);
     ui.text("deferred style cleanup restored the source scope");
 }
 
@@ -525,7 +505,7 @@ fn style_tokens_cannot_escape_the_window_that_created_them() {
     prepare_context(&mut ctx);
 
     let ui = ctx.frame();
-    let baseline = unsafe { ui.style().color(imgui::StyleColor::Text) };
+    let baseline = ui.style().color(imgui::StyleColor::Text);
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = ui
             .window("style token source window")
@@ -533,9 +513,18 @@ fn style_tokens_cannot_escape_the_window_that_created_them() {
     }))
     .expect_err("ending a window with an active style token must panic before FFI");
     assert!(panic_message(panic).contains("window-local scope"));
-    assert_eq!(
-        unsafe { ui.style().color(imgui::StyleColor::Text) },
-        baseline
-    );
+    assert_eq!(ui.style().color(imgui::StyleColor::Text), baseline);
     ui.text("unwinding restored both the style and window scopes");
+
+    ui.window("Parent").build(|| {
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ui
+                .child_window("Child")
+                .build(|| ui.push_style_color(imgui::StyleColor::Text, [0.2, 0.3, 0.4, 1.0]));
+        }))
+        .expect_err("ending a child window with an active style token must panic before FFI");
+        assert!(panic_message(panic).contains("window-local scope"));
+        assert_eq!(ui.style().color(imgui::StyleColor::Text), baseline);
+        ui.text("unwinding restored both the style and child window scopes");
+    });
 }

@@ -45,7 +45,7 @@ impl ScopeSnapshot {
         let context = unsafe { &*ui.context_raw() };
         let frame = context.FrameCount;
         let window = context.CurrentWindow;
-        let window = (!window.is_null()).then(|| WindowScope {
+        let window = (!window.is_null()).then_some(WindowScope {
             frame,
             window: window as usize,
             stack_depth: context.CurrentWindowStack.Size,
@@ -122,6 +122,7 @@ enum NativeScopeKey {
     DrawListClip(usize),
     DrawListTexture(usize),
     DrawListFlags(usize),
+    DrawListSplitter(usize),
     TableStack,
 }
 
@@ -147,6 +148,7 @@ enum ScopeStack {
     DrawListClip,
     DrawListTexture,
     DrawListFlags,
+    DrawListSplitter,
     Table,
 }
 
@@ -173,6 +175,7 @@ impl NativeScopeKey {
             Self::DrawListClip(_) => ScopeStack::DrawListClip,
             Self::DrawListTexture(_) => ScopeStack::DrawListTexture,
             Self::DrawListFlags(_) => ScopeStack::DrawListFlags,
+            Self::DrawListSplitter(_) => ScopeStack::DrawListSplitter,
             Self::TableStack => ScopeStack::Table,
         }) as usize
     }
@@ -232,6 +235,10 @@ pub(crate) enum NativeScopePop {
         draw_list: *mut sys::ImDrawList,
         window_scoped: bool,
     },
+    DrawListMergeChannels {
+        draw_list: *mut sys::ImDrawList,
+        window_scoped: bool,
+    },
     PopTableBackgroundChannel,
     PopTableColumnChannel,
 }
@@ -284,6 +291,9 @@ impl NativeScopePop {
             Self::DrawListPopDrawFlag { draw_list, .. } => {
                 NativeScopeKey::DrawListFlags(draw_list as usize)
             }
+            Self::DrawListMergeChannels { draw_list, .. } => {
+                NativeScopeKey::DrawListSplitter(draw_list as usize)
+            }
         };
         let secondary = match self {
             Self::EndDisabled {
@@ -333,6 +343,10 @@ impl NativeScopePop {
                 ..
             }
             | Self::DrawListPopDrawFlag {
+                window_scoped: true,
+                ..
+            }
+            | Self::DrawListMergeChannels {
                 window_scoped: true,
                 ..
             } => true,
@@ -385,6 +399,9 @@ impl NativeScopePop {
                     window_scoped: false,
                     ..
                 } | Self::DrawListPopDrawFlag {
+                    window_scoped: false,
+                    ..
+                } | Self::DrawListMergeChannels {
                     window_scoped: false,
                     ..
                 }
@@ -462,6 +479,9 @@ impl NativeScopePop {
                 Self::DrawListPopTexture { draw_list, .. } => sys::ImDrawList_PopTexture(draw_list),
                 Self::DrawListPopDrawFlag { draw_list, .. } => {
                     sys::ImDrawList_PopDrawFlag(draw_list)
+                }
+                Self::DrawListMergeChannels { draw_list, .. } => {
+                    sys::ImDrawList_ChannelsMerge(draw_list)
                 }
                 Self::PopTableBackgroundChannel => sys::igTablePopBackgroundChannel(),
                 Self::PopTableColumnChannel => sys::igTablePopColumnChannel(),
@@ -684,8 +704,9 @@ impl NativeScopeTracker {
         {
             return Some("was dropped after the current table cell changed".to_owned());
         }
-        if entry.pop.ends_window() {
-            if let Some(blocker) = self
+        if entry.pop.ends_window()
+            && self.next_id - 1 != entry.id.generation
+            && let Some(blocker) = self
                 .entries()
                 .filter(|other| {
                     other.id.generation > entry.id.generation
@@ -693,15 +714,15 @@ impl NativeScopeTracker {
                         && other.scope.window == entry.scope.window
                 })
                 .max_by_key(|other| other.id.generation)
-            {
-                return Some(format!(
-                    "was dropped before the window-local scope `{}`",
-                    blocker.label
-                ));
-            }
+        {
+            return Some(format!(
+                "was dropped before the window-local scope `{}`",
+                blocker.label
+            ));
         }
-        if entry.pop.ends_table() {
-            if let Some(blocker) = self
+        if entry.pop.ends_table()
+            && self.next_id - 1 != entry.id.generation
+            && let Some(blocker) = self
                 .entries()
                 .filter(|other| {
                     other.id.generation > entry.id.generation
@@ -709,12 +730,11 @@ impl NativeScopeTracker {
                         && other.scope.table == entry.scope.table
                 })
                 .max_by_key(|other| other.id.generation)
-            {
-                return Some(format!(
-                    "was dropped before the table-local scope `{}`",
-                    blocker.label
-                ));
-            }
+        {
+            return Some(format!(
+                "was dropped before the table-local scope `{}`",
+                blocker.label
+            ));
         }
         None
     }
@@ -835,6 +855,7 @@ impl NativeScopeTracker {
             .fold(boundary.first_id, u64::max)
     }
 
+    #[inline]
     fn assert_usable(&self) {
         assert!(
             !self.pending_recovery,
@@ -984,6 +1005,7 @@ impl Ui {
         NativeScopeToken::new_with_order(self, pop, label, NativeScopeOrder::ProvenanceOnly)
     }
 
+    #[inline]
     pub(crate) fn assert_native_scopes_usable(&self) {
         self.native_scopes.borrow().assert_usable();
     }

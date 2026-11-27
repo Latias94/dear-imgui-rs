@@ -76,7 +76,7 @@ impl<State> CaptureProviderGuard<'_, State> {
         let Some(slot) = self.slot.take() else {
             return Ok(());
         };
-        slot.as_ref().set(None);
+        unsafe { slot.as_ref_unchecked() }.set(None);
         let status = unsafe {
             sys::imgui_test_engine_clear_capture_provider(self.engine, slot.as_ptr().cast())
         };

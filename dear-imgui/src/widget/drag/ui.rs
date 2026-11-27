@@ -4,17 +4,65 @@ use crate::Ui;
 use crate::internal::DataTypeKind;
 use crate::sys;
 
-use super::Drag;
+use super::{Drag, DragRange};
 
 impl Ui {
     /// Creates a new drag slider widget. Returns true if the value has been edited.
     pub fn drag<T: AsRef<str>, K: DataTypeKind>(&self, label: T, value: &mut K) -> bool {
-        Drag::new(label).build(self, value)
+        self.drag_config(label).build(value)
     }
 
     /// Creates a new unbuilt Drag.
-    pub fn drag_config<T: AsRef<str>, K: DataTypeKind>(&self, label: T) -> Drag<K, T> {
-        Drag::new(label)
+    pub fn drag_config<T: AsRef<str>, K: DataTypeKind>(&self, label: T) -> Drag<'_, K, T> {
+        Drag::new(self, label)
+    }
+
+    /// Creates a drag float slider.
+    #[doc(alias = "DragFloat")]
+    pub fn drag_float(&self, label: impl AsRef<str>, value: &mut f32) -> bool {
+        self.drag(label, value)
+    }
+
+    /// Creates a drag float slider builder.
+    #[doc(alias = "DragFloat")]
+    pub fn drag_float_config<L: AsRef<str>>(&self, label: L) -> Drag<'_, f32, L> {
+        self.drag_config(label)
+    }
+
+    /// Creates a drag integer slider.
+    #[doc(alias = "DragInt")]
+    pub fn drag_int(&self, label: impl AsRef<str>, value: &mut i32) -> bool {
+        self.drag(label, value)
+    }
+
+    /// Creates a drag integer slider builder.
+    #[doc(alias = "DragInt")]
+    pub fn drag_int_config<L: AsRef<str>>(&self, label: L) -> Drag<'_, i32, L> {
+        self.drag_config(label)
+    }
+
+    /// Creates a drag float range slider.
+    #[doc(alias = "DragFloatRange2")]
+    pub fn drag_float_range2(&self, label: impl AsRef<str>, min: &mut f32, max: &mut f32) -> bool {
+        self.drag_float_range2_config(label).build(min, max)
+    }
+
+    /// Creates a drag float range slider builder.
+    #[doc(alias = "DragFloatRange2")]
+    pub fn drag_float_range2_config<L: AsRef<str>>(&self, label: L) -> DragRange<'_, f32, L> {
+        DragRange::new(self, label)
+    }
+
+    /// Creates a drag integer range slider.
+    #[doc(alias = "DragIntRange2")]
+    pub fn drag_int_range2(&self, label: impl AsRef<str>, min: &mut i32, max: &mut i32) -> bool {
+        self.drag_int_range2_config(label).build(min, max)
+    }
+
+    /// Creates a drag integer range slider builder.
+    #[doc(alias = "DragIntRange2")]
+    pub fn drag_int_range2_config<L: AsRef<str>>(&self, label: L) -> DragRange<'_, i32, L> {
+        DragRange::new(self, label)
     }
 
     /// Creates a drag float2 slider (2 floats)

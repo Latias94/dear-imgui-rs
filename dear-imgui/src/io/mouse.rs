@@ -1,5 +1,6 @@
 use crate::input::MouseButton;
-use crate::io::{Io, assert_finite_f32, assert_finite_vec2};
+use crate::io::Io;
+use crate::validation::{assert_finite_f32, assert_finite_vec2};
 
 const MOUSE_BUTTON_COUNT: usize = 5;
 

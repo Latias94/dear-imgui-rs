@@ -103,6 +103,19 @@ fn button_and_invisible_button_validate_geometry_and_flags_before_ffi() {
 }
 
 #[test]
+fn invisible_button_mouse_conversion_rejects_unsupported_buttons() {
+    use imgui::{InvisibleButtonMouseButtons, MouseButton};
+
+    assert_eq!(
+        InvisibleButtonMouseButtons::try_from(MouseButton::Middle),
+        Ok(InvisibleButtonMouseButtons::MIDDLE)
+    );
+    for button in [MouseButton::Extra1, MouseButton::Extra2] {
+        assert_eq!(InvisibleButtonMouseButtons::try_from(button), Err(button));
+    }
+}
+
+#[test]
 fn arrow_button_rejects_none_direction_before_ffi() {
     let _guard = test_guard();
 
@@ -132,7 +145,7 @@ fn progress_list_box_and_selectable_validate_numeric_inputs_before_ffi() {
         let _ = ui
             .list_box_config("negative aligned list")
             .size([-1.0, 0.0])
-            .begin(ui);
+            .build(|| ui.text("First item"));
         let _ = ui
             .selectable_config("highlighted selectable")
             .flags(imgui::SelectableFlags::HIGHLIGHT | imgui::SelectableFlags::SELECT_ON_NAV)
@@ -149,7 +162,7 @@ fn progress_list_box_and_selectable_validate_numeric_inputs_before_ffi() {
             let _ = ui
                 .list_box_config("nan list")
                 .size([f32::NAN, 0.0])
-                .begin(ui);
+                .build(|| ());
         });
         assert_panics!({
             let _ = ui
@@ -167,4 +180,31 @@ fn progress_list_box_and_selectable_validate_numeric_inputs_before_ffi() {
                 .build();
         });
     });
+}
+
+#[test]
+fn list_box_restores_parent_window_on_panic() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let ui = ctx.frame();
+
+    ui.window("list box parent")
+        .size([320.0, 240.0], imgui::Condition::Always)
+        .build(|| {
+            let parent = ui.with_current_state_storage(|storage| storage.as_raw());
+            let mut reached = false;
+            assert_panics!({
+                let _ = ui.list_box_config("list scope").build(|| {
+                    reached = true;
+                    panic!("inside list box");
+                });
+            });
+            assert!(reached, "list box must be visible");
+            assert_eq!(
+                ui.with_current_state_storage(|storage| storage.as_raw()),
+                parent
+            );
+        })
+        .expect("parent must be visible");
 }

@@ -69,7 +69,7 @@ fn thread_safety_core_scope_tokens_are_ui_bound() {
     assert_not_impl_any!(dear_imgui_rs::DragDropTarget<'static>: Send, Sync);
 
     assert_not_impl_any!(dear_imgui_rs::ComboBoxToken<'static>: Send, Sync);
-    assert_not_impl_any!(dear_imgui_rs::ListBoxToken<'static>: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::ListBox<'static, &'static str>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::DisabledToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::ButtonRepeatToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::MainMenuBarToken<'static>: Send, Sync);

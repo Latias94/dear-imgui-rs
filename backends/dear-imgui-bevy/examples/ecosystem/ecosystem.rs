@@ -282,52 +282,53 @@ fn render_gizmo(ui: &dear_imgui_rs::Ui, frame_index: u64) {
     let available = ui.content_region_avail();
     let size = [available[0].max(420.0), available[1].max(240.0)];
     let pos = ui.cursor_screen_pos();
-    let draw_list = ui.get_window_draw_list();
-    draw_list
-        .add_rect(
-            pos,
-            [pos[0] + size[0], pos[1] + size[1]],
-            [0.07, 0.09, 0.12, 1.0],
-        )
-        .filled(true)
-        .build();
-    draw_list
-        .add_rect(
-            [pos[0] + 16.0, pos[1] + 16.0],
-            [pos[0] + size[0] - 16.0, pos[1] + size[1] - 16.0],
-            [0.22, 0.36, 0.52, 1.0],
-        )
-        .thickness(2.0)
-        .build();
-    let center = [pos[0] + size[0] * 0.5, pos[1] + size[1] * 0.54];
     let angle = (frame_index as f32) * 0.05;
-    let half = [96.0, 58.0];
-    let corners = [
-        [-half[0], -half[1]],
-        [half[0], -half[1]],
-        [half[0], half[1]],
-        [-half[0], half[1]],
-    ];
-    let rotated = corners.map(|p| {
-        [
-            center[0] + p[0] * angle.cos() - p[1] * angle.sin(),
-            center[1] + p[0] * angle.sin() + p[1] * angle.cos(),
-        ]
-    });
-    for pair in rotated.windows(2) {
+    ui.with_window_draw_list(|draw_list| {
         draw_list
-            .add_line(pair[0], pair[1], [0.95, 0.78, 0.28, 1.0])
+            .add_rect(
+                pos,
+                [pos[0] + size[0], pos[1] + size[1]],
+                [0.07, 0.09, 0.12, 1.0],
+            )
+            .filled(true)
+            .build();
+        draw_list
+            .add_rect(
+                [pos[0] + 16.0, pos[1] + 16.0],
+                [pos[0] + size[0] - 16.0, pos[1] + size[1] - 16.0],
+                [0.22, 0.36, 0.52, 1.0],
+            )
+            .thickness(2.0)
+            .build();
+        let center = [pos[0] + size[0] * 0.5, pos[1] + size[1] * 0.54];
+        let half = [96.0, 58.0];
+        let corners = [
+            [-half[0], -half[1]],
+            [half[0], -half[1]],
+            [half[0], half[1]],
+            [-half[0], half[1]],
+        ];
+        let rotated = corners.map(|p| {
+            [
+                center[0] + p[0] * angle.cos() - p[1] * angle.sin(),
+                center[1] + p[0] * angle.sin() + p[1] * angle.cos(),
+            ]
+        });
+        for pair in rotated.windows(2) {
+            draw_list
+                .add_line(pair[0], pair[1], [0.95, 0.78, 0.28, 1.0])
+                .thickness(4.0)
+                .build();
+        }
+        draw_list
+            .add_line(rotated[3], rotated[0], [0.95, 0.78, 0.28, 1.0])
             .thickness(4.0)
             .build();
-    }
-    draw_list
-        .add_line(rotated[3], rotated[0], [0.95, 0.78, 0.28, 1.0])
-        .thickness(4.0)
-        .build();
-    draw_list
-        .add_circle(center, 8.0, [0.28, 0.86, 0.62, 1.0])
-        .filled(true)
-        .build();
+        draw_list
+            .add_circle(center, 8.0, [0.28, 0.86, 0.62, 1.0])
+            .filled(true)
+            .build();
+    });
     ui.dummy(size);
 
     let gizmo = ui.guizmo();

@@ -313,7 +313,7 @@ fn reject_copy_link(entry: &FsEntry) -> io::Result<()> {
         return Err(Error::new(
             ErrorKind::Unsupported,
             format!(
-                "copying links or directory reparse points is unsupported: {}",
+                "copying links or name-surrogate reparse points is unsupported: {}",
                 entry.path.display()
             ),
         ));

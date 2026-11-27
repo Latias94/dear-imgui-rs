@@ -3,6 +3,7 @@ use std::ffi::c_void;
 
 use crate::internal::DataTypeKind;
 use crate::sys;
+use crate::validation::assert_finite_vec2;
 use crate::{NumericFormat, NumericFormatError, Ui};
 
 use super::SliderFlags;
@@ -11,7 +12,8 @@ use super::validation::validate_slider_preconditions;
 /// Builder for a vertical slider widget.
 #[derive(Clone, Debug)]
 #[must_use]
-pub struct VerticalSlider<Label, Data, Format = &'static str> {
+pub struct VerticalSlider<'ui, Label, Data, Format = &'static str> {
+    ui: &'ui Ui,
     label: Label,
     size: [f32; 2],
     min: Data,
@@ -20,28 +22,20 @@ pub struct VerticalSlider<Label, Data, Format = &'static str> {
     flags: SliderFlags,
 }
 
-impl<Label, Data> VerticalSlider<Label, Data>
+impl<'ui, Label, Data> VerticalSlider<'ui, Label, Data>
 where
     Label: AsRef<str>,
     Data: DataTypeKind,
 {
-    /// Constructs a new vertical slider builder with the given size and range.
-    ///
-    /// ```no_run
-    /// # use dear_imgui_rs::*;
-    /// # let mut ctx = Context::create();
-    /// # let ui = ctx.frame();
-    /// VerticalSlider::new("Example", [20.0, 20.0], i8::MIN, i8::MAX)
-    ///     .range(4, 8)
-    ///     // Remember to call .build(&ui)
-    ///     ;
-    /// ```
-    ///
-    /// It is safe, though up to C++ Dear ImGui, on how to handle when
-    /// `min > max`.
-    #[doc(alias = "VSliderScalar")]
-    pub fn new(label: Label, size: impl Into<[f32; 2]>, min: Data, max: Data) -> Self {
+    pub(super) fn new(
+        ui: &'ui Ui,
+        label: Label,
+        size: impl Into<[f32; 2]>,
+        min: Data,
+        max: Data,
+    ) -> Self {
         VerticalSlider {
+            ui,
             label,
             size: size.into(),
             min,
@@ -52,7 +46,7 @@ where
     }
 }
 
-impl<Label, Data, Format> VerticalSlider<Label, Data, Format>
+impl<'ui, Label, Data, Format> VerticalSlider<'ui, Label, Data, Format>
 where
     Label: AsRef<str>,
     Data: DataTypeKind,
@@ -64,10 +58,10 @@ where
     /// # use dear_imgui_rs::*;
     /// # let mut ctx = Context::create();
     /// # let ui = ctx.frame();
-    /// VerticalSlider::new("Example", [20.0, 20.0], i8::MIN, i8::MAX)
+    /// let mut value = 4i8;
+    /// ui.v_slider_config("Example", [20.0, 20.0], i8::MIN, i8::MAX)
     ///     .range(4, 8)
-    ///     // Remember to call .build(&ui)
-    ///     ;
+    ///     .build(&mut value);
     /// ```
     ///
     /// It is safe, though up to C++ Dear ImGui, on how to handle when
@@ -84,8 +78,9 @@ where
     pub fn display_format<'fmt>(
         self,
         display_format: NumericFormat<'fmt, Data>,
-    ) -> VerticalSlider<Label, Data, NumericFormat<'fmt, Data>> {
+    ) -> VerticalSlider<'ui, Label, Data, NumericFormat<'fmt, Data>> {
         VerticalSlider {
+            ui: self.ui,
             label: self.label,
             size: self.size,
             min: self.min,
@@ -99,7 +94,8 @@ where
     pub fn try_display_format<'fmt>(
         self,
         display_format: impl Into<Cow<'fmt, str>>,
-    ) -> Result<VerticalSlider<Label, Data, NumericFormat<'fmt, Data>>, NumericFormatError> {
+    ) -> Result<VerticalSlider<'ui, Label, Data, NumericFormat<'fmt, Data>>, NumericFormatError>
+    {
         Ok(self.display_format(NumericFormat::new(display_format)?))
     }
 
@@ -113,17 +109,17 @@ where
     /// Builds a vertical slider that is bound to the given value.
     ///
     /// Returns true if the slider value was changed.
-    pub fn build(self, ui: &Ui, value: &mut Data) -> bool {
+    pub fn build(self, value: &mut Data) -> bool {
         validate_slider_preconditions("VerticalSlider::build()", &self.min, &self.max, self.flags);
-        let size = sys::ImVec2::new(self.size[0], self.size[1]);
+        assert_finite_vec2("VerticalSlider::build()", "size", self.size);
 
-        ui.with_scratch_txt_with_opt(
+        self.ui.with_scratch_txt_with_opt(
             self.label,
             self.display_format,
             |label, display_format| unsafe {
                 sys::igVSliderScalar(
                     label,
-                    size,
+                    self.size.into(),
                     Data::KIND as i32,
                     value as *mut Data as *mut c_void,
                     &self.min as *const Data as *const c_void,

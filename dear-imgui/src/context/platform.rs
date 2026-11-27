@@ -66,7 +66,7 @@ impl Context {
             "mouse position must be finite"
         );
         with_bound_context(self.raw, || unsafe {
-            sys::igUpdateHoveredWindowAndCaptureFlags(sys::ImVec2::from(mouse_pos).into());
+            sys::igUpdateHoveredWindowAndCaptureFlags(sys::ImVec2::from(mouse_pos));
         });
     }
 

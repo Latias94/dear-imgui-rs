@@ -157,7 +157,7 @@ impl Organizer {
                 ui.child_window("collections")
                     .size([190.0, 0.0])
                     .border(true)
-                    .build(ui, || {
+                    .build(|| {
                         ui.text("Collections");
                         ui.separator();
                         for collection in Collection::ALL {
@@ -200,7 +200,7 @@ impl Organizer {
                 ui.child_window("assets")
                     .size([0.0, 0.0])
                     .border(true)
-                    .build(ui, || {
+                    .build(|| {
                         ui.text(self.current_collection.label());
                         ui.separator();
 

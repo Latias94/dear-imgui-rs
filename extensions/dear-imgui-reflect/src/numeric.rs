@@ -75,9 +75,9 @@ pub fn render_numeric<T: DataTypeKind + NumericDefaultRange + PartialOrd>(
                 drag = drag.range(min, max);
             }
             let changed = if let Some(format) = format {
-                drag.display_format(format).build(ui, value)
+                drag.display_format(format).build(value)
             } else {
-                drag.build(ui, value)
+                drag.build(value)
             };
             changed
                 | (!inspector.is_read_only()

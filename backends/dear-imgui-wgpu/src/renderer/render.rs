@@ -214,7 +214,9 @@ impl WgpuRenderer {
         }
         Self::preflight_draw_callback_support(draw_data.requirements())?;
         unsafe {
-            RendererRenderStateGuard::<crate::WgpuRenderStateStorage>::preflight(platform_io)
+            RendererRenderStateGuard::<crate::WgpuRenderStateStorage<'_, '_>>::preflight(
+                platform_io,
+            )
         }
         .map_err(map_renderer_render_state_error)?;
 

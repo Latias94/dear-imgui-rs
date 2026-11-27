@@ -362,15 +362,17 @@ mod tests {
     impl InputTextCallbackHandler for DefaultHandler {}
 
     fn callback_data_for_text(text: &mut [u8]) -> sys::ImGuiInputTextCallbackData {
-        let len = text.len().saturating_sub(1);
-        let mut data = sys::ImGuiInputTextCallbackData::default();
-        data.Buf = text.as_mut_ptr().cast();
-        data.BufTextLen = len as i32;
-        data.BufSize = text.len() as i32;
-        data.CursorPos = len as i32;
-        data.SelectionStart = 0;
-        data.SelectionEnd = len as i32;
-        data
+        let buffer_size = text.len();
+        let text_len = buffer_size.saturating_sub(1) as i32;
+        sys::ImGuiInputTextCallbackData {
+            Buf: text.as_mut_ptr().cast(),
+            BufTextLen: text_len,
+            BufSize: buffer_size as i32,
+            CursorPos: text_len,
+            SelectionStart: 0,
+            SelectionEnd: text_len,
+            ..Default::default()
+        }
     }
 
     #[test]

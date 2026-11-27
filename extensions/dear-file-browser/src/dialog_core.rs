@@ -1092,7 +1092,7 @@ impl FileDialogCore {
                 CoreEventOutcome::None
             }
             CoreEvent::MoveFocus { delta, modifiers } => {
-                self.move_focus(delta, modifiers);
+                let _ = self.move_focus(delta, modifiers);
                 CoreEventOutcome::None
             }
             CoreEvent::ClickEntry { id, modifiers } => {
@@ -1107,7 +1107,7 @@ impl FileDialogCore {
                 }
             }
             CoreEvent::SelectByPrefix(prefix) => {
-                self.select_by_prefix(&prefix);
+                let _ = self.select_by_prefix(&prefix);
                 CoreEventOutcome::None
             }
             CoreEvent::ActivateFocused => {
@@ -1613,10 +1613,10 @@ impl FileDialogCore {
     /// Select the next entry whose base name starts with the given prefix (case-insensitive).
     ///
     /// This is used by "type-to-select" navigation (IGFD-style).
-    pub(crate) fn select_by_prefix(&mut self, prefix: &str) {
+    pub(crate) fn select_by_prefix(&mut self, prefix: &str) -> Option<EntryId> {
         let prefix = prefix.trim();
         if prefix.is_empty() || self.entries.is_empty() {
-            return;
+            return None;
         }
         let prefix_lower = prefix.to_lowercase();
         let len = self.entries.len();
@@ -1636,6 +1636,7 @@ impl FileDialogCore {
         if let Some(id) = found {
             self.select_single_by_id(id);
         }
+        found
     }
 
     /// Applies Ctrl+A style selection to all currently visible entries.
@@ -1653,9 +1654,9 @@ impl FileDialogCore {
     }
 
     /// Moves keyboard focus up/down within the current view.
-    pub(crate) fn move_focus(&mut self, delta: i32, modifiers: Modifiers) {
+    pub(crate) fn move_focus(&mut self, delta: i32, modifiers: Modifiers) -> Option<EntryId> {
         if self.entries.is_empty() {
-            return;
+            return None;
         }
         let last = self.entries.len() - 1;
         let next_idx = match self.focused_id.and_then(|id| self.row_index(id)) {
@@ -1663,9 +1664,7 @@ impl FileDialogCore {
             None if delta < 0 => last,
             None => 0,
         };
-        let Some(target_id) = self.id_at_row(next_idx) else {
-            return;
-        };
+        let target_id = self.id_at_row(next_idx)?;
 
         if modifiers.shift {
             let anchor_id = self
@@ -1683,6 +1682,7 @@ impl FileDialogCore {
         } else {
             self.select_single_by_id(target_id);
         }
+        Some(target_id)
     }
 
     /// Activates the focused entry (Enter).
@@ -3362,7 +3362,10 @@ mod tests {
         set_view_files(&mut core, &["a", "b", "c", "d"]);
 
         core.click_entry(entry_id(&core, "b"), mods(false, false));
-        core.move_focus(2, mods(false, true));
+        assert_eq!(
+            core.move_focus(2, mods(false, true)),
+            Some(entry_id(&core, "d"))
+        );
         assert_eq!(selected_entry_names(&core), vec!["b", "c", "d"]);
         assert_eq!(core.focused_entry_id(), Some(entry_id(&core, "d")));
     }
@@ -3772,11 +3775,11 @@ mod tests {
         set_view_files(&mut core, &["alpha", "beta", "alpine"]);
         core.focused_id = Some(entry_id(&core, "alpha"));
 
-        core.select_by_prefix("al");
+        assert_eq!(core.select_by_prefix("al"), Some(entry_id(&core, "alpine")));
         assert_eq!(selected_entry_names(&core), vec!["alpine"]);
         assert_eq!(core.focused_entry_id(), Some(entry_id(&core, "alpine")));
 
-        core.select_by_prefix("al");
+        assert_eq!(core.select_by_prefix("al"), Some(entry_id(&core, "alpha")));
         assert_eq!(selected_entry_names(&core), vec!["alpha"]);
         assert_eq!(core.focused_entry_id(), Some(entry_id(&core, "alpha")));
     }

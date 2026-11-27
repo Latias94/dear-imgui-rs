@@ -325,6 +325,9 @@ impl ThumbnailCache {
     /// - Uploads completed images and fulfills the cache on the caller's thread, and
     /// - Requests retirement of evicted/replaced textures via [`ThumbnailRenderer::destroy`].
     ///
+    /// Requests abandoned by a stopped or replaced decoder can be retried.
+    /// Decoder shutdown does not cache a thumbnail failure.
+    ///
     /// The renderer must queue these requests until the current frame is consumed/recorded
     /// before unregistering IDs, and retain GPU storage for all relevant draws.
     ///
@@ -344,13 +347,18 @@ impl ThumbnailCache {
     fn poll_decoder(&mut self, backend: &mut ThumbnailBackend<'_>) {
         let mut index = 0;
         while index < self.decoding.len() {
-            let Some(decoded) = self.decoding[index].poll() else {
+            let Some(outcome) = self.decoding[index].poll(backend.decoder) else {
                 index += 1;
                 continue;
             };
             let decode = self.decoding.swap_remove(index);
-            let uploaded = decoded.and_then(|image| backend.renderer.upload_rgba8(&image));
-            self.fulfill_request(&decode.request, uploaded);
+            match outcome {
+                worker::DecodeOutcome::Finished(decoded) => {
+                    let uploaded = decoded.and_then(|image| backend.renderer.upload_rgba8(&image));
+                    self.fulfill_request(&decode.request, uploaded);
+                }
+                worker::DecodeOutcome::Abandoned => self.requests.push_back(decode.request),
+            }
         }
 
         while let Some(request) = self.requests.pop_front() {
@@ -361,7 +369,7 @@ impl ThumbnailCache {
                     break;
                 }
                 Err(worker::SubmitError::Closed(request)) => {
-                    self.fulfill_request(&request, Err("thumbnail decoder is closed".into()));
+                    self.pending.remove(&request.path);
                 }
             }
         }
@@ -563,5 +571,63 @@ mod tests {
             thread::yield_now();
         }
         assert_eq!(renderer.next, 1);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn replacing_a_decoder_resubmits_in_flight_work_without_caching_failure() {
+        use std::sync::{Arc, Mutex, mpsc};
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        struct Provider(Option<Arc<Mutex<mpsc::Receiver<()>>>>);
+
+        impl ThumbnailProvider for Provider {
+            fn decode(&mut self, _request: &ThumbnailRequest) -> Result<DecodedRgbaImage, String> {
+                if let Some(gate) = &self.0 {
+                    let _ = gate.lock().unwrap().recv();
+                    return Err("old decoder".into());
+                }
+                Ok(DecodedRgbaImage {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![255; 4],
+                })
+            }
+        }
+
+        let replacement = ThumbnailDecoder::spawn(|| Provider(None)).unwrap();
+        for keep_old_alive in [false, true] {
+            let (release, gate) = mpsc::channel();
+            let gate = Arc::new(Mutex::new(gate));
+            let previous = ThumbnailDecoder::spawn(|| Provider(Some(Arc::clone(&gate)))).unwrap();
+            let mut cache = ThumbnailCache::default();
+            let mut renderer = DummyRenderer::default();
+            let path = Path::new("/pending.png");
+            cache.request_visible(path, [64, 64]);
+            cache.maintain(&mut ThumbnailBackend {
+                decoder: &previous,
+                renderer: &mut renderer,
+            });
+            assert_eq!(cache.stats().in_flight, 1);
+            let previous = keep_old_alive.then_some(previous);
+            let mut backend = ThumbnailBackend {
+                decoder: &replacement,
+                renderer: &mut renderer,
+            };
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while cache.texture_id(path).is_none() {
+                cache.maintain(&mut backend);
+                assert_eq!(cache.stats().failed, 0);
+                assert!(
+                    Instant::now() < deadline,
+                    "replacement did not get the request"
+                );
+                thread::yield_now();
+            }
+            assert_eq!(cache.stats().in_flight, 0);
+            drop(release);
+            drop(previous);
+        }
     }
 }

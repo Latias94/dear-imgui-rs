@@ -15,25 +15,7 @@ bitflags::bitflags! {
 }
 
 #[cfg(feature = "serde")]
-impl Serialize for TableRowFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_i32(self.bits())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for TableRowFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let bits = i32::deserialize(deserializer)?;
-        Ok(TableRowFlags::from_bits_retain(bits))
-    }
-}
+crate::validation::impl_serde_i32_flags!(TableRowFlags);
 
 /// Target for table background colors.
 #[repr(i32)]

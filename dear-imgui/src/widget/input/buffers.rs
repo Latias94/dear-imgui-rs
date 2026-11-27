@@ -1,7 +1,6 @@
-use crate::sys;
 use std::mem;
 
-const MAX_INPUT_BUFFER_SIZE: usize = i32::MAX as usize - 1;
+pub(super) const MAX_INPUT_BUFFER_SIZE: usize = i32::MAX as usize - 1;
 
 fn validate_input_buffer_size(size: usize) {
     // InputTextEx takes an int and allocates its internal TextA with buf_size + 1.
@@ -42,18 +41,14 @@ impl Drop for StringInputBuffer<'_> {
     }
 }
 
-pub(super) fn resize_string_input_buffer(
-    buffer: &mut Vec<u8>,
-    data: &mut sys::ImGuiInputTextCallbackData,
-) {
-    let requested = usize::try_from(data.BufSize).unwrap_or(0);
-    let additional = requested.saturating_sub(buffer.len());
-    if additional != 0 && buffer.try_reserve(additional).is_ok() {
+pub(super) fn resize_string_input_buffer(buffer: &mut Vec<u8>, requested: i32) {
+    if let Ok(requested) = usize::try_from(requested)
+        && requested <= MAX_INPUT_BUFFER_SIZE
+        && requested > buffer.len()
+        && buffer.try_reserve(requested - buffer.len()).is_ok()
+    {
         buffer.resize(requested, 0);
-        data.BufDirty = true;
     }
-    data.Buf = buffer.as_mut_ptr().cast();
-    data.BufSize = buffer.len() as i32;
 }
 
 pub(super) fn finish_string_input_buffer(target: &mut String, mut buffer: Vec<u8>) {

@@ -1,7 +1,7 @@
-use super::validation::assert_finite_vec2;
 use crate::Ui;
 use crate::scope::{NativeScopePop, NativeScopeToken};
 use crate::sys;
+use crate::validation::assert_finite_vec2;
 
 /// Tracks a pushed clip rect that will be popped on drop.
 ///

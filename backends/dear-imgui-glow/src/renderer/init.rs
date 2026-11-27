@@ -726,4 +726,48 @@ mod tests {
         assert_eq!(consumer.generation(), 1);
         reset(FakeFailure::None);
     }
+
+    #[test]
+    fn shutdown_unpublishes_only_the_owner_while_another_context_is_current() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset(FakeFailure::None);
+        let gl = std::rc::Rc::new(fake_gl());
+        let mut owner = ImGuiContext::create();
+        let mut renderer = GlowRenderer::with_shared_context(gl.clone(), &mut owner).unwrap();
+        let mut other = ImGuiContext::create();
+        let mut other_renderer = GlowRenderer::with_shared_context(gl, &mut other).unwrap();
+        let other_raw = other.as_raw();
+        let other_flags = other.io().backend_flags();
+        let other_renderer_data = other.io().backend_renderer_user_data();
+
+        other.binding().with_bound_context(|| {
+            assert_eq!(unsafe { sys::igGetCurrentContext() }, other_raw);
+            renderer.shutdown(&mut owner).unwrap();
+            assert_eq!(unsafe { sys::igGetCurrentContext() }, other_raw);
+        });
+
+        assert!(owner.io().backend_renderer_user_data().is_null());
+        assert!(owner.io().backend_renderer_name().is_none());
+        assert_eq!(
+            owner.io().backend_flags().bits() & RENDERER_RESERVED_FLAGS,
+            0
+        );
+        let platform_io = owner.platform_io();
+        assert!(platform_io.draw_callback_reset_render_state_raw().is_none());
+        assert!(platform_io.draw_callback_set_sampler_linear_raw().is_none());
+        assert!(
+            platform_io
+                .draw_callback_set_sampler_nearest_raw()
+                .is_none()
+        );
+        assert!(
+            platform_io
+                .draw_callback_set_sampler_from_texture_raw()
+                .is_none()
+        );
+        assert_eq!(other.io().backend_renderer_user_data(), other_renderer_data);
+        assert_eq!(other.io().backend_flags(), other_flags);
+        other_renderer.validate_renderer_state().unwrap();
+        other_renderer.shutdown(&mut other).unwrap();
+    }
 }

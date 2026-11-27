@@ -218,6 +218,17 @@ impl<'ui, 'session> Inspector<'ui, 'session> {
         })
     }
 
+    pub(crate) fn render_draft_value<T: ImGuiValue>(&self, label: &str, value: &mut T) {
+        let mut draft = Self {
+            ui: self.ui,
+            session: self.session,
+            context: self.context,
+            response: ReflectResponse::default(),
+            scope: Rc::clone(&self.scope),
+        };
+        T::imgui_value(&mut draft, label, value);
+    }
+
     /// Enters a dynamic path segment until the returned guard is dropped.
     ///
     /// This is public for hand-written implementations that need the same
@@ -521,6 +532,96 @@ mod tests {
                     assert_eq!(*value, 0);
                 },
             );
+        }
+    }
+
+    #[test]
+    fn editing_or_cancelling_map_popup_drafts_does_not_report_outer_changes() {
+        #[derive(Clone, Default)]
+        struct DraftValue {
+            edits: usize,
+            cancel: bool,
+        }
+
+        impl ImGuiValue for DraftValue {
+            fn imgui_value(
+                inspector: &mut Inspector<'_, '_>,
+                label: &str,
+                value: &mut Self,
+            ) -> bool {
+                assert_eq!(label, "Value##new_value");
+                value.edits += 1;
+                inspector.record_event(ReflectEvent::VecInserted {
+                    path: inspector.current_path(),
+                    index: 0,
+                });
+                if value.cancel {
+                    inspector.ui().close_current_popup();
+                }
+                true
+            }
+        }
+
+        let _guard = test_guard();
+        for ordered in [false, true] {
+            let mut context = test_ui_context();
+            let session = ReflectSession::new();
+            let settings = crate::MapSettings {
+                dropdown: false,
+                ..crate::MapSettings::editable()
+            };
+            let mut ordered_map = std::collections::BTreeMap::<String, DraftValue>::new();
+            let mut hash_map = HashMap::<String, DraftValue>::new();
+            let popup = "add_map_item_popup";
+
+            for opening in [true, false] {
+                let ui = context.frame();
+                ui.window("draft test")
+                    .size([400.0, 300.0], imgui::Condition::Always)
+                    .build(|| {
+                        let mut inspector = session.inspector(ui);
+                        let identity = {
+                            let _map_id = ui.push_id("Map");
+                            if opening {
+                                ui.open_popup(popup);
+                            }
+                            inspector.map_draft_identity::<DraftValue>(popup)
+                        };
+                        let changed = if ordered {
+                            crate::imgui_btree_map_with_settings(
+                                &mut inspector,
+                                "Map",
+                                &mut ordered_map,
+                                &settings,
+                            )
+                        } else {
+                            crate::imgui_hash_map_with_settings(
+                                &mut inspector,
+                                "Map",
+                                &mut hash_map,
+                                &settings,
+                            )
+                        };
+                        assert!(!changed);
+                        assert!(inspector.response().is_empty());
+                        assert!(ordered_map.is_empty() && hash_map.is_empty());
+                        let _map_id = ui.push_id("Map");
+                        assert_eq!(ui.is_popup_open(popup), opening);
+                        if opening {
+                            inspector.with_map_draft::<DraftValue, _>(
+                                identity,
+                                String::new,
+                                |_, _, draft| {
+                                    assert_eq!(draft.edits, 1);
+                                    draft.cancel = true;
+                                },
+                            );
+                        }
+                    })
+                    .unwrap();
+                drop(context.render_legacy());
+            }
+            assert!(session.map_drafts.borrow().is_empty());
         }
     }
 

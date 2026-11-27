@@ -1,5 +1,5 @@
-use super::validation::{assert_finite_f32, assert_finite_vec2};
 use crate::scope::{NativeScopePop, NativeScopeToken};
+use crate::validation::{assert_finite_f32, assert_finite_vec2};
 use crate::{Ui, sys};
 
 /// Tracks an indentation scope started with [`Ui::begin_indent`] or

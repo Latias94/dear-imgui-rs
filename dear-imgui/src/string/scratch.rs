@@ -23,9 +23,11 @@ impl ScratchBuffers {
     #[inline]
     pub(crate) fn with_c_string<R>(&self, text: &str, f: impl FnOnce(*const c_char) -> R) -> R {
         let bytes = text.as_bytes();
-        if bytes.len() < 64 && !bytes.contains(&0) {
+        if bytes.len() < 64 {
             let mut buffer = [0; 64];
-            buffer[..bytes.len()].copy_from_slice(bytes);
+            for (slot, &byte) in buffer.iter_mut().zip(bytes) {
+                *slot = if byte == 0 { b'?' } else { byte };
+            }
             return f(buffer.as_ptr().cast());
         }
         self.with(|buffer| f(buffer.scratch_txt(text)))

@@ -1,6 +1,6 @@
 use std::ffi::c_void;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use dear_imgui_rs::ffi::guard_native_callback;
 use dear_imgui_rs::internal::RawCast;
 use dear_imgui_rs::platform_io::{PlatformIo, Viewport};
 use dear_imgui_rs::{BackendFlags, Context, ContextLifecycle};
@@ -1151,74 +1151,67 @@ pub(super) fn run_work_callback(
     callback_name: &'static str,
     callback: impl FnOnce(&RuntimeControl) -> Result<(), AshViewportError>,
 ) {
-    let Some(control) = runtime_for_context(current_context()) else {
-        return;
-    };
-    if !control.is_callback_accessible() {
-        return;
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        detect_runtime_contract_drift(&control);
-        if !control.can_enter_callback() {
-            return None;
+    guard_renderer_callback(callback_name, |control| {
+        if !control.is_callback_accessible() {
+            return;
         }
-        match control.binding().lifecycle() {
-            ContextLifecycle::Alive => control
-                .binding()
-                .try_with_bound_context(|| {
-                    #[cfg(test)]
-                    control.maybe_panic_callback_for_test();
-                    callback(&control)
-                })
-                .ok(),
-            ContextLifecycle::Dropping | ContextLifecycle::NativeDestroyed => None,
-            _ => None,
+        detect_runtime_contract_drift(control);
+        if !control.can_enter_callback() || control.binding().lifecycle() != ContextLifecycle::Alive
+        {
+            return;
         }
-    }));
-    match result {
-        Ok(Some(Err(error))) => control.record_entry_fault(error),
-        Ok(Some(Ok(()))) | Ok(None) => {}
-        Err(_) => control.record_entry_fault(AshViewportError::CallbackPanicked {
-            callback: callback_name,
-        }),
-    }
+        if let Ok(Err(error)) = control.binding().try_with_bound_context(|| {
+            #[cfg(test)]
+            control.maybe_panic_callback_for_test();
+            callback(control)
+        }) {
+            control.record_entry_fault(error);
+        }
+    });
 }
 
 fn run_cleanup_callback(
     callback_name: &'static str,
     callback: impl FnOnce(&RuntimeControl) -> Result<(), AshViewportError>,
 ) {
-    let Some(control) = runtime_for_context(current_context()) else {
-        return;
-    };
-    if !control.is_cleanup_callback_accessible() {
-        return;
-    }
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        control
-            .binding()
-            .try_with_bound_context(|| {
-                if control.should_validate_runtime_contract() {
-                    detect_runtime_contract_drift(&control);
-                }
-                if control.is_cleanup_callback_accessible() {
-                    #[cfg(test)]
-                    control.maybe_panic_callback_for_test();
-                    Some(callback(&control))
-                } else {
-                    None
-                }
-            })
-            .ok()
-            .flatten()
-    }));
-    match result {
-        Ok(Some(Err(error))) => control.record_entry_fault(error),
-        Ok(Some(Ok(()))) | Ok(None) => {}
-        Err(_) => control.record_entry_fault(AshViewportError::CallbackPanicked {
-            callback: callback_name,
-        }),
-    }
+    guard_renderer_callback(callback_name, |control| {
+        if !control.is_cleanup_callback_accessible() {
+            return;
+        }
+        if let Ok(Err(error)) = control.binding().try_with_bound_context(|| {
+            if control.should_validate_runtime_contract() {
+                detect_runtime_contract_drift(control);
+            }
+            if control.is_cleanup_callback_accessible() {
+                #[cfg(test)]
+                control.maybe_panic_callback_for_test();
+                callback(control)
+            } else {
+                Ok(())
+            }
+        }) {
+            control.record_entry_fault(error);
+        }
+    });
+}
+
+fn guard_renderer_callback(callback_name: &'static str, callback: impl FnOnce(&RuntimeControl)) {
+    let context = current_context();
+    guard_native_callback(
+        (),
+        || {
+            if let Some(control) = runtime_for_context(context) {
+                callback(&control);
+            }
+        },
+        || {
+            if let Some(control) = runtime_for_context(context) {
+                control.record_entry_fault(AshViewportError::CallbackPanicked {
+                    callback: callback_name,
+                });
+            }
+        },
+    );
 }
 
 #[cfg(test)]

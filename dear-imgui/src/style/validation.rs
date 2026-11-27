@@ -1,23 +1,10 @@
 use super::{Direction, StyleVar, StyleVarVec2};
+use crate::validation::{assert_finite_f32, assert_finite_vec2, assert_finite_vec4};
 
 const TABLE_ANGLED_HEADERS_MAX_ANGLE: f32 = 50.0 * std::f32::consts::PI / 180.0;
 
-pub(super) fn assert_finite_f32(caller: &str, name: &str, value: f32) {
-    assert!(value.is_finite(), "{caller} {name} must be finite");
-}
-
-pub(super) fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
-    assert!(
-        value[0].is_finite() && value[1].is_finite(),
-        "{caller} {name} must contain finite values"
-    );
-}
-
 pub(crate) fn validate_style_color(caller: &str, name: &str, value: [f32; 4]) {
-    assert!(
-        value.iter().all(|component| component.is_finite()),
-        "{caller} {name} must contain finite values"
-    );
+    assert_finite_vec4(caller, name, value);
 }
 
 pub(super) fn assert_positive_f32(caller: &str, name: &str, value: f32) {

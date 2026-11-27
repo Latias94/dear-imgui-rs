@@ -7,12 +7,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef IMGUI_HAS_DOCK
-
 extern "C" ImGuiContext* const* dear_imgui_rs_current_context_slot() noexcept
 {
     return &GImGui;
 }
+
+#ifdef IMGUI_HAS_DOCK
 
 struct DearImguiRsPlatformIoHookStorage
 {

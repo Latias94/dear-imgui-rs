@@ -139,6 +139,91 @@ fn read_texture_texels(device: &wgpu::Device, readback: &wgpu::Buffer) -> [[u8; 
     pixels
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn live_draw_rebinds_zero_and_nonzero_vertex_offsets_after_raw_callbacks() -> RendererResult<()> {
+    use crate::{WgpuRenderState, texture::request_test_device_and_adapter};
+    use dear_imgui_rs::{Color, sys};
+    use wgpu::{BufferDescriptor, BufferUsages, DownlevelFlags, TextureFormat};
+
+    unsafe extern "C" fn replace_vertex_buffer(
+        _list: *const sys::ImDrawList,
+        _command: *const sys::ImDrawCmd,
+    ) {
+        let _ = unsafe {
+            WgpuRenderState::with_current(|mut state| {
+                let (device, pass) = state.resources();
+                let blank_vertices = device.create_buffer(&BufferDescriptor {
+                    label: Some("raw callback vertex buffer"),
+                    size: 256,
+                    usage: BufferUsages::VERTEX,
+                    mapped_at_creation: false,
+                });
+                pass.set_vertex_buffer(0, blank_vertices.slice(..));
+            })
+        };
+    }
+
+    let Some((device, queue, adapter)) = request_test_device_and_adapter() else {
+        return Ok(());
+    };
+    let adapter_supports_base_vertex = adapter
+        .get_downlevel_capabilities()
+        .flags
+        .contains(DownlevelFlags::BASE_VERTEX);
+    for (adapter, expected_base_vertex) in
+        [(None, false), (Some(adapter), adapter_supports_base_vertex)]
+    {
+        let mut context = Context::create();
+        let mut init_info =
+            WgpuInitInfo::new(device.clone(), queue.clone(), TextureFormat::Rgba8Unorm);
+        init_info.adapter = adapter;
+        let mut renderer = WgpuRenderer::new(init_info, &mut context)?;
+        assert_eq!(
+            renderer
+                .gpu
+                .backend_data
+                .as_ref()
+                .unwrap()
+                .supports_base_vertex,
+            expected_base_vertex,
+        );
+        context.io_mut().set_display_size([16.0, 16.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        {
+            let ui = context.frame();
+            let background = ui.get_background_draw_list();
+            unsafe { background.add_callback(replace_vertex_buffer, std::ptr::null_mut(), 0) };
+            background
+                .add_rect([0.0, 0.0], [8.0, 16.0], Color::RED)
+                .filled(true)
+                .build();
+
+            let foreground = ui.get_foreground_draw_list();
+            foreground
+                .add_rect([8.0, 0.0], [9.0, 1.0], Color::WHITE)
+                .filled(true)
+                .build();
+            unsafe { foreground.add_callback(replace_vertex_buffer, std::ptr::null_mut(), 0) };
+            foreground
+                .add_rect([8.0, 0.0], [16.0, 16.0], Color::GREEN)
+                .filled(true)
+                .build();
+        }
+
+        let (commands, readback) = record_texture_readback(&device, |pass| {
+            let pending = context.try_render(renderer.renderer_consumer()?)?;
+            renderer.render(pending, pass, FramebufferExtent::new(16, 16))?;
+            Ok(())
+        })?;
+        queue.submit([commands]);
+        let pixels = read_texture_texels(&device, &readback);
+        renderer.shutdown(&mut context)?;
+        assert_eq!(pixels, [[255, 0, 0, 255], [0, 255, 0, 255]]);
+    }
+    Ok(())
+}
+
 #[test]
 fn snapshot_managed_update_preserves_unsubmitted_texture_contents() -> RendererResult<()> {
     let (device, queue) = request_test_device().expect("managed isolation requires a WGPU adapter");

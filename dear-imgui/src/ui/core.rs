@@ -1,17 +1,6 @@
 use super::*;
 
 impl Ui {
-    pub(crate) fn assert_finite_f32(caller: &str, name: &str, value: f32) {
-        assert!(value.is_finite(), "{caller} {name} must be finite");
-    }
-
-    pub(super) fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
-        assert!(
-            value[0].is_finite() && value[1].is_finite(),
-            "{caller} {name} must contain finite values"
-        );
-    }
-
     /// Creates a new Ui instance
     ///
     /// This should only be called by Context::create()
@@ -65,7 +54,8 @@ impl Ui {
         if current == self.ctx {
             f()
         } else {
-            crate::context::binding::with_bound_context(self.ctx, f)
+            let _bound = crate::context::binding::RawBoundContextGuard::bind(self.ctx);
+            f()
         }
     }
 
@@ -116,7 +106,8 @@ impl Ui {
     /// still honoring the `Ui` that created the safe wrapper.
     pub fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
         self.assert_native_scopes_usable();
-        self.ctx_binding.with_bound_context(f)
+        let _bound = crate::context::binding::RawBoundContextGuard::bind(self.ctx);
+        f()
     }
 
     /// Returns an immutable reference to the inputs/outputs object

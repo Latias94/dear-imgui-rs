@@ -127,23 +127,11 @@ pub struct PlacesMergeOptions {
 ///
 /// This is intentionally dependency-free (no serde). The compact persistence
 /// format is designed to be stable and forward-compatible.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct Places {
     /// Places groups shown in UI.
     pub groups: Vec<PlaceGroup>,
-    #[cfg(windows)]
-    drive_scan: Option<crate::background::BackgroundTask<u32>>,
-}
-
-impl Clone for Places {
-    fn clone(&self) -> Self {
-        Self {
-            groups: self.groups.clone(),
-            #[cfg(windows)]
-            drive_scan: None,
-        }
-    }
 }
 
 impl Places {
@@ -190,63 +178,47 @@ impl Places {
 
     /// Rebuilds the system places group (home/root/drives).
     ///
-    /// On Windows this starts a best-effort drive scan without waiting. The
-    /// dialog polls for results on draw. Standalone callers can use
-    /// [`Self::poll_system_places`] to apply drives when ready.
+    /// On Windows this snapshots the assigned drive letters without probing
+    /// whether remote drives or removable media are reachable.
     pub fn refresh_system_places(&mut self) {
-        let group = self.ensure_group_mut(Self::SYSTEM_GROUP);
-        group.places.clear();
-
-        if let Some(home) = home_dir() {
-            group.places.push(Place::code("Home", home));
-        }
-
-        group.places.push(Place::code(
-            "Root",
-            PathBuf::from(std::path::MAIN_SEPARATOR.to_string()),
-        ));
-
         #[cfg(windows)]
-        if self.drive_scan.is_none() {
-            self.drive_scan =
-                crate::background::BackgroundTask::spawn("dear-file-browser-drives", |cancelled| {
-                    use std::sync::atomic::Ordering;
-                    use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
-                    if cancelled.load(Ordering::Relaxed) {
-                        return 0;
-                    }
-                    // SAFETY: This Win32 call takes no arguments and returns a drive bitmask.
-                    unsafe { GetLogicalDrives() }
-                })
-                .ok();
-        }
+        let drives = {
+            use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
+
+            // SAFETY: This Win32 call takes no arguments and returns a drive bitmask.
+            windows_drive_places(unsafe { GetLogicalDrives() })
+        };
+        #[cfg(not(windows))]
+        let drives = std::iter::empty();
+        self.rebuild_system_places(home_dir(), drives);
     }
 
-    /// Applies a completed background drive scan without blocking.
-    ///
-    /// Returns whether drive entries were added. Windows lists mounted drive letters;
-    /// this does not check whether a remote drive or removable medium is reachable.
-    pub fn poll_system_places(&mut self) -> bool {
-        #[cfg(windows)]
-        if let Some(result) = self.drive_scan.as_ref().and_then(|scan| scan.poll()) {
-            self.drive_scan = None;
-            if let Ok(mask) = result
-                && mask != 0
+    fn rebuild_system_places(
+        &mut self,
+        home: Option<PathBuf>,
+        drives: impl Iterator<Item = Place>,
+    ) {
+        let group = self.ensure_group_mut(Self::SYSTEM_GROUP);
+        group.places.clear();
+        let root = Place::code("Root", PathBuf::from(std::path::MAIN_SEPARATOR_STR));
+        for place in home
+            .map(|path| Place::code("Home", path))
+            .into_iter()
+            .chain([root])
+            .chain(drives)
+        {
+            if !group
+                .places
+                .iter()
+                .any(|existing| existing.path == place.path)
             {
-                let group = self.ensure_group_mut(Self::SYSTEM_GROUP);
-                group.places.extend(windows_drive_places(mask));
-                return true;
+                group.places.push(place);
             }
         }
-        false
     }
 
     fn empty() -> Self {
-        Self {
-            groups: Vec::new(),
-            #[cfg(windows)]
-            drive_scan: None,
-        }
+        Self { groups: Vec::new() }
     }
 
     /// Adds a place to a group if its path isn't already present in that group.
@@ -724,6 +696,33 @@ impl std::error::Error for PlacesDeserializeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn cloned_system_places_keep_the_drive_snapshot_without_duplicate_paths() {
+        let mut places = Places::empty();
+        let home = PathBuf::from(r"C:\");
+        places.rebuild_system_places(
+            Some(home.clone()),
+            windows_drive_places((1 << 2) | (1 << 4)),
+        );
+        let snapshot = places.clone();
+        places.rebuild_system_places(None, windows_drive_places(0));
+
+        let system = snapshot
+            .groups
+            .iter()
+            .find(|g| g.label == Places::SYSTEM_GROUP)
+            .unwrap();
+        assert_eq!(
+            system.places,
+            [
+                Place::code("Home", home),
+                Place::code("Root", PathBuf::from(r"\")),
+                Place::code(r"E:\", PathBuf::from(r"E:\")),
+            ]
+        );
+    }
 
     #[test]
     fn add_bookmark_dedupes_by_path() {

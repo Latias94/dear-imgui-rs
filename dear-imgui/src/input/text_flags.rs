@@ -1,7 +1,5 @@
 use crate::sys;
 use bitflags::bitflags;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 macro_rules! impl_input_flag_raw {
     ($ty:ident) => {
@@ -9,27 +7,6 @@ macro_rules! impl_input_flag_raw {
             #[inline]
             pub(crate) fn raw(self) -> sys::ImGuiInputTextFlags {
                 self.bits() as sys::ImGuiInputTextFlags
-            }
-        }
-
-        #[cfg(feature = "serde")]
-        impl Serialize for $ty {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: serde::Serializer,
-            {
-                serializer.serialize_i32(self.bits())
-            }
-        }
-
-        #[cfg(feature = "serde")]
-        impl<'de> Deserialize<'de> for $ty {
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                let bits = i32::deserialize(deserializer)?;
-                Ok(Self::from_bits_retain(bits))
             }
         }
     };
@@ -180,3 +157,6 @@ bitflags! {
 impl_input_flag_raw!(InputTextFlags);
 impl_input_flag_raw!(InputTextMultilineFlags);
 impl_input_flag_raw!(InputScalarFlags);
+
+#[cfg(feature = "serde")]
+crate::validation::impl_serde_i32_flags!(InputTextFlags, InputTextMultilineFlags, InputScalarFlags);

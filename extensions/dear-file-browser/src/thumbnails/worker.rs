@@ -11,6 +11,11 @@ use super::{DecodedRgbaImage, MAX_PENDING_REQUESTS, ThumbnailProvider, Thumbnail
 const WORKERS: usize = 2;
 type DecodeResult = Result<DecodedRgbaImage, String>;
 
+pub(super) enum DecodeOutcome {
+    Finished(DecodeResult),
+    Abandoned,
+}
+
 struct DecodeJob {
     request: ThumbnailRequest,
     reply: mpsc::SyncSender<DecodeResult>,
@@ -24,16 +29,14 @@ pub(super) struct PendingDecode {
 }
 
 impl PendingDecode {
-    pub(super) fn poll(&self) -> Option<DecodeResult> {
-        if self.cancelled.load(Ordering::Relaxed) {
-            return Some(Err("thumbnail decoder was stopped".into()));
+    pub(super) fn poll(&self, decoder: &ThumbnailDecoder) -> Option<DecodeOutcome> {
+        if !Arc::ptr_eq(&self.cancelled, &decoder.cancelled) {
+            return Some(DecodeOutcome::Abandoned);
         }
         match self.reply.try_recv() {
-            Ok(result) => Some(result),
+            Ok(result) => Some(DecodeOutcome::Finished(result)),
             Err(mpsc::TryRecvError::Empty) => None,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                Some(Err("thumbnail decoder was stopped".into()))
-            }
+            Err(mpsc::TryRecvError::Disconnected) => Some(DecodeOutcome::Abandoned),
         }
     }
 }

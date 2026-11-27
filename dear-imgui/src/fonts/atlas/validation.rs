@@ -2,9 +2,7 @@ use crate::sys;
 
 pub(super) const RASTERIZER_MULTIPLY_MAX: f32 = 16_000_000.0;
 
-pub(super) fn assert_finite_f32(caller: &str, name: &str, value: f32) {
-    assert!(value.is_finite(), "{caller} {name} must be finite");
-}
+use crate::validation::assert_finite_f32;
 
 pub(super) fn assert_non_negative_f32(caller: &str, name: &str, value: f32) {
     assert_finite_f32(caller, name, value);
@@ -14,13 +12,6 @@ pub(super) fn assert_non_negative_f32(caller: &str, name: &str, value: f32) {
 pub(super) fn assert_positive_f32(caller: &str, name: &str, value: f32) {
     assert_finite_f32(caller, name, value);
     assert!(value > 0.0, "{caller} {name} must be positive");
-}
-
-pub(super) fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
-    assert!(
-        value[0].is_finite() && value[1].is_finite(),
-        "{caller} {name} must contain finite values"
-    );
 }
 
 pub(super) fn assert_non_negative_i8(caller: &str, name: &str, value: i8) {

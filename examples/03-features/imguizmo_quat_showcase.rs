@@ -1005,7 +1005,7 @@ fn show_quat_gizmo_window(
             id_presets.pop();
 
             ui.separator();
-            ui.slider("Gizmo size", 100.0, 400.0, size);
+            ui.slider("Gizmo size", size, 100.0, 400.0);
 
             // Show values
             let (x, y, z, w) = (rot.x, rot.y, rot.z, rot.w);
@@ -1062,10 +1062,10 @@ fn show_quat_gizmo_window(
                 }
 
                 ui.separator();
-                ui.slider("Feeling Rot", 0.2, 3.0, feeling_rot);
-                ui.slider("Pan Scale", 0.1, 5.0, pan_scale);
-                ui.slider("Dolly Scale", 0.1, 5.0, dolly_scale);
-                ui.slider("Dolly Wheel", 0.1, 5.0, dolly_wheel_scale);
+                ui.slider("Feeling Rot", feeling_rot, 0.2, 3.0);
+                ui.slider("Pan Scale", pan_scale, 0.1, 5.0);
+                ui.slider("Dolly Scale", dolly_scale, 0.1, 5.0);
+                ui.slider("Dolly Wheel", dolly_wheel_scale, 0.1, 5.0);
                 ui.gizmo_quat().set_gizmo_feeling_rot(*feeling_rot);
                 ui.gizmo_quat().set_pan_scale(*pan_scale);
                 ui.gizmo_quat().set_dolly_scale(*dolly_scale);
@@ -1121,9 +1121,9 @@ fn show_quat_gizmo_window(
                 ui.separator();
                 ui.text("Geometry (Axes/Solid)");
                 let id_geo = ui.push_id("geometry");
-                ui.slider("Axes Length", 0.1, 3.0, axes_len);
-                ui.slider("Axes Thickness", 0.1, 3.0, axes_thickness);
-                ui.slider("Cone Thickness", 0.1, 3.0, cone_thickness);
+                ui.slider("Axes Length", axes_len, 0.1, 3.0);
+                ui.slider("Axes Thickness", axes_thickness, 0.1, 3.0);
+                ui.slider("Cone Thickness", cone_thickness, 0.1, 3.0);
                 if ui.button("Apply Axes Size") {
                     let v = glam::Vec3::new(*axes_len, *axes_thickness, *cone_thickness);
                     ui.gizmo_quat().resize_axes_of(&v);
@@ -1132,7 +1132,7 @@ fn show_quat_gizmo_window(
                 if ui.button("Restore Axes Size") {
                     ui.gizmo_quat().restore_axes_size();
                 }
-                ui.slider("Solid Size", 0.1, 3.0, solid_size);
+                ui.slider("Solid Size", solid_size, 0.1, 3.0);
                 ui.same_line();
                 if ui.button("Apply Solid Size") {
                     ui.gizmo_quat().resize_solid_of(*solid_size);

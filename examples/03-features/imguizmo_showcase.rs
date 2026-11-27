@@ -526,7 +526,7 @@ impl AppWindow {
                         ui.checkbox("Minimap", &mut self.state.graph_minimap_enabled);
                         ui.same_line();
                         ui.set_next_item_width(100.0);
-                        let _ = ui.slider("Snap", 0.0, 50.0, &mut self.state.graph_snap);
+                        let _ = ui.slider("Snap", &mut self.state.graph_snap, 0.0, 50.0);
                         ui.same_line();
                         ui.text(format!(
                             "Selected: {} nodes",

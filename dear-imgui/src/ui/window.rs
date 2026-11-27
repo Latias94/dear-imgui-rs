@@ -1,4 +1,5 @@
 use super::*;
+use crate::validation::assert_finite_vec2;
 
 impl Ui {
     /// Creates a window builder
@@ -28,7 +29,7 @@ impl Ui {
     /// Sets the position of the current window with a condition.
     #[doc(alias = "SetWindowPos")]
     pub fn set_window_pos_with_cond(&self, pos: [f32; 2], cond: crate::Condition) {
-        Self::assert_finite_vec2("Ui::set_window_pos_with_cond()", "position", pos);
+        assert_finite_vec2("Ui::set_window_pos_with_cond()", "position", pos);
         let pos_vec = sys::ImVec2_c {
             x: pos[0],
             y: pos[1],
@@ -52,7 +53,7 @@ impl Ui {
         pos: [f32; 2],
         cond: crate::Condition,
     ) {
-        Self::assert_finite_vec2("Ui::set_window_pos_by_name_with_cond()", "position", pos);
+        assert_finite_vec2("Ui::set_window_pos_by_name_with_cond()", "position", pos);
         let pos_vec = sys::ImVec2_c {
             x: pos[0],
             y: pos[1],
@@ -71,7 +72,7 @@ impl Ui {
     /// Sets the size of the current window with a condition.
     #[doc(alias = "SetWindowSize")]
     pub fn set_window_size_with_cond(&self, size: [f32; 2], cond: crate::Condition) {
-        Self::assert_finite_vec2("Ui::set_window_size_with_cond()", "size", size);
+        assert_finite_vec2("Ui::set_window_size_with_cond()", "size", size);
         let size_vec = sys::ImVec2_c {
             x: size[0],
             y: size[1],
@@ -95,7 +96,7 @@ impl Ui {
         size: [f32; 2],
         cond: crate::Condition,
     ) {
-        Self::assert_finite_vec2("Ui::set_window_size_by_name_with_cond()", "size", size);
+        assert_finite_vec2("Ui::set_window_size_by_name_with_cond()", "size", size);
         let size_vec = sys::ImVec2_c {
             x: size[0],
             y: size[1],

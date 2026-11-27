@@ -446,6 +446,69 @@ impl UnknownCountListClipperToken<'_> {
     }
 }
 
+pub struct ListClipperIterator<'ui> {
+    list_clipper: ListClipperToken<'ui>,
+    exhausted: bool,
+    last_value: Option<usize>,
+}
+
+impl<'ui> ListClipperIterator<'ui> {
+    fn new(list_clipper: ListClipperToken<'ui>) -> Self {
+        Self {
+            list_clipper,
+            exhausted: false,
+            last_value: None,
+        }
+    }
+}
+
+impl Iterator for ListClipperIterator<'_> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(value) = self.last_value {
+                let next_value = value + 1;
+
+                if next_value >= self.list_clipper.display_end() {
+                    self.last_value = None;
+                } else {
+                    self.last_value = Some(next_value);
+                }
+
+                return Some(value);
+            }
+
+            if self.exhausted {
+                // If the clipper is exhausted, don't call step again!
+                return None;
+            }
+
+            // Advance the clipper
+            let ret = self.list_clipper.step();
+            if !ret {
+                self.exhausted = true;
+                return None;
+            }
+
+            // Setup iteration for this step's chunk
+            let start = self.list_clipper.display_start();
+            let end = self.list_clipper.display_end();
+
+            if start < end {
+                let next_value = start + 1;
+                if next_value < end {
+                    self.last_value = Some(next_value);
+                }
+
+                return Some(start);
+            } else {
+                self.last_value = None;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1076,67 +1139,5 @@ mod tests {
                 .is_err()
             );
         });
-    }
-}
-
-pub struct ListClipperIterator<'ui> {
-    list_clipper: ListClipperToken<'ui>,
-    exhausted: bool,
-    last_value: Option<usize>,
-}
-
-impl<'ui> ListClipperIterator<'ui> {
-    fn new(list_clipper: ListClipperToken<'ui>) -> Self {
-        Self {
-            list_clipper,
-            exhausted: false,
-            last_value: None,
-        }
-    }
-}
-
-impl Iterator for ListClipperIterator<'_> {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let Some(value) = self.last_value {
-                let next_value = value + 1;
-
-                if next_value >= self.list_clipper.display_end() {
-                    self.last_value = None;
-                } else {
-                    self.last_value = Some(next_value);
-                }
-
-                return Some(value);
-            }
-
-            if self.exhausted {
-                // If the clipper is exhausted, don't call step again!
-                return None;
-            }
-
-            // Advance the clipper
-            let ret = self.list_clipper.step();
-            if !ret {
-                self.exhausted = true;
-                return None;
-            }
-
-            // Setup iteration for this step's chunk
-            let start = self.list_clipper.display_start();
-            let end = self.list_clipper.display_end();
-
-            if start < end {
-                let next_value = start + 1;
-                if next_value < end {
-                    self.last_value = Some(next_value);
-                }
-                return Some(start);
-            } else {
-                self.last_value = None;
-            }
-        }
     }
 }

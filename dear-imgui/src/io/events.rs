@@ -1,5 +1,6 @@
-use crate::io::{Io, assert_finite_vec2};
+use crate::io::Io;
 use crate::sys;
+use crate::validation::assert_finite_vec2;
 
 impl Io {
     /// Add a key event to the input queue.

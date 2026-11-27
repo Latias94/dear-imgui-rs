@@ -660,7 +660,7 @@ impl WgpuPreparedSnapshot<'_> {
             gamma,
             prepared.has_elements(),
         )?;
-        WgpuRenderer::execute_prepared_commands(prepared, &state, extent, pass, |_| {
+        WgpuRenderer::execute_prepared_commands(prepared, &state, extent, pass, |_, _| {
             Err(RendererError::RawDrawCallbackUnsupported)
         })?;
         Ok(WgpuDrawRecording {

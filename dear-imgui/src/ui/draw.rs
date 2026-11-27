@@ -1,10 +1,22 @@
 use super::*;
 
 impl Ui {
-    /// Access to the current window's draw list
+    /// Draw with the current window's draw list while its Context is bound.
+    ///
+    /// The borrow and any builders or stack tokens derived from it cannot escape the closure.
+    ///
+    /// ```compile_fail,E0521
+    /// use dear_imgui_rs::{DrawListMut, Ui};
+    ///
+    /// fn escape(ui: &Ui) {
+    ///     let mut saved: Option<&DrawListMut<'_>> = None;
+    ///     ui.with_window_draw_list(|draw_list| saved = Some(draw_list));
+    ///     drop(saved);
+    /// }
+    /// ```
     #[doc(alias = "GetWindowDrawList")]
-    pub fn get_window_draw_list(&self) -> DrawListMut<'_> {
-        DrawListMut::window(self)
+    pub fn with_window_draw_list<R>(&self, draw: impl FnOnce(&DrawListMut<'_>) -> R) -> R {
+        self.with_bound_context(|| draw(&DrawListMut::window(self)))
     }
 
     /// Access to the background draw list

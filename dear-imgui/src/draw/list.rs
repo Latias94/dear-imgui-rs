@@ -19,12 +19,12 @@ pub use raw::RawDrawCallback;
 pub use texture::DrawListTextureToken;
 
 thread_local! {
-    static BORROWED_DRAW_LISTS: RefCell<Vec<usize>> = RefCell::new(Vec::new());
+    static BORROWED_DRAW_LISTS: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Object implementing the custom draw API.
 ///
-/// Called from [`crate::Ui::get_window_draw_list`], [`crate::Ui::get_background_draw_list`] or [`crate::Ui::get_foreground_draw_list`].
+/// Called from [`crate::Ui::with_window_draw_list`], [`crate::Ui::get_background_draw_list`] or [`crate::Ui::get_foreground_draw_list`].
 /// Only one mutable wrapper can exist for the same raw draw list on the same thread at a time.
 /// Reuse the existing wrapper, or drop it before requesting the same draw list again. The program
 /// will panic when attempting to wrap the same draw list twice.
@@ -38,16 +38,6 @@ pub struct DrawListMut<'ui> {
 pub(super) enum DrawListProvenance {
     Frame,
     Window(crate::scope::WindowScope),
-}
-
-pub(super) struct ChannelsSplitMergeGuard<'ui> {
-    pub(super) draw_list: &'ui DrawListMut<'ui>,
-}
-
-impl Drop for ChannelsSplitMergeGuard<'_> {
-    fn drop(&mut self) {
-        unsafe { sys::ImDrawList_ChannelsMerge(self.draw_list.draw_list) };
-    }
 }
 
 impl Drop for DrawListMut<'_> {
@@ -111,7 +101,7 @@ impl<'ui> DrawListMut<'ui> {
             let scope = ui
                 .current_native_scope()
                 .window()
-                .expect("Ui::get_window_draw_list() requires a current window");
+                .expect("Ui::with_window_draw_list() requires a current window");
             Self::from_raw(
                 ui,
                 sys::igGetWindowDrawList(),
@@ -145,13 +135,6 @@ impl<'ui> DrawListMut<'ui> {
     pub(super) fn ui(&self) -> &crate::Ui {
         self.ui
             .expect("this draw-list operation requires a DrawListMut borrowed from Ui")
-    }
-
-    pub(super) fn assert_scope(&self, operation: &'static str) {
-        if self.is_window_scoped() {
-            self.ui()
-                .run_with_bound_context(|| self.assert_bound_scope(operation));
-        }
     }
 
     fn assert_bound_scope(&self, operation: &'static str) {

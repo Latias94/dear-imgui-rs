@@ -241,7 +241,7 @@ impl StyleAndFontsApp {
             self.status = format!("Queued {} for the next frame.", theme.label());
         }
 
-        if ui.slider("Global font scale", 0.75, 1.75, &mut self.global_font_scale) {
+        if ui.slider("Global font scale", &mut self.global_font_scale, 0.75, 1.75) {
             self.pending_global_font_scale = Some(self.global_font_scale);
         }
 
@@ -262,9 +262,9 @@ impl StyleAndFontsApp {
         ui.combo_simple_string("Font", &mut self.font_index, labels);
         ui.slider(
             "Preview runtime size",
+            &mut self.preview_font_size,
             12.0,
             42.0,
-            &mut self.preview_font_size,
         );
 
         if fonts.compact.is_none() {
@@ -306,7 +306,7 @@ impl StyleAndFontsApp {
 
     fn draw_scoped_style_controls(&mut self, ui: &Ui) {
         ui.text("Scoped style tokens");
-        ui.slider("Preview rounding", 0.0, 16.0, &mut self.preview_rounding);
+        ui.slider("Preview rounding", &mut self.preview_rounding, 0.0, 16.0);
         ui.color_edit4("Preview accent", &mut self.accent);
 
         {

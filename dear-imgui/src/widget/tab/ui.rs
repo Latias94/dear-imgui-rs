@@ -3,10 +3,22 @@ use std::ptr;
 use crate::sys;
 use crate::ui::Ui;
 
-use super::{TabBarFlags, TabBarOptions, TabBarToken, TabItemOptions, TabItemToken};
+use super::{
+    TabBar, TabBarFlags, TabBarOptions, TabBarToken, TabItem, TabItemOptions, TabItemToken,
+};
 
 /// # Tab Widgets
 impl Ui {
+    /// Configure a tab bar and render its contents with [`TabBar::build`].
+    pub fn tab_bar_config<T: AsRef<str>>(&self, id: T) -> TabBar<'_, T> {
+        TabBar::new(self, id)
+    }
+
+    /// Configure a tab item and render its contents with [`TabItem::build`].
+    pub fn tab_item_config<T: AsRef<str>>(&self, label: T) -> TabItem<'_, T> {
+        TabItem::new(self, label)
+    }
+
     /// Creates a tab bar and returns a tab bar token, allowing you to append
     /// Tab items afterwards. This passes no flags. To pass flags explicitly,
     /// use [tab_bar_with_flags](Self::tab_bar_with_flags).

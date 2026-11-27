@@ -751,7 +751,7 @@ pub(super) fn expand_glyph(
                     let transformed = component
                         .transform
                         .transform_bounds(child_bounds)
-                        .ok_or_else(|| StbTrueTypeFontError::InvalidGlyph {
+                        .ok_or(StbTrueTypeFontError::InvalidGlyph {
                             glyph_id: glyph_index as u16,
                             offset: component.source_offset,
                             reason:

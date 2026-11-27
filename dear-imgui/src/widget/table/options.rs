@@ -1,6 +1,6 @@
 use crate::sys;
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+crate::validation::impl_serde_i32_flags!(TableFlags, TableColumnFlags, TableColumnStateFlags);
 
 bitflags::bitflags! {
     /// Independent flags for table widgets.
@@ -178,27 +178,6 @@ const fn is_valid_table_sizing_policy(bits: i32) -> bool {
 impl From<TableFlags> for TableOptions {
     fn from(flags: TableFlags) -> Self {
         Self::new().flags(flags)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl Serialize for TableFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_i32(self.bits())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for TableFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let bits = i32::deserialize(deserializer)?;
-        Ok(TableFlags::from_bits_retain(bits))
     }
 }
 
@@ -397,47 +376,5 @@ impl TableColumnFlags {
             (bits & indent_mask).count_ones() <= 1,
             "{caller} accepts at most one table column indent policy"
         );
-    }
-}
-
-#[cfg(feature = "serde")]
-impl Serialize for TableColumnFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_i32(self.bits())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for TableColumnFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let bits = i32::deserialize(deserializer)?;
-        Ok(TableColumnFlags::from_bits_retain(bits))
-    }
-}
-
-#[cfg(feature = "serde")]
-impl Serialize for TableColumnStateFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_i32(self.bits())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for TableColumnStateFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let bits = i32::deserialize(deserializer)?;
-        Ok(TableColumnStateFlags::from_bits_retain(bits))
     }
 }

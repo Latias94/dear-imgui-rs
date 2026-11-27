@@ -929,13 +929,13 @@ pub(super) fn run_post_destroy(
     let context = ContextDestroyed { id: context_id };
     let mut completed = true;
     for control in controls {
-        if let Some(attachment) = control.attachment.borrow().clone() {
-            if let Err(payload) =
+        let attachment = control.attachment.borrow().clone();
+        if let Some(attachment) = attachment
+            && let Err(payload) =
                 catch_unwind(AssertUnwindSafe(|| attachment.context_destroyed(context)))
-            {
-                completed = false;
-                std::mem::forget(payload);
-            }
+        {
+            completed = false;
+            std::mem::forget(payload);
         }
         control.state.set(AttachmentState::Complete);
         let attachment = control.attachment.borrow_mut().take();

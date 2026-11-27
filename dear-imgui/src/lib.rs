@@ -16,7 +16,7 @@
 //! ## Quick Start
 //!
 //! ```no_run
-//! use dear_imgui_rs::*;
+//! use dear_imgui_rs::prelude::*;
 //!
 //! let mut ctx = Context::create();
 //! ctx.io_mut().set_display_size([640.0, 480.0]);
@@ -51,19 +51,20 @@
 //! ```no_run
 //! # use dear_imgui_rs::*;
 //! # fn demo(ui: &Ui) {
-//! let dl = ui.get_window_draw_list();
-//! dl.add_line([0.0, 0.0], [100.0, 100.0], [1.0, 1.0, 1.0, 1.0]).build();
-//! // Also works with mint::Vector2<f32>
-//! let a = mint::Vector2 { x: 10.0, y: 20.0 };
-//! let b = mint::Vector2 { x: 30.0, y: 40.0 };
-//! dl.add_rect(a, b, [1.0, 0.0, 0.0, 1.0]).build();
-//! // And with glam::Vec2 when the `glam` feature is enabled
-//! #[cfg(feature = "glam")]
-//! {
-//!     let a = glam::Vec2::new(10.0, 20.0);
-//!     let b = glam::Vec2::new(30.0, 40.0);
-//!     dl.add_rect(a, b, [0.0, 1.0, 0.0, 1.0]).build();
-//! }
+//! ui.with_window_draw_list(|dl| {
+//!     dl.add_line([0.0, 0.0], [100.0, 100.0], [1.0, 1.0, 1.0, 1.0]).build();
+//!     // Also works with mint::Vector2<f32>
+//!     let a = mint::Vector2 { x: 10.0, y: 20.0 };
+//!     let b = mint::Vector2 { x: 30.0, y: 40.0 };
+//!     dl.add_rect(a, b, [1.0, 0.0, 0.0, 1.0]).build();
+//!     // And with glam::Vec2 when the `glam` feature is enabled
+//!     #[cfg(feature = "glam")]
+//!     {
+//!         let a = glam::Vec2::new(10.0, 20.0);
+//!         let b = glam::Vec2::new(30.0, 40.0);
+//!         dl.add_rect(a, b, [0.0, 1.0, 0.0, 1.0]).build();
+//!     }
+//! });
 //! # }
 //! ```
 //!
@@ -214,7 +215,7 @@
 //! ## Colors (ImU32 ABGR)
 //!
 //! Dear ImGui uses a packed 32-bit color in ABGR order for low-level APIs (aka `ImU32`).
-//! When you need a packed color (e.g. `TableSetBgColor`), use `colors::Color::to_imgui_u32()`:
+//! When you need a packed color (e.g. `TableSetBgColor`), use [`Color::to_imgui_u32`]:
 //!
 //! ```no_run
 //! # use dear_imgui_rs::*;
@@ -263,6 +264,7 @@
 //!     method docs for safety requirements.
 
 #![deny(rust_2018_idioms)]
+#![warn(unreachable_pub)]
 #![cfg_attr(test, allow(clippy::float_cmp, deprecated))]
 #![allow(
     clippy::cast_possible_truncation,
@@ -327,47 +329,131 @@ pub enum Condition {
     Appearing = sys::ImGuiCond_Appearing as i32,
 }
 
-// use std::cell;
-// use std::os::raw::c_char;
-
-// Core modules
 pub use self::clipboard::{ClipboardBackend, DummyClipboardBackend};
 #[cfg(feature = "system-clipboard")]
 pub use self::clipboard::{SystemClipboard, SystemClipboardError};
-pub use self::context::*;
-// Note: draw types are now in render module
-pub use self::fonts::*;
-pub use self::input::*;
-pub use self::io::*;
-pub use self::platform_io::*;
-pub use self::state_storage::*;
-pub use self::string::*;
-pub use self::style::*;
-pub use self::ui::*;
-// Re-export utility flags/types for convenience
+pub use self::colors::Color;
+pub use self::context::{
+    Context, ContextAliveToken, ContextAttachment, ContextAttachmentDetachError,
+    ContextAttachmentError, ContextAttachmentHandle, ContextAttachmentLease,
+    ContextAttachmentPhase, ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding,
+    ContextBindingError, ContextDestroyed, ContextId, ContextLifecycle, ContextOperationError,
+    ContextPlatformAttachmentRelease, ContextPlatformAttachmentReleaseError,
+    ContextPlatformWindowTeardown, ContextPlatformWindowTeardownError, ContextScopeError,
+    ContextTeardown, ContextThreadLease, FrameLifecycleStamp, FrameLifecycleState,
+    FramePrepareOptions, FrameResult, FrameToken, ImePreedit, ImePreeditError,
+    RendererTextureReset,
+};
+pub use self::dock_layout::{DockLayout, DockLayoutApply, DockSplit, DockspaceError};
+pub use self::dock_space::{
+    DockNodeFlags, DockspaceBuilder, WindowClass, WindowClassDockNodeFlags, WindowClassError,
+    WindowClassParentViewport,
+};
+pub use self::drag_drop::{
+    DragDropPayload, DragDropPayloadCond, DragDropPayloadEmpty, DragDropPayloadPod, DragDropSource,
+    DragDropSourceFlags, DragDropSourceTooltip, DragDropTarget, DragDropTargetFlags,
+    PayloadIsWrongType,
+};
+pub use self::draw::{
+    DrawFlags, DrawListMut, DrawListTextureToken, DrawNgonSegmentCount, DrawSegmentCount,
+    ImColor32, RawDrawCallback,
+};
+pub use self::error::{ImGuiError, ImGuiResult, SafeStringConversion};
+pub use self::fonts::{
+    BakedFont, CustomRectData, CustomRectId, CustomRectSnapshot, FontAtlas, FontAtlasFlags,
+    FontAtlasLoaderError, FontAtlasModeError, FontAtlasTexture, FontConfig, FontId, FontLoadError,
+    FontLoader, FontLoaderFlags, FontSource, Glyph, LegacyFontAtlas, SharedFontAtlas,
+    StbTrueTypeFontData, StbTrueTypeFontError, StbTrueTypeFontLoadError,
+};
+pub use self::ini_settings::{
+    IniSessionDate, IniSessionDateError, IniSettingsRetention, IniSettingsRetentionError,
+};
+pub use self::input::{
+    InputScalarFlags, InputTextFlags, InputTextMultilineFlags, ItemKeyOwnerFlags, Key, KeyChord,
+    KeyMods, MouseButton, MouseCursor, MouseSource, NextItemShortcutFlags, NextItemShortcutOptions,
+    ShortcutFlags, ShortcutGlobalRouteFlags, ShortcutOptions, ShortcutRoute,
+};
+pub use self::io::{BackendFlags, ConfigFlags, Io, ViewportFlags, WindowClassViewportFlags};
+pub use self::layout::{ClipRectToken, GroupToken, IndentToken};
+#[cfg(feature = "stack-layout")]
+pub use self::layout::{
+    HorizontalStackLayoutToken, StackLayoutId, StackLayoutSuspensionToken, VerticalStackLayoutToken,
+};
+pub use self::list_clipper::{
+    ListClipper, ListClipperIterator, ListClipperToken, UnknownCountListClipper,
+    UnknownCountListClipperToken,
+};
+pub use self::numeric_format::{NumericFormat, NumericFormatError};
+pub use self::platform_io::{
+    NativeWindowIdentityExhausted, NativeWindowInstanceId, NativeWindowTarget, PlatformIo, Viewport,
+};
+pub use self::render::{
+    DetachedRendererConsumer, DrawCmd, DrawCmdIterator, DrawCmdParams, DrawCmdSnapshot, DrawData,
+    DrawDataSnapshot, DrawIdx, DrawList, DrawListIterator, DrawListSnapshot, DrawRequirements,
+    DrawVert, FrameSnapshot, PendingFrame, RawCallbackCommand, ReconciledFrame,
+    RendererConsumerCapability, RendererConsumerError, RendererRenderStateGuard,
+    RendererRenderStateGuardError, SnapshotCommitError, SnapshotCompletionProgress, SnapshotEpoch,
+    SnapshotError, SnapshotTextureId, SynchronousRendererConsumer, TextureBinding, TextureFeedback,
+    TextureFeedbackError, TextureOp, TextureRequest, TextureRequestKind, TextureUploadIdentity,
+    TextureUploadRect, ViewportDrawDataSnapshot,
+};
+pub use self::stacks::{
+    ColorStackToken, FocusScopeToken, FontStackToken, IdStackToken, ItemFlagStackToken, ItemFlags,
+    ItemStateFlags, ItemWidthStackToken, StyleStackToken, TextWrapPosStackToken,
+};
+pub use self::state_storage::{OwnedStateStorage, StateStorage};
+pub use self::string::{
+    UiBuffer, with_scratch_txt, with_scratch_txt_slice, with_scratch_txt_slice_with_opt,
+    with_scratch_txt_three, with_scratch_txt_two,
+};
+pub use self::style::{
+    ColorOverride, Direction, Style, StyleColor, StyleTweaks, StyleVar, StyleVarVec2, TableTheme,
+    Theme, ThemePreset, TreeLineMode, WindowTheme,
+};
+pub use self::text_filter::TextFilter;
+pub use self::texture::{
+    ManagedTextureError, ManagedTextureId, ManagedTextureMut, ManagedTextureMutationError,
+    ManagedTextureRef, OwnedTextureData, RawTextureId, TextureData, TextureDataError,
+    TextureFormat, TextureId, TextureRect, TextureRef, TextureRegion, TextureStatus,
+    TextureSubresource, get_format_bytes_per_pixel, get_format_name, get_status_name,
+};
+pub use self::ui::{NativeWindowScope, Ui};
 pub use self::utils::{
     FocusedFlags, ItemHoveredFlags, LogAutoOpenDepth, TooltipHoveredFlags, WindowHoveredFlags,
 };
+pub use self::widget::{
+    AngleSlider, BasicSelection, BasicSelectionIter, Button, ButtonFlags, ButtonRepeatToken,
+    ColorButton, ColorButtonFlags, ColorButtonOptions, ColorDataType, ColorDisplayMode, ColorEdit3,
+    ColorEdit4, ColorEditFlags, ColorEditOptions, ColorInputMode, ColorPicker3, ColorPicker4,
+    ColorPickerDisplayFlags, ColorPickerFlags, ColorPickerMode, ColorPickerOptions, ColumnBuilder,
+    ComboBox, ComboBoxFlags, ComboBoxHeight, ComboBoxOptions, ComboBoxPreviewMode, ComboBoxToken,
+    DisabledToken, Drag, DragFlags, DragRange, HistoryDirection, Image, ImageButton, InputDouble,
+    InputFloat, InputFloat2, InputFloat3, InputFloat4, InputInt, InputInt2, InputInt3, InputInt4,
+    InputScalar, InputScalarN, InputText, InputTextCallback, InputTextCallbackHandler,
+    InputTextMultiline, InputTextMultilineWithCb, InvisibleButtonMouseButtons,
+    InvisibleButtonOptions, KeySetSelection, ListBox, MainMenuBarToken, MenuBarToken, MenuToken,
+    ModalPopup, ModalPopupToken, MultiSelectBoxSelect, MultiSelectClickPolicy, MultiSelectFlags,
+    MultiSelectIndexStorage, MultiSelectOptions, MultiSelectRangeDirection, MultiSelectRequest,
+    MultiSelectResult, MultiSelectScope, MultiSelectScopeKind, MultiSelectUserData,
+    PassthroughCallback, PlotHistogram, PlotLines, PlotValueOffset, PopupContextFlags,
+    PopupContextMouseButton, PopupContextOptions, PopupOpenFlags, PopupQueryFlags, PopupToken,
+    ProgressBar, Selectable, SelectableFlags, Slider, SliderFlags, SortDirection, TabBar,
+    TabBarFittingPolicy, TabBarFlags, TabBarOptions, TabBarToken, TabItem, TabItemFlags,
+    TabItemOptions, TabItemPlacement, TabItemToken, TableBgTarget, TableBuilder, TableColumnFlags,
+    TableColumnIndent, TableColumnIndex, TableColumnRef, TableColumnSetup, TableColumnSortSpec,
+    TableColumnStateFlags, TableColumnUserData, TableColumnWidth, TableContextMenuTarget,
+    TableFlags, TableHeaderData, TableHoveredColumn, TableHoveredRow, TableOptions, TableRowFlags,
+    TableRowIndex, TableSizingPolicy, TableSortSpecs, TableToken, TextCallbackData, TooltipToken,
+    TreeNode, TreeNodeFlags, TreeNodeId, TreeNodeToken, VerticalSlider,
+};
+pub use self::window::{
+    ChildFlags, ChildWindow, Window, WindowFlags, WindowKey, WindowKeyError, WindowLabel,
+};
 
-// Utility modules
-pub use self::list_clipper::*;
-// pub use self::math::*;
-
-// Widget modules
-pub use self::widget::*;
-pub use self::window::*;
-
-// Stack management
-pub use self::stacks::*;
-
-// Layout and cursor control
-pub use self::layout::*;
-
-// Drag and drop system
-pub use self::drag_drop::*;
-
-// Text filtering system
-pub use self::text_filter::*;
+/// The everyday types used to create a Context and submit widgets.
+pub mod prelude {
+    pub use crate::{Color, Condition, Context, Id, Ui, WindowFlags};
+}
 
 // Internal modules
 mod clipboard;
@@ -375,7 +461,7 @@ mod colors;
 mod context;
 mod dock_layout;
 mod dock_space;
-mod draw;
+pub mod draw;
 mod error;
 pub mod ffi;
 pub mod fonts;
@@ -396,51 +482,15 @@ pub mod texture;
 // Token system for resource management
 #[macro_use]
 mod tokens;
+mod drag_drop;
+mod layout;
+pub mod stacks;
+mod text_filter;
 mod ui;
 mod utils;
-// mod math;
-mod widget;
+mod validation;
+pub mod widget;
 mod window;
-
-// Stack management
-mod stacks;
-
-// Layout and cursor control
-mod layout;
-
-// Drag and drop system
-mod drag_drop;
-
-// Text filtering system
-mod text_filter;
-
-// Logging utilities
-
-#[cfg(test)]
-pub(crate) mod test_support {
-    use std::sync::{Mutex, MutexGuard, OnceLock};
-
-    pub(crate) fn imgui_context_guard() -> MutexGuard<'static, ()> {
-        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-        GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
-    }
-}
-
-// Re-export public API
-pub use colors::*;
-pub use dock_layout::*;
-pub use dock_space::*;
-// Export draw-list helpers for extensions and downstream custom drawing.
-pub use draw::{
-    DrawFlags, DrawListMut, DrawListTextureToken, DrawNgonSegmentCount, DrawSegmentCount,
-    RawDrawCallback,
-};
-pub use error::*;
-pub use ini_settings::*;
-pub use numeric_format::{NumericFormat, NumericFormatError};
-// Note: draw types are now in render module, no need to export draw::*
-pub use render::*;
-pub use texture::*;
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -465,5 +515,15 @@ pub fn dear_imgui_version() -> &'static str {
         std::ffi::CStr::from_ptr(version_ptr)
             .to_str()
             .unwrap_or("Unknown")
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    pub(crate) fn imgui_context_guard() -> MutexGuard<'static, ()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
     }
 }

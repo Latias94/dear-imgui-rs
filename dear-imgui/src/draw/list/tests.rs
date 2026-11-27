@@ -371,7 +371,7 @@ fn standard_sampler_commands_are_safe_and_preserve_order() {
         ui.window("standard sampler commands")
             .size([96.0, 96.0], crate::Condition::Always)
             .build(|| {
-                let draw_list = ui.get_window_draw_list();
+                let draw_list = DrawListMut::window(ui);
                 draw_list.set_sampler_nearest();
                 draw_list
                     .add_rect([8.0, 8.0], [24.0, 24.0], ImColor32::WHITE)
@@ -429,7 +429,7 @@ fn standard_sampler_commands_validate_backend_support_before_ffi() {
         .build();
 
     let ui = context.frame();
-    let draw_list = ui.get_window_draw_list();
+    let draw_list = DrawListMut::window(ui);
     let before = draw_list_counts(draw_list.draw_list);
     let commands_before = unsafe { (*draw_list.draw_list).CmdBuffer.Size };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -468,7 +468,7 @@ fn text_and_clip_inputs_validate_before_ffi() {
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = ctx.frame();
-    let draw_list = ui.get_window_draw_list();
+    let draw_list = DrawListMut::window(ui);
     let raw_draw_list = draw_list.draw_list;
     let font = ui.current_font();
     let before = draw_list_counts(raw_draw_list);
@@ -900,7 +900,7 @@ fn draw_flag_scopes_reject_stale_window_views_before_mutation() {
     let ui: &crate::Ui = context.frame();
     let draw_list = ui
         .window("draw flag stale provenance")
-        .build(|| ui.get_window_draw_list())
+        .build(|| DrawListMut::window(ui))
         .unwrap();
     let raw = draw_list.draw_list;
     let initial_flags = unsafe { (*raw).Flags };
@@ -930,7 +930,7 @@ fn draw_flag_scope_window_order_violations_recover_without_double_panic() {
     let ui = context.frame();
 
     let tooltip = ui.begin_tooltip().unwrap();
-    let draw_list = ui.get_window_draw_list();
+    let draw_list = DrawListMut::window(ui);
     let raw = draw_list.draw_list;
     let initial_flags = unsafe { (*raw).Flags };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -942,7 +942,7 @@ fn draw_flag_scope_window_order_violations_recover_without_double_panic() {
     drop(draw_list);
     ui.text("window end recovered after the flag scope");
 
-    let draw_list = ui.get_window_draw_list();
+    let draw_list = DrawListMut::window(ui);
     let raw = draw_list.draw_list;
     let initial_flags = unsafe { (*raw).Flags };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

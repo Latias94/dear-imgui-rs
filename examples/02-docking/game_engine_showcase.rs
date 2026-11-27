@@ -708,7 +708,7 @@ fn render_console(ui: &Ui, editor: &mut EditorState) {
 
         ui.child_window("console-output")
             .size([0.0, -32.0])
-            .build(ui, || {
+            .build(|| {
                 for line in &editor.console_lines {
                     let color = if line.starts_with("[error]") {
                         [1.0, 0.45, 0.45, 1.0]

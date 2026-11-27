@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use dear_imgui_rs::ffi::guard_native_callback;
 use dear_imgui_rs::{ConfigFlags, Context, Id, NativeWindowInstanceId, NativeWindowTarget};
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::window::Window;
@@ -25,71 +26,76 @@ pub(super) unsafe extern "C" fn imgui_winit_set_ime_data(
 ) {
     use dear_imgui_rs::sys::{ImGuiPlatformImeData, ImGuiViewport};
 
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-        if viewport.is_null() || data.is_null() {
-            return;
-        }
-        let Some(control) = platform_control_for_context(ctx) else {
-            return;
-        };
-        let _ = control.binding.try_with_bound_context(|| {
-            if let Err(error) = control.validate_complete_contract_in_current_context() {
-                control.fail_current_contract(error);
+    guard_native_callback(
+        (),
+        || unsafe {
+            if viewport.is_null() || data.is_null() {
                 return;
             }
-            control.reset_ime_composition_if_requested();
-            #[cfg(feature = "multi-viewport")]
-            let window = crate::multi_viewport::window_for_viewport(ctx, viewport)
-                .or_else(|| control.attached_window().ok());
-            #[cfg(not(feature = "multi-viewport"))]
-            let window = control.attached_window().ok();
-            let Some(window) = window else {
+            let Some(control) = platform_control_for_context(ctx) else {
                 return;
             };
+            let _ = control.binding.try_with_bound_context(|| {
+                if let Err(error) = control.validate_complete_contract_in_current_context() {
+                    control.fail_current_contract(error);
+                    return;
+                }
+                control.reset_ime_composition_if_requested();
+                #[cfg(feature = "multi-viewport")]
+                let window = crate::multi_viewport::window_for_viewport(ctx, viewport)
+                    .or_else(|| control.attached_window().ok());
+                #[cfg(not(feature = "multi-viewport"))]
+                let window = control.attached_window().ok();
+                let Some(window) = window else {
+                    return;
+                };
 
-            let ime: &ImGuiPlatformImeData = &*data;
-            let vp: &ImGuiViewport = &*viewport;
-            if !ime.WantVisible && !ime.WantTextInput {
-                return;
-            }
-            let line_height = if ime.InputLineHeight > 0.0 {
-                ime.InputLineHeight
-            } else {
-                16.0_f32
-            };
-            let input_pos = [ime.InputPos.x, ime.InputPos.y];
-            let viewport_pos = [vp.Pos.x, vp.Pos.y];
-            #[cfg(feature = "multi-viewport")]
-            if control.has_live_runtime() {
-                if let Some((position, size)) = crate::multi_viewport::ime_cursor_area_for_viewport(
-                    &window,
+                let ime: &ImGuiPlatformImeData = &*data;
+                let vp: &ImGuiViewport = &*viewport;
+                if !ime.WantVisible && !ime.WantTextInput {
+                    return;
+                }
+                let line_height = if ime.InputLineHeight > 0.0 {
+                    ime.InputLineHeight
+                } else {
+                    16.0_f32
+                };
+                let input_pos = [ime.InputPos.x, ime.InputPos.y];
+                let viewport_pos = [vp.Pos.x, vp.Pos.y];
+                #[cfg(feature = "multi-viewport")]
+                if control.has_live_runtime() {
+                    if let Some((position, size)) =
+                        crate::multi_viewport::ime_cursor_area_for_viewport(
+                            &window,
+                            input_pos,
+                            viewport_pos,
+                            line_height,
+                        )
+                    {
+                        window.set_ime_cursor_area(position, size);
+                    }
+                    return;
+                }
+                if let Some((position, size)) = single_window_ime_cursor_area(
                     input_pos,
                     viewport_pos,
                     line_height,
+                    control.hidpi_factor.get(),
                 ) {
                     window.set_ime_cursor_area(position, size);
                 }
-                return;
-            }
-            if let Some((position, size)) = single_window_ime_cursor_area(
-                input_pos,
-                viewport_pos,
-                line_height,
-                control.hidpi_factor.get(),
-            ) {
-                window.set_ime_cursor_area(position, size);
-            }
-        });
-    }));
-    if res.is_err()
-        && let Some(control) = platform_control_for_context(ctx)
-    {
-        let _ = control.binding.try_with_bound_context(|| {
-            control.fail_current_contract(WinitPlatformError::CallbackPanicked {
-                callback: "Platform_SetImeDataFn",
             });
-        });
-    }
+        },
+        || {
+            if let Some(control) = platform_control_for_context(ctx) {
+                let _ = control.binding.try_with_bound_context(|| {
+                    control.fail_current_contract(WinitPlatformError::CallbackPanicked {
+                        callback: "Platform_SetImeDataFn",
+                    });
+                });
+            }
+        },
+    );
 }
 
 fn single_window_ime_cursor_area(

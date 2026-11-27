@@ -21,7 +21,6 @@ mod button_repeat;
 mod disabled;
 mod invisible_button;
 mod item_key;
-mod validation;
 
 #[cfg(test)]
 mod tests;

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use dear_imgui_rs::{
-    Ui,
+    DrawListMut, Ui,
     input::{Key, MouseButton},
 };
 
@@ -19,13 +19,13 @@ use super::{GraphEditorResponse, Hooks, RightClickEvent};
 
 pub(super) fn draw_core<'ui, 'h>(
     ui: &'ui Ui,
+    dl: &DrawListMut<'_>,
     graph: &mut Graph,
     view: &mut GraphView,
     style: &GraphStyle,
     mut hooks: Option<&'h mut Hooks<'ui>>,
 ) -> GraphEditorResponse {
     let mut resp = GraphEditorResponse::default();
-    let dl = ui.get_window_draw_list();
     let origin = ui.window_pos();
     let size = ui.window_size();
 
@@ -40,7 +40,7 @@ pub(super) fn draw_core<'ui, 'h>(
 
     // grid
     if style.grid_visible {
-        draw_grid(&dl, origin, size, view, style);
+        draw_grid(dl, origin, size, view, style);
     }
 
     // links first (under nodes)
@@ -63,7 +63,7 @@ pub(super) fn draw_core<'ui, 'h>(
             } else {
                 (style.link_color, style.link_thickness)
             };
-            draw_link_variant(&dl, p0, p1s, color, thick, view.zoom, style);
+            draw_link_variant(dl, p0, p1s, color, thick, view.zoom, style);
         }
     }
 
@@ -321,7 +321,7 @@ pub(super) fn draw_core<'ui, 'h>(
         if let Some((node, kind, idx)) = find_pin(graph, pin_id) {
             let start = pin_screen_pos(origin, view, node, kind, idx, style);
             draw_link_variant(
-                &dl,
+                dl,
                 start,
                 mouse,
                 [0.78, 0.78, 0.78, 1.0],
@@ -354,7 +354,7 @@ pub(super) fn draw_core<'ui, 'h>(
                     ),
                 };
                 draw_link_variant(
-                    &dl,
+                    dl,
                     fixed,
                     mouse,
                     style.selected_outline_color,
@@ -403,7 +403,7 @@ pub(super) fn draw_core<'ui, 'h>(
         draw_node(
             ui,
             hooks.as_deref_mut().and_then(|h| h.custom_draw_cb.as_mut()),
-            &dl,
+            dl,
             origin,
             view,
             node,
@@ -461,7 +461,7 @@ pub(super) fn draw_core<'ui, 'h>(
     view.last_mouse = mouse;
     // minimap
     if style.minimap_enabled {
-        draw_minimap(ui, &dl, graph, view, style, origin, size);
+        draw_minimap(ui, dl, graph, view, style, origin, size);
     }
 
     resp

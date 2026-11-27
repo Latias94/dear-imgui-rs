@@ -4,11 +4,12 @@ use std::{cell::RefCell, num::NonZeroU32};
 
 use dear_imgui_rs::{
     Context, FramePrepareOptions, TextureId,
-    render::{DrawCmdParams, DrawVert, RendererRenderStateGuard},
+    render::{DrawCmdParams, DrawVert},
+    sys,
 };
 
 use super::{
-    DrawListRenderScope, FramebufferExtent, GlowRenderer, SamplerBinding, VertexArrayGuard,
+    DeviceObjectReadiness, DrawListRenderScope, FramebufferExtent, GlowRenderer, SamplerBinding,
 };
 use crate::{
     GlVersion,
@@ -20,7 +21,6 @@ use crate::{
         sampler::SamplerObjects,
     },
     shaders::Shaders,
-    state::{GlowRenderStateStorage, GlowSamplerStrategy},
     texture::TextureRegistry,
 };
 
@@ -30,6 +30,7 @@ const ORIGINAL_MAG_FILTER: i32 = glow::LINEAR as i32;
 #[derive(Debug, PartialEq)]
 struct DrawSample {
     sampler: u32,
+    program_pipeline: u32,
     min_filter: i32,
     mag_filter: i32,
     parameter_writes: usize,
@@ -41,6 +42,7 @@ struct FakeGl {
     next_sampler: u32,
     sampler: u32,
     sampler_bindings: Vec<u32>,
+    program_pipeline: u32,
     min_filter: i32,
     mag_filter: i32,
     parameter_writes: usize,
@@ -54,6 +56,7 @@ impl Default for FakeGl {
             next_sampler: 40,
             sampler: 0,
             sampler_bindings: Vec::new(),
+            program_pipeline: 0,
             min_filter: ORIGINAL_MIN_FILTER,
             mag_filter: ORIGINAL_MAG_FILTER,
             parameter_writes: 0,
@@ -69,14 +72,45 @@ thread_local! {
 
 unsafe extern "system" fn get_string(name: u32) -> *const u8 {
     if name == glow::VERSION {
-        c"3.3".as_ptr().cast()
+        c"4.1".as_ptr().cast()
     } else {
         c"".as_ptr().cast()
     }
 }
 
-unsafe extern "system" fn get_integer(_name: u32, value: *mut i32) {
-    unsafe { *value = 0 };
+unsafe extern "system" fn get_integer(name: u32, value: *mut i32) {
+    unsafe {
+        *value = match name {
+            glow::ACTIVE_TEXTURE => glow::TEXTURE0 as i32,
+            glow::PROGRAM_PIPELINE_BINDING => {
+                GL_STATE.with_borrow(|state| state.program_pipeline as i32)
+            }
+            _ => 0,
+        };
+    }
+}
+
+unsafe extern "system" fn get_floats(_name: u32, values: *mut f32) {
+    unsafe { values.copy_from_nonoverlapping([0.0; 4].as_ptr(), 4) };
+}
+
+unsafe extern "system" fn get_booleans(_name: u32, values: *mut u8) {
+    unsafe { values.copy_from_nonoverlapping([1; 4].as_ptr(), 4) };
+}
+
+unsafe extern "system" fn is_enabled(_name: u32) -> u8 {
+    0
+}
+
+unsafe extern "system" fn bind_program_pipeline(pipeline: u32) {
+    GL_STATE.with_borrow_mut(|state| state.program_pipeline = pipeline);
+}
+
+unsafe extern "C" fn bind_callback_pipeline(
+    _list: *const sys::ImDrawList,
+    _cmd: *const sys::ImDrawCmd,
+) {
+    unsafe { bind_program_pipeline(29) };
 }
 
 unsafe extern "system" fn gen_samplers(count: i32, samplers: *mut u32) {
@@ -105,6 +139,8 @@ unsafe extern "system" fn one_u32(_value: u32) {}
 unsafe extern "system" fn two_u32(_first: u32, _second: u32) {}
 unsafe extern "system" fn blend_func(_src_rgb: u32, _dst_rgb: u32, _src_a: u32, _dst_a: u32) {}
 unsafe extern "system" fn four_i32(_x: i32, _y: i32, _w: i32, _h: i32) {}
+unsafe extern "system" fn clear_color(_r: f32, _g: f32, _b: f32, _a: f32) {}
+unsafe extern "system" fn color_mask(_r: u8, _g: u8, _b: u8, _a: u8) {}
 unsafe extern "system" fn vertex_attrib(
     index: u32,
     _size: i32,
@@ -153,6 +189,7 @@ unsafe extern "system" fn draw_elements(
     GL_STATE.with_borrow_mut(|state| {
         state.draws.push(DrawSample {
             sampler: state.sampler,
+            program_pipeline: state.program_pipeline,
             min_filter: state.min_filter,
             mag_filter: state.mag_filter,
             parameter_writes: state.parameter_writes,
@@ -179,6 +216,9 @@ fn fake_gl(has_sampler_objects: bool) -> glow::Context {
             match name {
                 "glGetString" => get_string as *const (),
                 "glGetIntegerv" => get_integer as *const (),
+                "glGetFloatv" => get_floats as *const (),
+                "glGetBooleanv" => get_booleans as *const (),
+                "glIsEnabled" => is_enabled as *const (),
                 "glGenSamplers" => gen_samplers as *const (),
                 "glBindSampler" if has_sampler_objects => bind_sampler as *const (),
                 "glSamplerParameteri" => sampler_parameter as *const (),
@@ -191,9 +231,13 @@ fn fake_gl(has_sampler_objects: bool) -> glow::Context {
                 | "glBlendEquation"
                 | "glUseProgram"
                 | "glEnableVertexAttribArray" => one_u32 as *const (),
-                "glPolygonMode" | "glBindBuffer" | "glBindTexture" => two_u32 as *const (),
+                "glPolygonMode" | "glBindBuffer" | "glBindTexture" | "glBlendEquationSeparate" => {
+                    two_u32 as *const ()
+                }
                 "glBlendFuncSeparate" => blend_func as *const (),
                 "glViewport" | "glScissor" => four_i32 as *const (),
+                "glClearColor" => clear_color as *const (),
+                "glColorMask" => color_mask as *const (),
                 "glVertexAttribPointer" => vertex_attrib as *const (),
                 "glBufferData" => buffer_data as *const (),
                 "glGetTexParameteriv" => get_texture_parameter as *const (),
@@ -261,10 +305,16 @@ fn draw_image(draw_list: &dear_imgui_rs::DrawListMut<'_>, texture: TextureId) {
     );
 }
 
-fn render_sampler_sequence(has_sampler_objects: bool) {
-    GL_STATE.set(FakeGl::default());
+fn render_sampler_sequence(has_sampler_objects: bool, initial_pipeline: Option<u32>) {
+    GL_STATE.set(FakeGl {
+        program_pipeline: initial_pipeline.unwrap_or_default(),
+        ..FakeGl::default()
+    });
     let gl = fake_gl(has_sampler_objects);
     let mut renderer = renderer(&gl, has_sampler_objects);
+    if initial_pipeline.is_some() {
+        unsafe { renderer.set_bind_program_pipeline(Some(bind_program_pipeline)) };
+    }
     let texture = renderer
         .texture_registry
         .register_external(glow::NativeTexture(NonZeroU32::new(9).unwrap()))
@@ -300,45 +350,22 @@ fn render_sampler_sequence(has_sampler_objects: bool) {
     draw_list.set_sampler_from_texture();
     draw_image(&draw_list, texture);
     unsafe {
+        if initial_pipeline.is_some() {
+            draw_list.add_callback(bind_callback_pipeline, std::ptr::null_mut(), 0);
+        }
         draw_list.add_callback(draw_callback_reset_render_state, std::ptr::null_mut(), 0);
     }
     draw_image(&draw_list, texture);
     drop(draw_list);
     let frame = context.render_legacy();
-    let draw_data = frame.draw_data();
-    let extent = FramebufferExtent::from_draw_data(draw_data)
-        .unwrap()
-        .unwrap();
-    let vertex_array = VertexArrayGuard::create_and_bind(&gl).unwrap();
-    let strategy = if has_sampler_objects {
-        GlowSamplerStrategy::SamplerObjects
-    } else {
-        GlowSamplerStrategy::TextureParameters
-    };
-    let mut callback_state = GlowRenderStateStorage::new(&gl, strategy);
-    // SAFETY: The current Context and callback storage remain alive for this render scope.
-    let render_state = unsafe {
-        RendererRenderStateGuard::install(
-            dear_imgui_rs::sys::igGetPlatformIO_Nil(),
-            &mut callback_state,
-        )
-    }
-    .unwrap();
     renderer
-        .set_up_render_state(&gl, draw_data, extent, &vertex_array, None)
-        .unwrap();
-    renderer
-        .render_draw_lists(
+        .render_draw_data_transaction(
             &gl,
-            &renderer.texture_registry,
-            draw_data,
-            extent,
-            &vertex_array,
-            None,
-            &render_state,
+            Some(frame.draw_data()),
+            false,
+            DeviceObjectReadiness::Ready,
         )
         .unwrap();
-    render_state.finish().unwrap();
     if let Some(samplers) = renderer.samplers.take() {
         samplers.destroy(&gl);
     }
@@ -346,9 +373,9 @@ fn render_sampler_sequence(has_sampler_objects: bool) {
 
 #[test]
 fn texture_owned_sampler_unbinds_the_previous_sampler_during_rendering() {
-    render_sampler_sequence(true);
+    render_sampler_sequence(true, None);
     GL_STATE.with_borrow(|state| {
-        assert_eq!(state.sampler_bindings, [40, 41, 0, 40, 0, 40]);
+        assert_eq!(state.sampler_bindings, [40, 41, 0, 40, 0, 40, 0]);
         assert_eq!(
             state
                 .draws
@@ -367,7 +394,7 @@ fn texture_owned_sampler_unbinds_the_previous_sampler_during_rendering() {
 
 #[test]
 fn texture_owned_sampler_preserves_mipmapped_texture_parameters_during_fallback_rendering() {
-    render_sampler_sequence(false);
+    render_sampler_sequence(false, None);
     GL_STATE.with_borrow(|state| {
         let nearest = glow::NEAREST as i32;
         let linear = glow::LINEAR as i32;
@@ -389,6 +416,16 @@ fn texture_owned_sampler_preserves_mipmapped_texture_parameters_during_fallback_
         assert_eq!(state.mag_filter, ORIGINAL_MAG_FILTER);
         assert_eq!(state.parameter_writes, 8);
         assert!(state.sampler_bindings.is_empty());
+    });
+}
+
+#[test]
+fn render_and_reset_unbind_program_pipeline_then_restore_host_binding() {
+    render_sampler_sequence(false, Some(17));
+    GL_STATE.with_borrow(|state| {
+        assert_eq!(state.draws.len(), 5);
+        assert!(state.draws.iter().all(|draw| draw.program_pipeline == 0));
+        assert_eq!(state.program_pipeline, 17);
     });
 }
 

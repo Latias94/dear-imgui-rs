@@ -7,6 +7,10 @@ use dear_imgui_rs::{
 };
 
 pub(crate) fn request_test_device() -> Option<(Device, Queue)> {
+    request_test_device_and_adapter().map(|(device, queue, _)| (device, queue))
+}
+
+pub(crate) fn request_test_device_and_adapter() -> Option<(Device, Queue, Adapter)> {
     #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
     let instance = Instance::new(&InstanceDescriptor::default());
     #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
@@ -22,7 +26,9 @@ pub(crate) fn request_test_device() -> Option<(Device, Queue)> {
         .or_else(|_| request_adapter(false))
         .ok();
     let result = adapter.and_then(|adapter| {
-        pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).ok()
+        pollster::block_on(adapter.request_device(&DeviceDescriptor::default()))
+            .ok()
+            .map(|(device, queue)| (device, queue, adapter))
     });
     assert!(
         result.is_some() || std::env::var_os("DEAR_IMGUI_REQUIRE_WGPU_ADAPTER").is_none(),

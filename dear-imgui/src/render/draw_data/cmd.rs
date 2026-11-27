@@ -164,12 +164,14 @@ mod tests {
             texture.set_tex_id(texture_id);
         }
 
-        let mut command = sys::ImDrawCmd::default();
-        command.TexRef = sys::ImTextureRef {
-            _TexData: texture.as_raw_mut(),
-            _TexID: 0,
+        let command = sys::ImDrawCmd {
+            TexRef: sys::ImTextureRef {
+                _TexData: texture.as_raw_mut(),
+                _TexID: 0,
+            },
+            ElemCount: 3,
+            ..Default::default()
         };
-        command.ElemCount = 3;
         let commands = [command];
 
         let draw_list = sys::ImDrawList::default();
@@ -188,12 +190,14 @@ mod tests {
         let mut texture = crate::texture::OwnedTextureData::empty();
         assert!(texture.tex_id().is_null());
 
-        let mut command = sys::ImDrawCmd::default();
-        command.TexRef = sys::ImTextureRef {
-            _TexData: texture.as_raw_mut(),
-            _TexID: 0,
+        let command = sys::ImDrawCmd {
+            TexRef: sys::ImTextureRef {
+                _TexData: texture.as_raw_mut(),
+                _TexID: 0,
+            },
+            ElemCount: 3,
+            ..Default::default()
         };
-        command.ElemCount = 3;
         let commands = [command];
 
         let draw_list = sys::ImDrawList::default();

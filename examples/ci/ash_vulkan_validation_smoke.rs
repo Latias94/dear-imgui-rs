@@ -353,50 +353,29 @@ impl ValidationSmoke {
                 observed_viewport_id = viewport.id();
                 observed_viewport_size = viewport.size();
                 ui.text("Ash dynamic rendering validation surface");
-                {
-                    let draw_list = ui.get_window_draw_list();
-                    unsafe {
-                        draw_list.add_callback(
-                            frame.sampler_nearest_callback,
-                            std::ptr::null_mut(),
-                            0,
-                        );
-                        draw_list.add_callback(
-                            smoke_nearest_sampler_probe,
-                            std::ptr::null_mut(),
-                            0,
-                        );
-                    }
-                }
+                ui.with_window_draw_list(|draw_list| unsafe {
+                    draw_list.add_callback(frame.sampler_nearest_callback, std::ptr::null_mut(), 0);
+                    draw_list.add_callback(smoke_nearest_sampler_probe, std::ptr::null_mut(), 0);
+                });
                 if let Some(texture) = managed_texture {
                     ui.image(texture, [64.0, 64.0]);
                 } else {
                     ui.text("Font atlas sampler probe");
                 }
-                {
-                    let draw_list = ui.get_window_draw_list();
-                    unsafe {
-                        draw_list.add_callback(
-                            frame.sampler_linear_callback,
-                            std::ptr::null_mut(),
-                            0,
-                        );
-                        draw_list.add_callback(smoke_linear_sampler_probe, std::ptr::null_mut(), 0);
-                        draw_list.add_callback(smoke_raw_callback, std::ptr::null_mut(), 0);
-                        draw_list.add_callback(
-                            frame.reset_render_state_callback,
-                            std::ptr::null_mut(),
-                            0,
-                        );
-                    }
-                }
+                ui.with_window_draw_list(|draw_list| unsafe {
+                    draw_list.add_callback(frame.sampler_linear_callback, std::ptr::null_mut(), 0);
+                    draw_list.add_callback(smoke_linear_sampler_probe, std::ptr::null_mut(), 0);
+                    draw_list.add_callback(smoke_raw_callback, std::ptr::null_mut(), 0);
+                    draw_list.add_callback(
+                        frame.reset_render_state_callback,
+                        std::ptr::null_mut(),
+                        0,
+                    );
+                });
                 ui.text("Draw after reset-render-state callback");
-                {
-                    let draw_list = ui.get_window_draw_list();
-                    unsafe {
-                        draw_list.add_callback(smoke_reset_probe, std::ptr::null_mut(), 0);
-                    }
-                }
+                ui.with_window_draw_list(|draw_list| unsafe {
+                    draw_list.add_callback(smoke_reset_probe, std::ptr::null_mut(), 0);
+                });
             });
         self.observe_window(
             observed_viewport_id,

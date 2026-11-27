@@ -39,7 +39,13 @@ mod single_line;
 mod tests;
 mod validation;
 
-pub use callbacks::*;
+pub use callbacks::{
+    HistoryDirection, InputTextCallback, InputTextCallbackHandler, PassthroughCallback,
+    TextCallbackData,
+};
 pub use multiline::{InputTextMultiline, InputTextMultilineWithCb};
-pub use numeric::*;
+pub use numeric::{
+    InputDouble, InputFloat, InputFloat2, InputFloat3, InputFloat4, InputInt, InputInt2, InputInt3,
+    InputInt4, InputScalar, InputScalarN,
+};
 pub use single_line::InputText;

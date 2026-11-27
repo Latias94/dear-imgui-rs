@@ -1,6 +1,8 @@
 #[cfg(feature = "render")]
 use std::{cell::Cell, rc::Rc};
 
+#[cfg(feature = "render")]
+use crate::test_util::RenderTestApp;
 use crate::test_util::imgui_context_guard;
 #[cfg(feature = "render")]
 use bevy_app::Main;
@@ -665,7 +667,7 @@ fn shutdown_converges_a_pending_managed_retirement_once() {
 #[test]
 fn plugin_finish_skips_a_context_already_transferred_to_managed_retirement() {
     let _guard = imgui_context_guard();
-    let mut app = app_with_primary_window();
+    let mut app = RenderTestApp::from_app(app_with_primary_window());
     app.try_install_imgui(ImguiPlugin::default())
         .expect("headless plugin admission must succeed before RenderApp exists");
     let primary = app
@@ -1686,7 +1688,7 @@ fn removing_the_primary_context_does_not_stop_an_additional_context() {
 #[test]
 fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context() {
     let _guard = imgui_context_guard();
-    let mut app = app_with_primary_window();
+    let mut app = RenderTestApp::from_app(app_with_primary_window());
     let pass_a = app.declare_imgui_pass::<ContextPassA>().unwrap();
     app.add_plugins(crate::test_util::render_extraction_plugin())
         .init_resource::<LifecycleTrace>()
@@ -1801,7 +1803,7 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
 #[test]
 fn removed_registry_retires_a_context_with_an_unextracted_snapshot() {
     let _guard = imgui_context_guard();
-    let mut app = app_with_primary_window();
+    let mut app = RenderTestApp::from_app(app_with_primary_window());
     app.add_plugins(crate::test_util::render_extraction_plugin())
         .init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());

@@ -42,17 +42,12 @@ impl Ui {
             match id {
                 Id::Int(i) => sys::igPushID_Int(i),
                 Id::Str(s) => {
-                    // Keep the C-string ID sanitization for strings containing NULs.
-                    if s.as_bytes().contains(&0) {
-                        self.with_scratch_buffer(|buf| sys::igPushID_Str(buf.scratch_txt(s)));
+                    let start = if s.is_empty() {
+                        c"".as_ptr()
                     } else {
-                        let start = if s.is_empty() {
-                            c"".as_ptr()
-                        } else {
-                            s.as_ptr().cast()
-                        };
-                        sys::igPushID_StrStr(start, start.add(s.len()));
-                    }
+                        s.as_ptr().cast()
+                    };
+                    sys::igPushID_StrStr(start, start.add(s.len()));
                 }
                 Id::Ptr(p) => sys::igPushID_Ptr(p),
             }
@@ -110,7 +105,7 @@ impl Ui {
     }
 }
 
-/// Represents an identifier that can be pushed to the ID stack
+/// Input to [`Ui::push_id`], distinct from the resolved numeric [`crate::Id`].
 #[derive(Copy, Clone, Debug)]
 pub enum Id<'a> {
     /// Integer identifier

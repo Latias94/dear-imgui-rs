@@ -13,7 +13,6 @@ impl Context {
     /// [`Context::set_clipboard_backend`]. Returns `None` if the callback or text is unavailable.
     #[doc(alias = "GetClipboardText")]
     pub fn clipboard_text(&self) -> Option<String> {
-        let _guard = CTX_MUTEX.lock();
         unsafe {
             with_bound_context(self.raw, || {
                 let ptr = sys::igGetClipboardText();
@@ -33,8 +32,11 @@ impl Context {
     /// Interior NUL bytes are sanitized to `?` to match other scratch-string helpers.
     #[doc(alias = "SetClipboardText")]
     pub fn set_clipboard_text(&self, text: impl AsRef<str>) {
-        self.ui
-            .with_scratch_txt(text, |text| unsafe { sys::igSetClipboardText(text) });
+        let text = text.as_ref();
+        with_bound_context(self.raw, || {
+            self.ui
+                .with_scratch_c_string(text, |text| unsafe { sys::igSetClipboardText(text) });
+        });
     }
 
     /// Sets the clipboard backend used for native clipboard operations.

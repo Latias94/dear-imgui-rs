@@ -131,9 +131,9 @@ impl PlotScope<'_> {
         })
     }
 
-    /// Returns the window draw list that ImPlot uses for this plot.
-    pub fn plot_draw_list(&self) -> DrawListMut<'_> {
-        self.with_bound_context(|| self.ui.get_window_draw_list())
+    /// Draw with the window draw list that ImPlot uses for this plot.
+    pub fn with_plot_draw_list<R>(&self, draw: impl FnOnce(&DrawListMut<'_>) -> R) -> R {
+        self.with_bound_context(|| self.ui.with_window_draw_list(draw))
     }
 
     /// Draw with the plot clip rectangle. Nested Dear ImGui scopes close before the clip is popped.

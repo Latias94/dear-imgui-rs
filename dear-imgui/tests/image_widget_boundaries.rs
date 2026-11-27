@@ -35,11 +35,11 @@ fn image_widgets_reject_invalid_geometry_and_colors_before_ffi() {
     let tex = imgui::TextureId::new(42);
 
     let _ = ui.window("image widget boundaries").build(|| {
-        ui.image_config(tex, [0.0, 0.0])
-            .uv0([-1.0, 0.0])
+        ui.image_config(tex, mint::Vector2 { x: 0.0, y: 0.0 })
+            .uv0(mint::Vector2 { x: -1.0, y: 0.0 })
             .uv1([2.0, 1.0])
             .tint_color([0.5, 0.5, 0.5, 1.0])
-            .border_color([1.0, 0.0, 0.0, 1.0])
+            .border_color(imgui::Color::rgb(1.0, 0.0, 0.0))
             .build();
 
         assert_panics!({
@@ -136,14 +136,16 @@ fn managed_images_resolve_only_in_the_owner_context_and_generation() {
         let ui = owner.frame();
         let _ = ui.window("managed owner").build(|| {
             ui.image(texture, [8.0, 8.0]);
-            ui.get_window_draw_list().add_image(
-                texture,
-                [0.0, 0.0],
-                [8.0, 8.0],
-                [0.0, 0.0],
-                [1.0, 1.0],
-                [1.0, 1.0, 1.0, 1.0],
-            );
+            ui.with_window_draw_list(|draw_list| {
+                draw_list.add_image(
+                    texture,
+                    [0.0, 0.0],
+                    [8.0, 8.0],
+                    [0.0, 0.0],
+                    [1.0, 1.0],
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+            });
         });
     }
     let _ = owner.render_legacy();

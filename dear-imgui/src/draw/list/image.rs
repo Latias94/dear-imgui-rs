@@ -26,7 +26,7 @@ impl<'ui> DrawListMut<'ui> {
         let uv_max = finite_vec2("DrawListMut::add_image()", "uv_max", uv_max);
         let col = col.into().to_bits();
         let texture = texture.into();
-        self.ui().run_with_bound_context(|| {
+        self.with_raw_bound("DrawListMut::add_image()", |draw_list| {
             let tex_ref = self
                 .ui()
                 .resolve_texture_ref(texture)
@@ -34,13 +34,17 @@ impl<'ui> DrawListMut<'ui> {
                     panic!("DrawListMut::add_image() rejected texture: {error}")
                 });
             unsafe {
-                sys::ImDrawList_AddImage(self.draw_list, tex_ref, p_min, p_max, uv_min, uv_max, col)
+                sys::ImDrawList_AddImage(draw_list, tex_ref, p_min, p_max, uv_min, uv_max, col)
             }
         })
     }
 
     /// Add an image with 4 arbitrary corners.
     #[doc(alias = "AddImageQuad")]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "mirrors ImDrawList::AddImageQuad"
+    )]
     pub fn add_image_quad<'tex>(
         &self,
         texture: impl Into<crate::texture::TextureRef<'tex>>,
@@ -72,7 +76,7 @@ impl<'ui> DrawListMut<'ui> {
         let uv4 = finite_vec2("DrawListMut::add_image_quad()", "uv4", uv4);
         let col = col.into().to_bits();
         let texture = texture.into();
-        self.ui().run_with_bound_context(|| {
+        self.with_raw_bound("DrawListMut::add_image_quad()", |draw_list| {
             let tex_ref = self
                 .ui()
                 .resolve_texture_ref(texture)
@@ -81,17 +85,7 @@ impl<'ui> DrawListMut<'ui> {
                 });
             unsafe {
                 sys::ImDrawList_AddImageQuad(
-                    self.draw_list,
-                    tex_ref,
-                    p1,
-                    p2,
-                    p3,
-                    p4,
-                    uv1,
-                    uv2,
-                    uv3,
-                    uv4,
-                    col,
+                    draw_list, tex_ref, p1, p2, p3, p4, uv1, uv2, uv3, uv4, col,
                 )
             }
         })
@@ -99,6 +93,10 @@ impl<'ui> DrawListMut<'ui> {
 
     /// Add an axis-aligned rounded image.
     #[doc(alias = "AddImageRounded")]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "mirrors ImDrawList::AddImageRounded"
+    )]
     pub fn add_image_rounded<'tex>(
         &self,
         texture: impl Into<crate::texture::TextureRef<'tex>>,
@@ -128,7 +126,7 @@ impl<'ui> DrawListMut<'ui> {
         assert_corner_flags("DrawListMut::add_image_rounded()", flags);
         let col = col.into().to_bits();
         let texture = texture.into();
-        self.ui().run_with_bound_context(|| {
+        self.with_raw_bound("DrawListMut::add_image_rounded()", |draw_list| {
             let tex_ref = self
                 .ui()
                 .resolve_texture_ref(texture)
@@ -137,7 +135,7 @@ impl<'ui> DrawListMut<'ui> {
                 });
             unsafe {
                 sys::ImDrawList_AddImageRounded(
-                    self.draw_list,
+                    draw_list,
                     tex_ref,
                     p_min,
                     p_max,

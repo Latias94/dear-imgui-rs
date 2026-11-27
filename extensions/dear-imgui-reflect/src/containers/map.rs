@@ -61,46 +61,23 @@ fn draw_map(
     }
 }
 
-fn imgui_hash_map_body<V, S>(
+fn draw_map_entry_popup<'a, V>(
     inspector: &mut Inspector<'_, '_>,
     label: &str,
-    map: &mut HashMap<String, V, S>,
-    map_settings: &MapSettings,
-) -> bool
+    insertable: bool,
+    entries: impl ExactSizeIterator<Item = (&'a String, &'a V)>,
+    contains_key: impl Fn(&str) -> bool,
+) -> Option<(String, V)>
 where
     V: ImGuiValue + Default + Clone + 'static,
-    S: BuildHasher,
 {
     let ui = inspector.ui();
-    let mut changed = false;
-
-    // Popup id used for the "add new entry" dialog.
     let popup_id = "add_map_item_popup";
-    // Capture the owner scope before BeginPopup switches to the popup window's
-    // ID stack. Every operation for this popup must use the same identity.
     let draft_identity = inspector.map_draft_identity::<V>(popup_id);
-
-    // "+" button to open a popup where the user can type a key for the new entry.
-    // When insertion is disabled via MapSettings, we still render a disabled button
-    // with a tooltip to mirror ImReflect's behavior.
     ui.same_line();
     let add_label = "+##map_add";
-    if map_settings.insertable {
+    if insertable {
         if ui.small_button(add_label) {
-            inspector.with_map_draft::<V, _>(
-                draft_identity,
-                || {
-                    let mut idx = map.len();
-                    loop {
-                        let candidate = format!("{label}_{}", idx);
-                        if !map.contains_key(&candidate) {
-                            break candidate;
-                        }
-                        idx += 1;
-                    }
-                },
-                |_, _, _| {},
-            );
             ui.open_popup(popup_id);
         }
     } else {
@@ -112,49 +89,41 @@ where
         }
     }
 
+    let mut insertion = None;
     if let Some(_popup) = ui.begin_popup(popup_id) {
-        let initial_key = {
-            let mut idx = map.len();
-            loop {
-                let candidate = format!("{label}_{}", idx);
-                if !map.contains_key(&candidate) {
-                    break candidate;
-                }
-                idx += 1;
-            }
-        };
-        let should_clear_popup_state = inspector.with_map_draft::<V, _>(
+        let len = entries.len();
+        let accepted_or_cancelled = inspector.with_map_draft::<V, _>(
             draft_identity,
-            || initial_key,
+            || {
+                let mut index = len;
+                loop {
+                    let candidate = format!("{label}_{index}");
+                    if !contains_key(&candidate) {
+                        break candidate;
+                    }
+                    index += 1;
+                }
+            },
             |inspector, key_buf, temp_value| {
                 ui.text("Add map entry");
+                inspector.render_draft_value("Key##new_key", key_buf);
+                inspector.render_draft_value("Value##new_value", temp_value);
 
-                let _ = String::imgui_value(inspector, "Key##new_key", key_buf);
-
-                changed |= V::imgui_value(inspector, "Value##new_value", temp_value);
-
-                if !map.is_empty() {
+                if len != 0 {
                     ui.separator();
                     ui.text("Copy value from existing entry:");
-                    for (existing_key, existing_value) in map.iter() {
+                    for (existing_key, existing_value) in entries {
                         let id = map_key_id(existing_key);
                         let _entry_id = ui.push_id(id.as_ref());
                         let copy_label = format!("Copy from \"{existing_key}\"###copy_value");
                         if ui.small_button(&copy_label) {
                             *temp_value = existing_value.clone();
-                            changed = true;
                         }
                     }
                 }
 
-                if ui.button("Add") && !key_buf.is_empty() && !map.contains_key(key_buf) {
-                    let inserted_key = key_buf.clone();
-                    map.insert(inserted_key.clone(), std::mem::take(temp_value));
-                    inspector.record_event(crate::ReflectEvent::MapInserted {
-                        path: inspector.current_path(),
-                        key: inserted_key,
-                    });
-                    changed = true;
+                if ui.button("Add") && insertable && !key_buf.is_empty() && !contains_key(key_buf) {
+                    insertion = Some((std::mem::take(key_buf), std::mem::take(temp_value)));
                     ui.close_current_popup();
                     true
                 } else {
@@ -169,7 +138,7 @@ where
             },
         );
 
-        if should_clear_popup_state {
+        if accepted_or_cancelled {
             inspector.clear_map_draft(draft_identity);
         }
     }
@@ -177,6 +146,34 @@ where
     // per-popup state to avoid unbounded growth across dynamically generated ids.
     if !ui.is_popup_open(popup_id) {
         inspector.clear_map_draft(draft_identity);
+    }
+    insertion
+}
+
+fn imgui_hash_map_body<V, S>(
+    inspector: &mut Inspector<'_, '_>,
+    label: &str,
+    map: &mut HashMap<String, V, S>,
+    map_settings: &MapSettings,
+) -> bool
+where
+    V: ImGuiValue + Default + Clone + 'static,
+    S: BuildHasher,
+{
+    let mut changed = false;
+    if let Some((key, value)) = draw_map_entry_popup(
+        inspector,
+        label,
+        map_settings.insertable,
+        map.iter(),
+        |key| map.contains_key(key),
+    ) {
+        map.insert(key.clone(), value);
+        inspector.record_event(crate::ReflectEvent::MapInserted {
+            path: inspector.current_path(),
+            key,
+        });
+        changed = true;
     }
     let (rows_changed, edits) = draw_map_rows(inspector, map.iter_mut(), map_settings);
     changed |= rows_changed;
@@ -227,106 +224,20 @@ fn imgui_btree_map_body<V>(
 where
     V: ImGuiValue + Default + Clone + 'static,
 {
-    let ui = inspector.ui();
     let mut changed = false;
-
-    let popup_id = "add_map_item_popup";
-    // Capture the owner scope before BeginPopup switches to the popup window's
-    // ID stack. Every operation for this popup must use the same identity.
-    let draft_identity = inspector.map_draft_identity::<V>(popup_id);
-
-    ui.same_line();
-    let add_label = "+##map_add";
-    if map_settings.insertable {
-        if ui.small_button(add_label) {
-            inspector.with_map_draft::<V, _>(
-                draft_identity,
-                || {
-                    let mut idx = map.len();
-                    loop {
-                        let candidate = format!("{label}_{}", idx);
-                        if !map.contains_key(&candidate) {
-                            break candidate;
-                        }
-                        idx += 1;
-                    }
-                },
-                |_, _, _| {},
-            );
-            ui.open_popup(popup_id);
-        }
-    } else {
-        let _disabled = ui.begin_disabled();
-        let _ = ui.small_button(add_label);
-        drop(_disabled);
-        if ui.is_item_hovered_with_flags(imgui::ItemHoveredFlags::ALLOW_WHEN_DISABLED) {
-            ui.set_item_tooltip("Insertion disabled in MapSettings");
-        }
-    }
-
-    if let Some(_popup) = ui.begin_popup(popup_id) {
-        let initial_key = {
-            let mut idx = map.len();
-            loop {
-                let candidate = format!("{label}_{}", idx);
-                if !map.contains_key(&candidate) {
-                    break candidate;
-                }
-                idx += 1;
-            }
-        };
-        let should_clear_popup_state = inspector.with_map_draft::<V, _>(
-            draft_identity,
-            || initial_key,
-            |inspector, key_buf, temp_value| {
-                ui.text("Add map entry");
-
-                let _ = String::imgui_value(inspector, "Key##new_key", key_buf);
-
-                changed |= V::imgui_value(inspector, "Value##new_value", temp_value);
-
-                if !map.is_empty() {
-                    ui.separator();
-                    ui.text("Copy value from existing entry:");
-                    for (existing_key, existing_value) in map.iter() {
-                        let id = map_key_id(existing_key);
-                        let _entry_id = ui.push_id(id.as_ref());
-                        let copy_label = format!("Copy from \"{existing_key}\"###copy_value");
-                        if ui.small_button(&copy_label) {
-                            *temp_value = existing_value.clone();
-                            changed = true;
-                        }
-                    }
-                }
-
-                if ui.button("Add") && !key_buf.is_empty() && !map.contains_key(key_buf) {
-                    let inserted_key = key_buf.clone();
-                    map.insert(inserted_key.clone(), std::mem::take(temp_value));
-                    inspector.record_event(crate::ReflectEvent::MapInserted {
-                        path: inspector.current_path(),
-                        key: inserted_key,
-                    });
-                    changed = true;
-                    ui.close_current_popup();
-                    true
-                } else {
-                    ui.same_line();
-                    if ui.button("Cancel") {
-                        ui.close_current_popup();
-                        true
-                    } else {
-                        false
-                    }
-                }
-            },
-        );
-
-        if should_clear_popup_state {
-            inspector.clear_map_draft(draft_identity);
-        }
-    }
-    if !ui.is_popup_open(popup_id) {
-        inspector.clear_map_draft(draft_identity);
+    if let Some((key, value)) = draw_map_entry_popup(
+        inspector,
+        label,
+        map_settings.insertable,
+        map.iter(),
+        |key| map.contains_key(key),
+    ) {
+        map.insert(key.clone(), value);
+        inspector.record_event(crate::ReflectEvent::MapInserted {
+            path: inspector.current_path(),
+            key,
+        });
+        changed = true;
     }
     let (rows_changed, edits) = draw_map_rows(inspector, map.iter_mut(), map_settings);
     changed |= rows_changed;

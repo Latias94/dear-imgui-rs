@@ -54,31 +54,19 @@ impl Ui {
     // Style Access
     // ============================================================================
 
-    /// Returns a shared reference to the current [`crate::Style`].
+    /// Borrows the live [`crate::Style`] of this UI's Context.
     ///
-    /// ## Safety
-    ///
-    /// This function is tagged as `unsafe` because pushing via
-    /// [`push_style_color`](crate::Ui::push_style_color) or
-    /// [`push_style_var`](crate::Ui::push_style_var) or popping via
-    /// [`ColorStackToken::pop`](crate::ColorStackToken::pop) or
-    /// [`StyleStackToken::pop`](crate::StyleStackToken::pop) will modify the values in the returned
-    /// shared reference. Therefore, you should not retain this reference across calls to push and
-    /// pop. The [`clone_style`](Ui::clone_style) version may instead be used to avoid `unsafe`.
+    /// Accessors reflect subsequent style changes, including stack pushes and pops.
+    /// Use [`Self::clone_style`] for an independent snapshot.
     #[doc(alias = "GetStyle")]
-    pub unsafe fn style(&self) -> &crate::Style {
-        self.run_with_bound_context(|| unsafe {
-            // safe because Style is a transparent wrapper around sys::ImGuiStyle
-            &*(sys::igGetStyle() as *const crate::Style)
-        })
+    pub fn style(&self) -> &crate::Style {
+        self.run_with_bound_context(|| unsafe { &*sys::igGetStyle().cast::<crate::Style>() })
     }
 
-    /// Returns a copy of the current style.
-    ///
-    /// This is a safe alternative to [`style`](Self::style) that avoids the lifetime issues.
+    /// Returns an independent copy of the current style.
     #[doc(alias = "GetStyle")]
     pub fn clone_style(&self) -> crate::Style {
-        unsafe { self.style().clone() }
+        self.style().clone()
     }
 
     /// Apply the built-in Dark style to the current style.

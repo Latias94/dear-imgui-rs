@@ -23,13 +23,9 @@ impl Drop for DrawFlagsGuard<'_> {
 impl DrawListMut<'_> {
     /// Return the currently enabled public drawing flags.
     pub fn flags(&self) -> DrawFlags {
-        self.assert_scope("DrawListMut::flags()");
-        let read_flags =
-            || DrawFlags::from_bits_truncate(unsafe { (*self.draw_list).Flags } as u32);
-        match self.ui {
-            Some(ui) => ui.run_with_bound_context(read_flags),
-            None => read_flags(),
-        }
+        self.with_raw_bound("DrawListMut::flags()", |draw_list| {
+            DrawFlags::from_bits_truncate(unsafe { (*draw_list).Flags } as u32)
+        })
     }
 
     /// Enable or disable drawing options while `f` runs, then restore prior defaults.
@@ -59,9 +55,9 @@ impl DrawListMut<'_> {
     /// ```
     #[doc(alias = "PushDrawFlag", alias = "PopDrawFlag")]
     pub fn with_draw_flags<R>(&self, flags: DrawFlags, enabled: bool, f: impl FnOnce() -> R) -> R {
-        self.assert_scope("DrawListMut::with_draw_flags()");
+        const CALLER: &str = "DrawListMut::with_draw_flags()";
         assert_draw_flags(
-            "DrawListMut::with_draw_flags()",
+            CALLER,
             flags,
             DrawFlags::from_bits_retain(sys::ImDrawFlags_AllowInPushScope_ as u32),
         );
@@ -70,40 +66,33 @@ impl DrawListMut<'_> {
             stroke == 0 || stroke == DrawFlags::STROKE_LEGACY.bits(),
             "DrawListMut::with_draw_flags() only supports STROKE_LEGACY as a scoped stroke position"
         );
-        let effective = if enabled {
-            self.flags() | flags
-        } else {
-            self.flags().difference(flags)
-        };
-        assert_draw_flags(
-            "DrawListMut::with_draw_flags()",
-            effective & CORNER_FLAGS,
-            CORNER_FLAGS,
-        );
-        let push = || unsafe {
-            let stack = &(*self.draw_list)._DrawFlagsStack;
+        let guard = self.with_raw_bound(CALLER, |draw_list| unsafe {
+            let current = DrawFlags::from_bits_truncate((*draw_list).Flags as u32);
+            let effective = if enabled {
+                current | flags
+            } else {
+                current.difference(flags)
+            };
+            assert_draw_flags(CALLER, effective & CORNER_FLAGS, CORNER_FLAGS);
+            let stack = &(*draw_list)._DrawFlagsStack;
             assert!(
                 usize::from(stack.Size) < stack.LocalData.len(),
                 "DrawListMut::with_draw_flags() exceeded the native draw-flag scope capacity"
             );
-            sys::ImDrawList_PushDrawFlag(self.draw_list, flags.bits() as sys::ImDrawFlags, enabled);
-        };
-        match self.ui {
-            Some(ui) => ui.run_with_bound_context(push),
-            None => push(),
-        }
-        let guard = DrawFlagsGuard {
-            draw_list: self.draw_list,
-            scope: self.ui.map(|ui| {
-                ui.begin_native_scope(
-                    crate::scope::NativeScopePop::DrawListPopDrawFlag {
-                        draw_list: self.draw_list,
-                        window_scoped: self.is_window_scoped(),
-                    },
-                    "DrawListDrawFlagScope",
-                )
-            }),
-        };
+            sys::ImDrawList_PushDrawFlag(draw_list, flags.bits() as sys::ImDrawFlags, enabled);
+            DrawFlagsGuard {
+                draw_list,
+                scope: self.ui.map(|ui| {
+                    ui.begin_native_scope(
+                        crate::scope::NativeScopePop::DrawListPopDrawFlag {
+                            draw_list,
+                            window_scoped: self.is_window_scoped(),
+                        },
+                        "DrawListDrawFlagScope",
+                    )
+                }),
+            }
+        });
         let result = f();
         drop(guard);
         result

@@ -41,7 +41,7 @@ dear-imgui-rs = { workspace = true, features = ["wasm"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rfd = { version = "0.18", optional = true, default-features = false, features = ["xdg-portal"] }
 
-[target.'cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))'.dependencies]
+[target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1", features = ["fs"], optional = true }
 
 [target.'cfg(windows)'.dependencies]

@@ -6,7 +6,7 @@ use dear_imgui_rs::{
     HistoryDirection, InputTextCallback, InputTextCallbackHandler, TextCallbackData,
 };
 
-use crate::dialog_core::{CoreEvent, ProjectedEntries};
+use crate::dialog_core::{CoreEvent, DirEntry, ProjectedEntries};
 use crate::dialog_state::{FileDialogState, PathBarStyle};
 use crate::fs::display_path;
 
@@ -73,50 +73,39 @@ impl PathBarCallback<'_> {
         }
     }
 
-    fn last_sep_pos(s: &str) -> Option<(usize, char)> {
-        s.char_indices().rfind(|(_, c)| *c == '/' || *c == '\\')
-    }
-
-    fn try_complete_path(&mut self, data: TextCallbackData) {
-        let Ok(input) = data.str() else {
-            return;
-        };
+    fn complete_path<'a>(
+        input: &str,
+        cwd: &Path,
+        entries: impl Iterator<Item = &'a DirEntry>,
+    ) -> Option<(String, Option<PathBuf>)> {
         let input = input.trim();
-        if input.is_empty() {
-            return;
-        }
-
-        let (dir_prefix, frag, sep) = match Self::last_sep_pos(input) {
+        let last_sep = input
+            .char_indices()
+            .rfind(|(_, separator)| std::path::is_separator(*separator));
+        let (dir_prefix, frag, sep) = match last_sep {
             Some((i, c)) => (&input[..=i], &input[i + 1..], c),
             None => ("", input, std::path::MAIN_SEPARATOR),
         };
 
         if frag.is_empty() {
-            return;
+            return None;
         }
 
-        let base_dir = if dir_prefix.is_empty() {
-            self.cwd.to_owned()
-        } else {
-            let raw = PathBuf::from(dir_prefix);
-            if raw.is_absolute() {
-                raw
-            } else {
-                self.cwd.join(raw)
+        if !dir_prefix.is_empty() {
+            let base_dir = cwd.join(dir_prefix);
+            if base_dir != cwd
+                && Path::new(display_path(&base_dir).as_ref())
+                    != Path::new(display_path(cwd).as_ref())
+            {
+                return None;
             }
-        };
-
-        if base_dir != self.cwd && display_path(&base_dir) != display_path(self.cwd) {
-            return;
         }
 
-        let mut matches = self
-            .entries
-            .iter()
+        let mut matches = entries
             .filter(|entry| entry.is_dir && Self::starts_with_case_insensitive(&entry.name, frag))
             .collect::<Vec<_>>();
         if matches.is_empty() {
-            return;
+            return None;
         }
         matches.sort_unstable_by(|left, right| left.name.cmp(&right.name));
 
@@ -138,10 +127,21 @@ impl PathBarCallback<'_> {
         } else {
             format!("{dir_prefix}{completed}")
         };
+        let path = (matches.len() == 1).then(|| matches[0].path.clone());
+        Some((new_text, path))
+    }
 
+    fn try_complete_path(&mut self, data: TextCallbackData) {
+        let Ok(input) = data.str() else {
+            return;
+        };
+        let Some((new_text, path)) = Self::complete_path(input, self.cwd, self.entries.iter())
+        else {
+            return;
+        };
         *self.history_index = None;
         *self.history_saved_buffer = None;
-        *self.buffer_path = (matches.len() == 1).then(|| matches[0].path.clone());
+        *self.buffer_path = path;
         self.set_text(data, &new_text);
     }
 
@@ -623,4 +623,58 @@ pub(super) fn draw_breadcrumbs(
         ui.new_line();
     }
     new_cwd
+}
+
+#[cfg(all(test, any(unix, windows)))]
+mod tests {
+    use super::*;
+    use crate::EntryId;
+    use std::ffi::OsStr;
+
+    fn assert_completes_native_child(cwd: &Path, name: &OsStr, fragment: &str) {
+        let path = cwd.join(name);
+        let entry = DirEntry {
+            id: EntryId::from_path(&path),
+            name: name.to_string_lossy().into_owned(),
+            path: path.clone(),
+            is_dir: true,
+            is_symlink: false,
+            size: None,
+            modified: None,
+        };
+        let prefix = display_path(cwd);
+        let sep = std::path::MAIN_SEPARATOR;
+        let input = format!("{prefix}{sep}{fragment}");
+        let expected = format!("{prefix}{sep}{}{sep}", entry.name);
+        assert_eq!(
+            PathBarCallback::complete_path(&input, cwd, std::iter::once(&entry)),
+            Some((expected, Some(path)))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn completes_displayed_verbatim_disk_and_unc_paths() {
+        for path in [r"\\?\C:\folder", r"\\?\UNC\server\share\folder"] {
+            assert_completes_native_child(Path::new(path), OsStr::new("subfolder"), "su");
+        }
+    }
+
+    #[test]
+    fn completes_lossy_display_without_losing_native_names() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let cwd = Path::new(OsStr::from_bytes(b"/folder\xff"));
+            assert_completes_native_child(cwd, OsStr::from_bytes(b"su\\b\xfe"), "su\\");
+        }
+        #[cfg(windows)]
+        {
+            use std::ffi::OsString;
+            use std::os::windows::ffi::OsStringExt;
+            let name = OsString::from_wide(&[b's' as u16, b'u' as u16, 0xD800]);
+            let cwd = Path::new(r"\\?\C:\folder").join(&name);
+            assert_completes_native_child(&cwd, &name, "su");
+        }
+    }
 }

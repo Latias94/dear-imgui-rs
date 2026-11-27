@@ -4,18 +4,8 @@
 //!
 use crate::sys;
 use crate::ui::Ui;
+use crate::validation::{assert_finite_f32, assert_finite_vec2};
 use std::borrow::Cow;
-
-fn assert_finite_f32(caller: &str, name: &str, value: f32) {
-    assert!(value.is_finite(), "{caller} {name} must be finite");
-}
-
-fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
-    assert!(
-        value[0].is_finite() && value[1].is_finite(),
-        "{caller} {name} must contain finite values"
-    );
-}
 
 /// # Progress Bar Widgets
 impl Ui {

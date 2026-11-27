@@ -217,12 +217,15 @@ impl<'ui> GraphEditor<'ui> {
             custom_draw_cb: self.custom_draw_cb.take(),
             on_right_click_cb: self.on_right_click_cb.take(),
         };
-        draw_core(
-            self.ui,
-            &mut graph_ref,
-            &mut view_ref,
-            &self.style,
-            Some(&mut hooks),
-        )
+        self.ui.with_window_draw_list(|draw_list| {
+            draw_core(
+                self.ui,
+                draw_list,
+                &mut graph_ref,
+                &mut view_ref,
+                &self.style,
+                Some(&mut hooks),
+            )
+        })
     }
 }

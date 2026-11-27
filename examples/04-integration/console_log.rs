@@ -477,34 +477,32 @@ impl AppWindow {
 
                 // Log area
                 ui.separator();
-                ui.child_window("log_region")
-                    .size([0.0, -68.0])
-                    .build(&ui, || {
-                        let f = self.console.filter.to_lowercase();
-                        let mut visible: Vec<usize> = Vec::with_capacity(self.console.logs.len());
-                        for (i, it) in self.console.logs.iter().enumerate() {
-                            let line = it.fmt_line(self.console.start);
-                            if f.is_empty() || line.to_lowercase().contains(&f) {
-                                visible.push(i);
-                            }
+                ui.child_window("log_region").size([0.0, -68.0]).build(|| {
+                    let f = self.console.filter.to_lowercase();
+                    let mut visible: Vec<usize> = Vec::with_capacity(self.console.logs.len());
+                    for (i, it) in self.console.logs.iter().enumerate() {
+                        let line = it.fmt_line(self.console.start);
+                        if f.is_empty() || line.to_lowercase().contains(&f) {
+                            visible.push(i);
                         }
-                        let mut clipper = dear_imgui_rs::ListClipper::new(visible.len())
-                            .items_height(ui.text_line_height_with_spacing())
-                            .begin(&ui);
-                        while clipper.step() {
-                            for row in clipper.display_range() {
-                                let idx = visible[row];
-                                let line = self.console.logs[idx].fmt_line(self.console.start);
-                                let label = format!("{}##{idx}", line);
-                                ui.selectable_config(&label)
-                                    .allow_double_click(true)
-                                    .build();
-                            }
+                    }
+                    let mut clipper = dear_imgui_rs::ListClipper::new(visible.len())
+                        .items_height(ui.text_line_height_with_spacing())
+                        .begin(&ui);
+                    while clipper.step() {
+                        for row in clipper.display_range() {
+                            let idx = visible[row];
+                            let line = self.console.logs[idx].fmt_line(self.console.start);
+                            let label = format!("{}##{idx}", line);
+                            ui.selectable_config(&label)
+                                .allow_double_click(true)
+                                .build();
                         }
-                        if self.console.autoscroll {
-                            ui.set_scroll_here_y(1.0);
-                        }
-                    });
+                    }
+                    if self.console.autoscroll {
+                        ui.set_scroll_here_y(1.0);
+                    }
+                });
 
                 // Input line
                 ui.separator();

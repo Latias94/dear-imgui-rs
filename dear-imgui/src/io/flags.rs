@@ -1,91 +1,13 @@
 use crate::sys;
 use bitflags::bitflags;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "serde")]
-impl Serialize for ConfigFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_i32(self.bits())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for ConfigFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let bits = i32::deserialize(deserializer)?;
-        Ok(ConfigFlags::from_bits_retain(bits))
-    }
-}
-
-#[cfg(feature = "serde")]
-impl Serialize for BackendFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_i32(self.bits())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for BackendFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let bits = i32::deserialize(deserializer)?;
-        Ok(BackendFlags::from_bits_retain(bits))
-    }
-}
-
-#[cfg(feature = "serde")]
-impl Serialize for ViewportFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_i32(self.bits())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for ViewportFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let bits = i32::deserialize(deserializer)?;
-        Ok(ViewportFlags::from_bits_retain(bits))
-    }
-}
-
-#[cfg(feature = "serde")]
-impl Serialize for WindowClassViewportFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_i32(self.bits())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> Deserialize<'de> for WindowClassViewportFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let bits = i32::deserialize(deserializer)?;
-        Ok(WindowClassViewportFlags::from_bits_retain(bits))
-    }
-}
+crate::validation::impl_serde_i32_flags!(
+    ConfigFlags,
+    BackendFlags,
+    ViewportFlags,
+    WindowClassViewportFlags,
+);
 
 bitflags! {
     /// Configuration flags

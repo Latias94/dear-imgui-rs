@@ -37,6 +37,10 @@ impl<'ui> DrawListMut<'ui> {
     ///
     /// This mirrors Dear ImGui's `ImDrawList::AddText(ImFont*, ...)` overload.
     #[doc(alias = "AddText")]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "mirrors the ImDrawList::AddText overload"
+    )]
     pub fn add_text_with_font(
         &self,
         font: crate::fonts::FontId,

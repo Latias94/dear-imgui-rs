@@ -652,6 +652,7 @@ fn windows_junctions_are_never_traversed_during_copy_or_deletion() {
 
     let fs = StdFileSystem;
     assert!(fs.inspect_entry(&junction).unwrap().is_symlink);
+    assert!(fs.inspect_move_source(&junction).unwrap().0.is_symlink);
     fs.visit_dir(&source, &mut |entry| {
         assert!(entry.is_dir && entry.is_symlink);
         ScanVisit::Continue

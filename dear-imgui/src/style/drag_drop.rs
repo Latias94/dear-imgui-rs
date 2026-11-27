@@ -1,5 +1,6 @@
 use super::Style;
-use super::validation::{assert_finite_f32, assert_non_negative_f32};
+use super::validation::assert_non_negative_f32;
+use crate::validation::assert_finite_f32;
 
 impl Style {
     pub fn drag_drop_target_rounding(&self) -> f32 {

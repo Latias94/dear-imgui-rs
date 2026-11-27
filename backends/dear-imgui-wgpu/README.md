@@ -117,10 +117,11 @@ Sampling is renderer state rather than texture ownership. The renderer owns the 
 # use dear_imgui_rs::Ui;
 # use dear_imgui_wgpu::ExternalTextureId;
 # fn sampling(ui: &Ui, texture: ExternalTextureId) {
-let draw_list = ui.get_window_draw_list();
-draw_list.set_sampler_nearest();
-ui.image(texture.texture_id(), [320.0, 180.0]);
-draw_list.set_sampler_linear();
+ui.with_window_draw_list(|draw_list| {
+    draw_list.set_sampler_nearest();
+    ui.image(texture.texture_id(), [320.0, 180.0]);
+    draw_list.set_sampler_linear();
+});
 # }
 ```
 

@@ -12,7 +12,7 @@
 //!     ui.child_window("pane")
 //!         .size([200.0, 120.0])
 //!         .border(true)
-//!         .build(&ui, || {
+//!         .build(|| {
 //!             ui.text("Inside child window");
 //!         });
 //! });
@@ -28,6 +28,7 @@
 // public wrapper APIs intentionally expose fixed underlying integer types.
 use super::validate_window_flags;
 use crate::sys;
+use crate::validation::assert_finite_vec2;
 use crate::{Ui, WindowFlags};
 use std::borrow::Cow;
 
@@ -83,29 +84,19 @@ fn validate_child_flags(caller: &str, child_flags: ChildFlags, window_flags: Win
 }
 
 /// Represents a child window that can be built
+#[must_use]
 pub struct ChildWindow<'ui> {
+    ui: &'ui Ui,
     name: Cow<'ui, str>,
     size: [f32; 2],
     child_flags: ChildFlags,
     flags: WindowFlags,
-    _phantom: std::marker::PhantomData<&'ui Ui>,
 }
 
 impl<'ui> ChildWindow<'ui> {
-    /// Creates a new child window builder
-    pub fn new(name: impl Into<Cow<'ui, str>>) -> Self {
-        Self {
-            name: name.into(),
-            size: [0.0, 0.0],
-            child_flags: ChildFlags::NONE,
-            flags: WindowFlags::empty(),
-            _phantom: std::marker::PhantomData,
-        }
-    }
-
     /// Sets the size of the child window
-    pub fn size(mut self, size: [f32; 2]) -> Self {
-        self.size = size;
+    pub fn size(mut self, size: impl Into<[f32; 2]>) -> Self {
+        self.size = size.into();
         self
     }
 
@@ -127,53 +118,33 @@ impl<'ui> ChildWindow<'ui> {
         self
     }
 
-    /// Builds the child window and calls the provided closure
+    /// Builds the child window and calls the closure while its Context is current.
     #[doc(alias = "BeginChild", alias = "EndChild")]
-    pub fn build<F, R>(self, ui: &'ui Ui, f: F) -> Option<R>
+    pub fn build<F, R>(self, f: F) -> Option<R>
     where
         F: FnOnce() -> R,
     {
-        let token = self.begin(ui)?;
-        let result = f();
-        drop(token); // Explicitly drop the token to call EndChild
-        Some(result)
-    }
+        validate_child_flags("ChildWindow::build()", self.child_flags, self.flags);
+        assert_finite_vec2("ChildWindow::build()", "size", self.size);
 
-    /// Begins the child window and returns a token
-    fn begin(self, ui: &'ui Ui) -> Option<ChildWindowGuard<'ui>> {
-        validate_child_flags("ChildWindow::begin()", self.child_flags, self.flags);
-        assert!(
-            self.size[0].is_finite() && self.size[1].is_finite(),
-            "ChildWindow::begin() size must contain finite values"
-        );
-
-        ui.with_scratch_txt(self.name, |name_ptr| {
-            let result = unsafe {
-                let size_vec = sys::ImVec2 {
-                    x: self.size[0],
-                    y: self.size[1],
-                };
+        let ui = self.ui;
+        ui.with_bound_context(|| {
+            let visible = ui.with_scratch_c_string(&self.name, |name| unsafe {
                 sys::igBeginChild_Str(
-                    name_ptr,
-                    size_vec,
+                    name,
+                    self.size.into(),
                     self.child_flags.bits() as i32,
                     self.flags.bits(),
                 )
-            };
-
-            // IMPORTANT: According to ImGui documentation, BeginChild/EndChild are inconsistent
-            // with other Begin/End functions. EndChild() must ALWAYS be called regardless of
-            // what BeginChild() returns. However, if BeginChild returns false, EndChild must
-            // be called immediately and no content should be rendered.
-            if result {
-                Some(ChildWindowGuard::new(ui))
-            } else {
-                // If BeginChild returns false, call EndChild immediately and return None
-                unsafe {
-                    sys::igEndChild();
-                }
-                None
+            });
+            if !visible {
+                unsafe { sys::igEndChild() };
+                return None;
             }
+            let child = ChildWindowGuard::new(ui);
+            let result = f();
+            drop(child);
+            Some(result)
         })
     }
 }
@@ -201,6 +172,12 @@ impl Drop for ChildWindowGuard<'_> {
 impl Ui {
     /// Creates a child window builder
     pub fn child_window<'ui>(&'ui self, name: impl Into<Cow<'ui, str>>) -> ChildWindow<'ui> {
-        ChildWindow::new(name)
+        ChildWindow {
+            ui: self,
+            name: name.into(),
+            size: [0.0, 0.0],
+            child_flags: ChildFlags::NONE,
+            flags: WindowFlags::empty(),
+        }
     }
 }

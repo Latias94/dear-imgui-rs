@@ -144,7 +144,7 @@ impl LogViewer {
                 }
                 ui.separator();
 
-                ui.child_window("log-view").size([0.0, 0.0]).build(ui, || {
+                ui.child_window("log-view").size([0.0, 0.0]).build(|| {
                     let was_at_bottom = ui.scroll_y() >= ui.scroll_max_y();
                     for visible_index in ListClipper::new(self.filtered.len()).begin(ui).iter() {
                         let entry_index = self.filtered[visible_index];

@@ -17,7 +17,7 @@ mod layout;
 mod style;
 
 pub use font::FontStackToken;
-pub use id::{FocusScopeToken, IdStackToken};
+pub use id::{FocusScopeToken, Id, IdStackToken};
 pub use item::{ItemFlagStackToken, ItemFlags, ItemStateFlags};
 pub use layout::{ItemWidthStackToken, TextWrapPosStackToken};
 pub use style::{ColorStackToken, StyleStackToken};

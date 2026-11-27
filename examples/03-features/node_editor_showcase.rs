@@ -660,7 +660,7 @@ fn draw_left_pane(ui: &Ui, node_editor: &EditorContext, graph: &mut GraphState) 
     ui.child_window("blueprints_left_pane")
         .size([300.0, 0.0])
         .border(true)
-        .build(ui, || {
+        .build(|| {
             ui.text("Blueprints");
             ui.separator();
             if ui.button("Fit Content") {
@@ -911,16 +911,20 @@ fn draw_comment_hint(editor: &NodeEditorFrame<'_>) {
         let min = hint.min();
         let label_min = [min[0] + 12.0, min[1] - 24.0];
         let label_max = [label_min[0] + 176.0, label_min[1] + 22.0];
-        hint.background_draw_list()
-            .add_rect(label_min, label_max, [0.12, 0.14, 0.16, 0.88])
-            .filled(true)
-            .rounding(4.0)
-            .build();
-        hint.foreground_draw_list().add_text(
-            [label_min[0] + 8.0, label_min[1] + 4.0],
-            [0.72, 0.83, 0.92, 1.0],
-            "Blueprint comment",
-        );
+        hint.with_background_draw_list(|draw_list| {
+            draw_list
+                .add_rect(label_min, label_max, [0.12, 0.14, 0.16, 0.88])
+                .filled(true)
+                .rounding(4.0)
+                .build();
+        });
+        hint.with_foreground_draw_list(|draw_list| {
+            draw_list.add_text(
+                [label_min[0] + 8.0, label_min[1] + 4.0],
+                [0.72, 0.83, 0.92, 1.0],
+                "Blueprint comment",
+            );
+        });
     });
 }
 

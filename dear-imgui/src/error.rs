@@ -57,7 +57,7 @@ pub enum ImGuiError {
     TextureOperation { operation: String },
 
     /// Renderer error (from backends)
-    #[error("Renderer error")]
+    #[error("Renderer error: {0}")]
     Renderer(#[from] Box<dyn std::error::Error + Send + Sync>),
 
     /// IO operation error
@@ -155,9 +155,10 @@ mod tests {
     }
 
     #[test]
-    fn test_error_chain() {
+    fn renderer_error_displays_and_retains_its_source() {
         let source_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
         let imgui_err = ImGuiError::Renderer(Box::new(source_err));
-        assert!(imgui_err.source().is_some());
+        assert_eq!(imgui_err.to_string(), "Renderer error: file not found");
+        assert_eq!(imgui_err.source().unwrap().to_string(), "file not found");
     }
 }

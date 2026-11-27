@@ -1,5 +1,5 @@
-use crate::io::assert_finite_f32;
 use crate::sys;
+use crate::validation::assert_finite_f32;
 use std::cell::UnsafeCell;
 
 /// Settings and inputs/outputs for imgui-rs

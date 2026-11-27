@@ -3,6 +3,7 @@
 //! Run with `cargo run --release -p dear-imgui-rs --example widget_hot_path`.
 //! Use the same example, toolchain, features and workload in both checkouts.
 //! Pass `-- --native-only` to time the same submissions without widget wrappers.
+//! Pass `-- --foreign-current` to start each frame with a second context current.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::ffi::{CString, c_void};
@@ -153,6 +154,9 @@ fn main() {
         .try_claim_legacy_renderer()
         .unwrap()
         .build();
+    let _previous = std::env::args()
+        .any(|arg| arg == "--foreign-current")
+        .then(Context::create);
     let windows: Vec<_> = (0..500).map(|index| format!("View {index}")).collect();
     let labels: Vec<_> = (0..10_000).map(|index| format!("Button {index}")).collect();
     let native_only = std::env::args().any(|arg| arg == "--native-only");

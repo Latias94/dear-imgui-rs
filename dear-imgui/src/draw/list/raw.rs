@@ -35,8 +35,9 @@ impl<'ui> DrawListMut<'ui> {
     ///     _list: *const dear_imgui_rs::sys::ImDrawList,
     ///     _command: *const dear_imgui_rs::sys::ImDrawCmd,
     /// ) {}
-    /// let draw_list = ui.get_window_draw_list();
-    /// draw_list.add_callback(callback, std::ptr::null_mut(), 0);
+    /// ui.with_window_draw_list(|draw_list| {
+    ///     draw_list.add_callback(callback, std::ptr::null_mut(), 0);
+    /// });
     /// ```
     ///
     /// Rust-owned closure callbacks are intentionally unavailable: a draw command may be dropped
@@ -46,8 +47,7 @@ impl<'ui> DrawListMut<'ui> {
     /// # use dear_imgui_rs::Context;
     /// # let mut context = Context::create();
     /// # let ui = context.frame();
-    /// let draw_list = ui.get_window_draw_list();
-    /// draw_list.add_callback_safe(|| {}).build();
+    /// ui.with_window_draw_list(|draw_list| draw_list.add_callback_safe(|| {}).build());
     /// ```
     #[doc(alias = "AddCallback")]
     pub unsafe fn add_callback(
@@ -64,15 +64,17 @@ impl<'ui> DrawListMut<'ui> {
             userdata_size == 0 || !userdata.is_null(),
             "DrawListMut::add_callback() copied userdata must not be null"
         );
-        unsafe {
-            sys::ImDrawList_AddCallback(self.draw_list, Some(callback), userdata, userdata_size)
-        }
+        self.with_raw_bound("DrawListMut::add_callback()", |draw_list| unsafe {
+            sys::ImDrawList_AddCallback(draw_list, Some(callback), userdata, userdata_size)
+        });
     }
 
     /// Insert a new draw command (forces a new draw call boundary).
     #[doc(alias = "AddDrawCmd")]
     pub fn add_draw_cmd(&self) {
-        unsafe { sys::ImDrawList_AddDrawCmd(self.draw_list) }
+        self.with_raw_bound("DrawListMut::add_draw_cmd()", |draw_list| unsafe {
+            sys::ImDrawList_AddDrawCmd(draw_list)
+        });
     }
 }
 
@@ -84,7 +86,9 @@ impl<'ui> DrawListMut<'ui> {
     pub unsafe fn prim_reserve(&self, idx_count: usize, vtx_count: usize) {
         let idx_count = count_to_i32("DrawListMut::prim_reserve()", "idx_count", idx_count);
         let vtx_count = count_to_i32("DrawListMut::prim_reserve()", "vtx_count", vtx_count);
-        unsafe { sys::ImDrawList_PrimReserve(self.draw_list, idx_count, vtx_count) }
+        self.with_raw_bound("DrawListMut::prim_reserve()", |draw_list| unsafe {
+            sys::ImDrawList_PrimReserve(draw_list, idx_count, vtx_count)
+        });
     }
 
     /// Unsafe low-level geometry API: unreserve previously reserved space.
@@ -94,7 +98,9 @@ impl<'ui> DrawListMut<'ui> {
     pub unsafe fn prim_unreserve(&self, idx_count: usize, vtx_count: usize) {
         let idx_count = count_to_i32("DrawListMut::prim_unreserve()", "idx_count", idx_count);
         let vtx_count = count_to_i32("DrawListMut::prim_unreserve()", "vtx_count", vtx_count);
-        unsafe { sys::ImDrawList_PrimUnreserve(self.draw_list, idx_count, vtx_count) }
+        self.with_raw_bound("DrawListMut::prim_unreserve()", |draw_list| unsafe {
+            sys::ImDrawList_PrimUnreserve(draw_list, idx_count, vtx_count)
+        });
     }
 
     /// Unsafe low-level geometry API: append a rectangle primitive with a single color.
@@ -109,7 +115,10 @@ impl<'ui> DrawListMut<'ui> {
     ) {
         let a = finite_vec2("DrawListMut::prim_rect()", "a", a);
         let b = finite_vec2("DrawListMut::prim_rect()", "b", b);
-        unsafe { sys::ImDrawList_PrimRect(self.draw_list, a, b, col.into().into()) }
+        let color = col.into().into();
+        self.with_raw_bound("DrawListMut::prim_rect()", |draw_list| unsafe {
+            sys::ImDrawList_PrimRect(draw_list, a, b, color)
+        });
     }
 
     /// Unsafe low-level geometry API: append a rectangle primitive with UVs and color.
@@ -129,13 +138,17 @@ impl<'ui> DrawListMut<'ui> {
         let uv_a = finite_vec2("DrawListMut::prim_rect_uv()", "uv_a", uv_a);
         let uv_b = finite_vec2("DrawListMut::prim_rect_uv()", "uv_b", uv_b);
 
-        unsafe { sys::ImDrawList_PrimRectUV(self.draw_list, a, b, uv_a, uv_b, col.into().into()) }
+        let color = col.into().into();
+        self.with_raw_bound("DrawListMut::prim_rect_uv()", |draw_list| unsafe {
+            sys::ImDrawList_PrimRectUV(draw_list, a, b, uv_a, uv_b, color)
+        });
     }
 
     /// Unsafe low-level geometry API: append a quad primitive with UVs and color.
     ///
     /// # Safety
     /// Only use between `prim_reserve` and completing the reserved writes.
+    #[allow(clippy::too_many_arguments, reason = "mirrors ImDrawList::PrimQuadUV")]
     pub unsafe fn prim_quad_uv(
         &self,
         a: impl Into<sys::ImVec2>,
@@ -157,20 +170,10 @@ impl<'ui> DrawListMut<'ui> {
         let uv_c = finite_vec2("DrawListMut::prim_quad_uv()", "uv_c", uv_c);
         let uv_d = finite_vec2("DrawListMut::prim_quad_uv()", "uv_d", uv_d);
 
-        unsafe {
-            sys::ImDrawList_PrimQuadUV(
-                self.draw_list,
-                a,
-                b,
-                c,
-                d,
-                uv_a,
-                uv_b,
-                uv_c,
-                uv_d,
-                col.into().into(),
-            )
-        }
+        let color = col.into().into();
+        self.with_raw_bound("DrawListMut::prim_quad_uv()", |draw_list| unsafe {
+            sys::ImDrawList_PrimQuadUV(draw_list, a, b, c, d, uv_a, uv_b, uv_c, uv_d, color)
+        });
     }
 
     /// Unsafe low-level geometry API: write a vertex.
@@ -185,7 +188,10 @@ impl<'ui> DrawListMut<'ui> {
     ) {
         let pos = finite_vec2("DrawListMut::prim_write_vtx()", "pos", pos);
         let uv = finite_vec2("DrawListMut::prim_write_vtx()", "uv", uv);
-        unsafe { sys::ImDrawList_PrimWriteVtx(self.draw_list, pos, uv, col.into().into()) }
+        let color = col.into().into();
+        self.with_raw_bound("DrawListMut::prim_write_vtx()", |draw_list| unsafe {
+            sys::ImDrawList_PrimWriteVtx(draw_list, pos, uv, color)
+        });
     }
 
     /// Unsafe low-level geometry API: write an index.
@@ -193,7 +199,9 @@ impl<'ui> DrawListMut<'ui> {
     /// # Safety
     /// Only use to fill space reserved by `prim_reserve`.
     pub unsafe fn prim_write_idx(&self, idx: sys::ImDrawIdx) {
-        unsafe { sys::ImDrawList_PrimWriteIdx(self.draw_list, idx) }
+        self.with_raw_bound("DrawListMut::prim_write_idx()", |draw_list| unsafe {
+            sys::ImDrawList_PrimWriteIdx(draw_list, idx)
+        });
     }
 
     /// Unsafe low-level geometry API: convenience to append one vertex (pos+uv+col).
@@ -208,6 +216,9 @@ impl<'ui> DrawListMut<'ui> {
     ) {
         let pos = finite_vec2("DrawListMut::prim_vtx()", "pos", pos);
         let uv = finite_vec2("DrawListMut::prim_vtx()", "uv", uv);
-        unsafe { sys::ImDrawList_PrimVtx(self.draw_list, pos, uv, col.into().into()) }
+        let color = col.into().into();
+        self.with_raw_bound("DrawListMut::prim_vtx()", |draw_list| unsafe {
+            sys::ImDrawList_PrimVtx(draw_list, pos, uv, color)
+        });
     }
 }

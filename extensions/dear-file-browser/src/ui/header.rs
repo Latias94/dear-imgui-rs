@@ -789,15 +789,16 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
             let rect_max = ui.item_rect_max();
             let after = ui.cursor_pos();
 
-            let dl = ui.get_window_draw_list();
-            let rounding = style.frame_rounding();
-            dl.add_rect(rect_min, rect_max, ui.get_color_u32(StyleColor::FrameBg))
-                .filled(true)
-                .rounding(rounding)
-                .build();
-            dl.add_rect(rect_min, rect_max, ui.get_color_u32(StyleColor::Border))
-                .rounding(rounding)
-                .build();
+            ui.with_window_draw_list(|dl| {
+                let rounding = style.frame_rounding();
+                dl.add_rect(rect_min, rect_max, ui.get_color_u32(StyleColor::FrameBg))
+                    .filled(true)
+                    .rounding(rounding)
+                    .build();
+                dl.add_rect(rect_min, rect_max, ui.get_color_u32(StyleColor::Border))
+                    .rounding(rounding)
+                    .build();
+            });
 
             // Match InputText's horizontal padding, but keep full vertical space so
             // breadcrumb buttons (which are frame-height) don't get clipped away.

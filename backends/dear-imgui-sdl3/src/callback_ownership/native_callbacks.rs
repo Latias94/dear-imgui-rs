@@ -1,7 +1,7 @@
 use std::ffi::c_void;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 
+use dear_imgui_rs::ffi::guard_native_callback;
 use dear_imgui_rs::sys;
 
 use crate::core::ffi;
@@ -772,7 +772,11 @@ impl Drop for NativeTransaction<'_> {
         if self.active {
             let mut first_fault = 0;
             let faults = unsafe { ffi::dear_imgui_sdl3_native_end(&mut first_fault) };
-            self.control.record_native_faults(faults, first_fault);
+            guard_native_callback(
+                (),
+                || self.control.record_native_faults(faults, first_fault),
+                || {},
+            );
         }
     }
 }
@@ -850,26 +854,25 @@ fn run_platform_callback<R: Copy>(
     fallback: R,
     callback: impl FnOnce(&RuntimeControl, &PlatformCallbacks) -> R,
 ) -> R {
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        with_current_runtime(|control| {
-            if !control.validate_platform_callback_slot(slot) {
-                return fallback;
-            }
-            let Some(callbacks) = control.original_platform_callbacks() else {
-                control.record_platform_state_replaced("platform callback ownership");
-                return fallback;
-            };
-            callback(control, &callbacks)
-        })
-        .unwrap_or(fallback)
-    }));
-    match result {
-        Ok(result) => result,
-        Err(_) => {
+    guard_native_callback(
+        fallback,
+        || {
+            with_current_runtime(|control| {
+                if !control.validate_platform_callback_slot(slot) {
+                    return fallback;
+                }
+                let Some(callbacks) = control.original_platform_callbacks() else {
+                    control.record_platform_state_replaced("platform callback ownership");
+                    return fallback;
+                };
+                callback(control, &callbacks)
+            })
+            .unwrap_or(fallback)
+        },
+        || {
             let _ = with_current_runtime(|control| control.record_callback_panicked(slot.name()));
-            fallback
-        }
-    }
+        },
+    )
 }
 
 fn run_owned_platform_callback<R: Copy>(
@@ -895,23 +898,23 @@ fn run_callback<R: Copy>(
     fallback: R,
     callback: impl FnOnce(&RuntimeControl) -> R,
 ) -> R {
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        with_current_runtime(|control| {
-            if control.validate_platform_ownership_bound() || control.callback_teardown_active() {
-                callback(control)
-            } else {
-                fallback
-            }
-        })
-        .unwrap_or(fallback)
-    }));
-    match result {
-        Ok(result) => result,
-        Err(_) => {
+    guard_native_callback(
+        fallback,
+        || {
+            with_current_runtime(|control| {
+                if control.validate_platform_ownership_bound() || control.callback_teardown_active()
+                {
+                    callback(control)
+                } else {
+                    fallback
+                }
+            })
+            .unwrap_or(fallback)
+        },
+        || {
             let _ = with_current_runtime(|control| control.record_callback_panicked(name));
-            fallback
-        }
-    }
+        },
+    )
 }
 
 #[cfg(test)]

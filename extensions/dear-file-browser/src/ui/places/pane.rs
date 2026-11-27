@@ -25,7 +25,7 @@ pub(in crate::ui) fn draw_minimal_places_popup(ui: &Ui, state: &mut FileDialogSt
         ui.child_window("##fb_places_popup_child")
             .size([280.0, 380.0])
             .border(true)
-            .build(ui, || {
+            .build(|| {
                 new_cwd = draw_places_pane(ui, state);
             });
         if let Some(p) = new_cwd {

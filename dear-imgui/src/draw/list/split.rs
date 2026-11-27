@@ -1,8 +1,17 @@
+use crate::scope::{NativeScopePop, NativeScopeToken};
 use crate::sys;
 
 use super::super::channels::ChannelsSplit;
 use super::super::util::count_to_i32;
-use super::{ChannelsSplitMergeGuard, DrawListMut};
+use super::DrawListMut;
+
+struct ChannelsSplitMergeGuard<'ui>(NativeScopeToken<'ui>);
+
+impl Drop for ChannelsSplitMergeGuard<'_> {
+    fn drop(&mut self) {
+        self.0.finish();
+    }
+}
 
 /// Drawing functions
 impl<'ui> DrawListMut<'ui> {
@@ -19,7 +28,7 @@ impl<'ui> DrawListMut<'ui> {
     /// Panics if the count is outside `1..=i32::MAX`, this draw list is already split,
     /// or a native extension is using its splitter.
     #[doc(alias = "ChannelsSplit")]
-    pub fn channels_split<F: FnOnce(&ChannelsSplit<'ui>)>(&'ui self, channels_count: usize, f: F) {
+    pub fn channels_split(&self, channels_count: usize, f: impl FnOnce(&ChannelsSplit<'_>)) {
         assert!(channels_count > 0, "channels_count must be greater than 0");
         let channels_count_i32 = count_to_i32(
             "DrawListMut::channels_split()",
@@ -27,15 +36,26 @@ impl<'ui> DrawListMut<'ui> {
             channels_count,
         );
 
-        self.assert_splitter_available();
-        let splitter = unsafe { &(*self.draw_list)._Splitter };
-        assert!(
-            splitter._Current == 0 && splitter._Count <= 1,
-            "DrawListMut::channels_split() does not support nested splits for the same draw list"
-        );
+        let ui = self.ui();
+        ui.with_bound_context(|| {
+            self.assert_bound_scope("DrawListMut::channels_split()");
+            self.assert_splitter_available();
+            let draw_list = self.draw_list;
+            let splitter = unsafe { &(*draw_list)._Splitter };
+            assert!(
+                splitter._Current == 0 && splitter._Count <= 1,
+                "DrawListMut::channels_split() does not support nested splits for the same draw list"
+            );
 
-        unsafe { sys::ImDrawList_ChannelsSplit(self.draw_list, channels_count_i32) };
-        let _merge_guard = ChannelsSplitMergeGuard { draw_list: self };
-        f(&ChannelsSplit::new(self, channels_count));
+            unsafe { sys::ImDrawList_ChannelsSplit(draw_list, channels_count_i32) };
+            let _merge_guard = ChannelsSplitMergeGuard(ui.begin_native_scope(
+                NativeScopePop::DrawListMergeChannels {
+                    draw_list,
+                    window_scoped: self.is_window_scoped(),
+                },
+                "DrawListMut::channels_split()",
+            ));
+            f(&ChannelsSplit::new(self, channels_count));
+        });
     }
 }

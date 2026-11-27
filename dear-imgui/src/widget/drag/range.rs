@@ -11,7 +11,8 @@ use super::validation::validate_drag_flags;
 /// Builder for a drag range slider widget
 #[derive(Clone, Debug)]
 #[must_use]
-pub struct DragRange<T, L, F = &'static str, M = &'static str> {
+pub struct DragRange<'ui, T, L, F = &'static str, M = &'static str> {
+    ui: &'ui Ui,
     label: L,
     speed: f32,
     min: Option<T>,
@@ -21,11 +22,12 @@ pub struct DragRange<T, L, F = &'static str, M = &'static str> {
     flags: DragFlags,
 }
 
-impl<T: DataTypeKind, L: AsRef<str>> DragRange<T, L> {
+impl<'ui, T: DataTypeKind, L: AsRef<str>> DragRange<'ui, T, L> {
     /// Constructs a new drag range slider builder
     #[doc(alias = "DragIntRange2", alias = "DragFloatRange2")]
-    pub fn new(label: L) -> DragRange<T, L> {
+    pub(super) fn new(ui: &'ui Ui, label: L) -> Self {
         DragRange {
+            ui,
             label,
             speed: 1.0,
             min: None,
@@ -37,7 +39,7 @@ impl<T: DataTypeKind, L: AsRef<str>> DragRange<T, L> {
     }
 }
 
-impl<T, L, F, M> DragRange<T, L, F, M>
+impl<'ui, T, L, F, M> DragRange<'ui, T, L, F, M>
 where
     T: DataTypeKind,
     L: AsRef<str>,
@@ -63,8 +65,9 @@ where
     pub fn display_format<'fmt>(
         self,
         display_format: NumericFormat<'fmt, T>,
-    ) -> DragRange<T, L, NumericFormat<'fmt, T>, M> {
+    ) -> DragRange<'ui, T, L, NumericFormat<'fmt, T>, M> {
         DragRange {
+            ui: self.ui,
             label: self.label,
             speed: self.speed,
             min: self.min,
@@ -79,7 +82,7 @@ where
     pub fn try_display_format<'fmt>(
         self,
         display_format: impl Into<Cow<'fmt, str>>,
-    ) -> Result<DragRange<T, L, NumericFormat<'fmt, T>, M>, NumericFormatError> {
+    ) -> Result<DragRange<'ui, T, L, NumericFormat<'fmt, T>, M>, NumericFormatError> {
         Ok(self.display_format(NumericFormat::new(display_format)?))
     }
 
@@ -87,8 +90,9 @@ where
     pub fn max_display_format<'fmt>(
         self,
         max_display_format: NumericFormat<'fmt, T>,
-    ) -> DragRange<T, L, F, NumericFormat<'fmt, T>> {
+    ) -> DragRange<'ui, T, L, F, NumericFormat<'fmt, T>> {
         DragRange {
+            ui: self.ui,
             label: self.label,
             speed: self.speed,
             min: self.min,
@@ -103,7 +107,7 @@ where
     pub fn try_max_display_format<'fmt>(
         self,
         max_display_format: impl Into<Cow<'fmt, str>>,
-    ) -> Result<DragRange<T, L, F, NumericFormat<'fmt, T>>, NumericFormatError> {
+    ) -> Result<DragRange<'ui, T, L, F, NumericFormat<'fmt, T>>, NumericFormatError> {
         Ok(self.max_display_format(NumericFormat::new(max_display_format)?))
     }
 
@@ -115,9 +119,9 @@ where
 
     fn with_scratch_labels(
         &self,
-        ui: &Ui,
         submit: impl FnOnce(*const c_char, *const c_char, *const c_char) -> bool,
     ) -> bool {
+        let ui = self.ui;
         ui.run_with_bound_context(|| {
             let label = self.label.as_ref();
             let format = self.display_format.as_ref().map(AsRef::as_ref);
@@ -141,7 +145,7 @@ where
     }
 }
 
-impl<L, F, M> DragRange<f32, L, F, M>
+impl<L, F, M> DragRange<'_, f32, L, F, M>
 where
     L: AsRef<str>,
     F: AsRef<str>,
@@ -151,9 +155,9 @@ where
     ///
     /// Returns true if the slider value was changed
     #[doc(alias = "DragFloatRange2")]
-    pub fn build(self, ui: &Ui, min: &mut f32, max: &mut f32) -> bool {
+    pub fn build(self, min: &mut f32, max: &mut f32) -> bool {
         validate_drag_flags("DragRange::build()", self.flags);
-        self.with_scratch_labels(ui, |label, display_format, max_display_format| unsafe {
+        self.with_scratch_labels(|label, display_format, max_display_format| unsafe {
             sys::igDragFloatRange2(
                 label,
                 min as *mut f32,
@@ -169,7 +173,7 @@ where
     }
 }
 
-impl<L, F, M> DragRange<i32, L, F, M>
+impl<L, F, M> DragRange<'_, i32, L, F, M>
 where
     L: AsRef<str>,
     F: AsRef<str>,
@@ -179,9 +183,9 @@ where
     ///
     /// Returns true if the slider value was changed
     #[doc(alias = "DragIntRange2")]
-    pub fn build(self, ui: &Ui, min: &mut i32, max: &mut i32) -> bool {
+    pub fn build(self, min: &mut i32, max: &mut i32) -> bool {
         validate_drag_flags("DragRange::build()", self.flags);
-        self.with_scratch_labels(ui, |label, display_format, max_display_format| unsafe {
+        self.with_scratch_labels(|label, display_format, max_display_format| unsafe {
             sys::igDragIntRange2(
                 label,
                 min as *mut i32,

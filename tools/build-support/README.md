@@ -66,7 +66,7 @@ The core uses `NativeBuildPlan::from_core_env` to normalize the existing Test En
 Sys crates keep their target-specific compilation, ABI validation, and link order.
 In automatic or strict-prebuilt mode, an explicit `PrebuiltSource` is acquired with `acquire`; the returned directory must still pass the crate's existing artifact-profile validation before any link directives are emitted.
 Acquisition errors are fatal for explicit inputs. `finish_prebuilt_lookup` permits an automatic cache miss but rejects one in strict-prebuilt mode.
-Explicit sources use separate cache namespaces. Local archive replacement invalidates extraction through a content freshness key under the existing extraction lock; offline HTTP routes may reuse cached downloads but never start a network request.
+Explicit sources use separate cache namespaces. Local archives and renamed libraries are staged by content under a writer lock, so replacing a local input does not overwrite a previously returned library.
 Core and extension manifest readers track both candidate locations, watching the parent directory for absent candidates to catch newly added overrides without perpetual rebuilds.
 No generic provider registry, build graph, or binary ABI inference is involved.
 
@@ -113,20 +113,27 @@ from the same release directory. Set `DEAR_IMGUI_SHA256SUMS` to the path of a
 local checksum file to override that manifest. A cached archive and checksum
 file are verified without a network request, even in online mode.
 With `CARGO_NET_OFFLINE=1`, a remote URL requires a cached archive and either
-its cached release manifest or the local override. Automatic release discovery
-can fall back to building from source when the archive or release manifest is
-unavailable. A checksum verification failure still fails the build.
+its cached release manifest or the local override. Unavailable, unverified,
+or invalid archives are rejected without emitting a fatal Cargo directive.
+Automatic release discovery can try other candidates or build from source.
+An explicit selection still fails on acquisition errors, and strict prebuilt
+mode still requires a compatible artifact.
 Set `DEAR_IMGUI_ALLOW_INSECURE_HTTP=1` only for local HTTP testing.
 
 An explicit `*_SYS_CACHE_DIR` specifies the crate's cache root. Otherwise, the
 helper uses a crate-specific subdirectory of `DEAR_IMGUI_CACHE_DIR` or defaults
-to `OUT_DIR/dear-imgui-prebuilt-cache`.
+to `OUT_DIR/pb`. Downloads and extracted libraries use compact cache paths
+without changing full SHA-256 verification. Populate the new cache online
+before building offline, or select a local archive explicitly. For very deep
+Windows build directories, use a short cache override.
 
 Local paths (including `file://...`) and `*_SYS_PACKAGE_DIR` use local artifacts
 without the release checksum file. Extracting local archives requires the
-`archive` feature, which `download` also enables. Explicit `*_SYS_LIB_DIR`
-selects an already extracted library. Sys crates validate the artifact profile
-before linking in all cases.
+`archive` feature, which `download` also enables. Local and remote archives
+may contain regular files and directories only. Links and other special
+entries are rejected before extraction. Explicit `*_SYS_LIB_DIR` selects an
+already extracted library. Sys crates validate the artifact profile before
+linking in all cases.
 
 ## When to Use
 

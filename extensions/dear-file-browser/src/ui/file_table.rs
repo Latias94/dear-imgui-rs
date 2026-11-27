@@ -469,16 +469,10 @@ fn draw_file_table_view(
                 state.ui.runtime.error = start_paste_into_cwd(state).err();
             }
             if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
-                let _ = state.core.handle_event(CoreEvent::MoveFocus {
-                    delta: -1,
-                    modifiers,
-                });
+                move_focus_and_reveal(state, -1, modifiers);
             }
             if ui.is_key_pressed_with_repeat(Key::DownArrow, true) {
-                let _ = state.core.handle_event(CoreEvent::MoveFocus {
-                    delta: 1,
-                    modifiers,
-                });
+                move_focus_and_reveal(state, 1, modifiers);
             }
             if state.ui.config.type_select_enabled && !modifiers.ctrl && !modifiers.shift {
                 handle_type_select(ui, state);
@@ -718,123 +712,121 @@ fn draw_file_grid_view(
         .columns(col_setups)
         .headers(false)
         .build(|ui| {
-            let dl = ui.get_window_draw_list();
-            let font_size = ui.current_font_size();
+            ui.with_window_draw_list(|dl| {
+                let font_size = ui.current_font_size();
 
-            if ui.is_window_focused() && !ui.io().want_text_input() {
-                let modifiers = Modifiers {
-                    ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
-                    shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
-                };
+                if ui.is_window_focused() && !ui.io().want_text_input() {
+                    let modifiers = Modifiers {
+                        ctrl: ui.is_key_down(Key::LeftCtrl) || ui.is_key_down(Key::RightCtrl),
+                        shift: ui.is_key_down(Key::LeftShift) || ui.is_key_down(Key::RightShift),
+                    };
 
-                if modifiers.ctrl && ui.is_key_pressed(Key::A) && !modifiers.shift {
-                    let _ = state.core.handle_event(CoreEvent::SelectAll);
+                    if modifiers.ctrl && ui.is_key_pressed(Key::A) && !modifiers.shift {
+                        let _ = state.core.handle_event(CoreEvent::SelectAll);
+                    }
+                    if modifiers.ctrl && ui.is_key_pressed(Key::C) && !modifiers.shift {
+                        clipboard_set_from_selection(state, ClipboardOp::Copy);
+                    }
+                    if modifiers.ctrl && ui.is_key_pressed(Key::X) && !modifiers.shift {
+                        clipboard_set_from_selection(state, ClipboardOp::Cut);
+                    }
+                    if modifiers.ctrl && ui.is_key_pressed(Key::V) && !modifiers.shift {
+                        state.ui.runtime.error = start_paste_into_cwd(state).err();
+                    }
+                    if ui.is_key_pressed_with_repeat(Key::LeftArrow, true) {
+                        move_focus_and_reveal(state, -1, modifiers);
+                    }
+                    if ui.is_key_pressed_with_repeat(Key::RightArrow, true) {
+                        move_focus_and_reveal(state, 1, modifiers);
+                    }
+                    if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
+                        move_focus_and_reveal(state, -(cols as i32), modifiers);
+                    }
+                    if ui.is_key_pressed_with_repeat(Key::DownArrow, true) {
+                        move_focus_and_reveal(state, cols as i32, modifiers);
+                    }
+                    if state.ui.config.type_select_enabled && !modifiers.ctrl && !modifiers.shift {
+                        handle_type_select(ui, state);
+                    }
                 }
-                if modifiers.ctrl && ui.is_key_pressed(Key::C) && !modifiers.shift {
-                    clipboard_set_from_selection(state, ClipboardOp::Copy);
-                }
-                if modifiers.ctrl && ui.is_key_pressed(Key::X) && !modifiers.shift {
-                    clipboard_set_from_selection(state, ClipboardOp::Cut);
-                }
-                if modifiers.ctrl && ui.is_key_pressed(Key::V) && !modifiers.shift {
-                    state.ui.runtime.error = start_paste_into_cwd(state).err();
-                }
-                if ui.is_key_pressed_with_repeat(Key::LeftArrow, true) {
-                    let _ = state.core.handle_event(CoreEvent::MoveFocus {
-                        delta: -1,
-                        modifiers,
-                    });
-                }
-                if ui.is_key_pressed_with_repeat(Key::RightArrow, true) {
-                    let _ = state.core.handle_event(CoreEvent::MoveFocus {
-                        delta: 1,
-                        modifiers,
-                    });
-                }
-                if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
-                    let _ = state.core.handle_event(CoreEvent::MoveFocus {
-                        delta: -(cols as i32),
-                        modifiers,
-                    });
-                }
-                if ui.is_key_pressed_with_repeat(Key::DownArrow, true) {
-                    let _ = state.core.handle_event(CoreEvent::MoveFocus {
-                        delta: cols as i32,
-                        modifiers,
-                    });
-                }
-                if state.ui.config.type_select_enabled && !modifiers.ctrl && !modifiers.shift {
-                    handle_type_select(ui, state);
-                }
-            }
 
-            let row_count = entry_count.div_ceil(cols).min(i32::MAX as usize - 1);
-            let row_height = cell_h + 2.0 * style.cell_padding()[1];
-            let mut clipper = ListClipper::new(row_count)
-                .items_height(row_height)
-                .begin(ui);
-            if let Some(row) = state
-                .ui
-                .operations
-                .reveal_id_next
-                .and_then(|id| state.core.row_index(id))
-                .map(|index| index / cols)
-                .filter(|row| *row < row_count)
-            {
-                clipper.include_item_by_index(row);
-            }
-            let mut row_ids = Vec::new();
-            while clipper.step() {
-                row_ids.clear();
-                let start = clipper.display_start() * cols;
-                let end = (clipper.display_end() * cols).min(entry_count);
-                state.core.append_row_ids(start..end, &mut row_ids);
-                for row in row_ids.chunks(cols) {
-                    ui.table_next_row_with_flags(TableRowFlags::empty(), row_height);
-                    for &id in row {
-                        ui.table_next_column();
-                        let Some(e) = state.core.entry_by_id(id) else {
-                            continue;
-                        };
+                let row_count = entry_count.div_ceil(cols).min(i32::MAX as usize - 1);
+                let row_height = cell_h + 2.0 * style.cell_padding()[1];
+                let mut clipper = ListClipper::new(row_count)
+                    .items_height(row_height)
+                    .begin(ui);
+                if let Some(row) = state
+                    .ui
+                    .operations
+                    .reveal_id_next
+                    .and_then(|id| state.core.row_index(id))
+                    .map(|index| index / cols)
+                    .filter(|row| *row < row_count)
+                {
+                    clipper.include_item_by_index(row);
+                }
+                let mut row_ids = Vec::new();
+                while clipper.step() {
+                    row_ids.clear();
+                    let start = clipper.display_start() * cols;
+                    let end = (clipper.display_end() * cols).min(entry_count);
+                    state.core.append_row_ids(start..end, &mut row_ids);
+                    for row in row_ids.chunks(cols) {
+                        ui.table_next_row_with_flags(TableRowFlags::empty(), row_height);
+                        for &id in row {
+                            ui.table_next_column();
+                            let Some(e) = state.core.entry_by_id(id) else {
+                                continue;
+                            };
 
-                        let selected = state.core.is_selected_id(id);
-                        let focused = state.core.focused_entry_id() == Some(id);
-                        let visual = style_visual_for_entry(&mut state.ui.config, e);
+                            let selected = state.core.is_selected_id(id);
+                            let focused = state.core.focused_entry_id() == Some(id);
+                            let visual = style_visual_for_entry(&mut state.ui.config, e);
 
-                        let mut label = e.display_name();
-                        if let Some(icon) = visual.icon.as_deref() {
-                            label = Cow::Owned(format!("{icon} {label}"));
-                        }
-
-                        let _id = ui.push_id(id.widget_id());
-                        let clicked = ui.invisible_button("##grid_item", [cell_w, cell_h]);
-                        let hovered = ui.is_item_hovered();
-                        let active = ui.is_item_active();
-
-                        let item_min = ui.item_rect_min();
-                        let item_max = ui.item_rect_max();
-                        let img_min = [item_min[0] + pad_x, item_min[1] + pad_y];
-                        let img_max = [img_min[0] + thumb[0], img_min[1] + thumb[1]];
-
-                        if state.ui.operations.reveal_id_next == Some(id) {
-                            ui.set_scroll_here_y(0.5);
-                            state.ui.operations.reveal_id_next = None;
-                        }
-
-                        if state.ui.config.thumbnails_enabled && !e.is_dir {
-                            let max_size_u32 = [thumb[0].max(1.0) as u32, thumb[1].max(1.0) as u32];
-                            if ui.is_item_visible() {
-                                state.ui.thumbnails.request_visible(&e.path, max_size_u32);
+                            let mut label = e.display_name();
+                            if let Some(icon) = visual.icon.as_deref() {
+                                label = Cow::Owned(format!("{icon} {label}"));
                             }
-                            if let Some(tex) = state.ui.thumbnails.texture_id(&e.path) {
-                                dl.add_image(
-                                    tex,
-                                    img_min,
-                                    img_max,
-                                    [0.0, 0.0],
-                                    [1.0, 1.0],
-                                    dear_imgui_rs::Color::rgb(1.0, 1.0, 1.0),
-                                );
+
+                            let _id = ui.push_id(id.widget_id());
+                            let clicked = ui.invisible_button("##grid_item", [cell_w, cell_h]);
+                            let hovered = ui.is_item_hovered();
+                            let active = ui.is_item_active();
+
+                            let item_min = ui.item_rect_min();
+                            let item_max = ui.item_rect_max();
+                            let img_min = [item_min[0] + pad_x, item_min[1] + pad_y];
+                            let img_max = [img_min[0] + thumb[0], img_min[1] + thumb[1]];
+
+                            if state.ui.operations.reveal_id_next == Some(id) {
+                                ui.set_scroll_here_y(0.5);
+                                state.ui.operations.reveal_id_next = None;
+                            }
+
+                            if state.ui.config.thumbnails_enabled && !e.is_dir {
+                                let max_size_u32 =
+                                    [thumb[0].max(1.0) as u32, thumb[1].max(1.0) as u32];
+                                if ui.is_item_visible() {
+                                    state.ui.thumbnails.request_visible(&e.path, max_size_u32);
+                                }
+                                if let Some(tex) = state.ui.thumbnails.texture_id(&e.path) {
+                                    dl.add_image(
+                                        tex,
+                                        img_min,
+                                        img_max,
+                                        [0.0, 0.0],
+                                        [1.0, 1.0],
+                                        dear_imgui_rs::Color::rgb(1.0, 1.0, 1.0),
+                                    );
+                                } else {
+                                    dl.add_rect(
+                                        img_min,
+                                        img_max,
+                                        dear_imgui_rs::Color::new(0.2, 0.2, 0.2, 1.0),
+                                    )
+                                    .filled(true)
+                                    .build();
+                                }
                             } else {
                                 dl.add_rect(
                                     img_min,
@@ -844,89 +836,83 @@ fn draw_file_grid_view(
                                 .filled(true)
                                 .build();
                             }
-                        } else {
-                            dl.add_rect(
-                                img_min,
-                                img_max,
-                                dear_imgui_rs::Color::new(0.2, 0.2, 0.2, 1.0),
-                            )
-                            .filled(true)
-                            .build();
-                        }
 
-                        if hovered || selected || active {
-                            let overlay_style_color = if selected || active {
-                                StyleColor::HeaderActive
-                            } else {
-                                StyleColor::HeaderHovered
-                            };
-                            let mut overlay = style.color(overlay_style_color);
-                            overlay[3] *= if selected || active { 0.55 } else { 0.35 };
-                            dl.add_rect(item_min, item_max, overlay)
-                                .filled(true)
-                                .rounding(style.frame_rounding())
-                                .build();
-                        }
-                        if focused {
-                            let mut border = style.color(StyleColor::NavCursor);
-                            border[3] *= 0.9;
-                            dl.add_rect(item_min, item_max, border)
-                                .rounding(style.frame_rounding())
-                                .thickness(1.0)
-                                .build();
-                        }
-
-                        let label_min = [item_min[0] + pad_x, img_max[1] + spacing_y];
-                        let mut label_max = [item_max[0] - pad_x, item_max[1] - pad_y];
-                        if label_max[0] < label_min[0] {
-                            label_max[0] = label_min[0];
-                        }
-                        if label_max[1] < label_min[1] {
-                            label_max[1] = label_min[1];
-                        }
-                        let label_h = (label_max[1] - label_min[1]).max(0.0);
-                        let text_y = label_min[1] + ((label_h - font_size).max(0.0) * 0.5);
-                        let text_pos = [label_min[0], text_y];
-                        let col = visual
-                            .text_color
-                            .map(|c| dear_imgui_rs::Color::from_array(c))
-                            .unwrap_or_else(|| dear_imgui_rs::Color::rgb(1.0, 1.0, 1.0));
-                        let _font = visual.font_id.map(|id| ui.push_font(id));
-                        {
-                            let max_label_w = (item_max[0] - item_min[0] - pad_x * 2.0).max(0.0);
-                            let display_label = ellipsize_text(ui, &label, max_label_w);
-                            dl.with_clip_rect(label_min, label_max, || {
-                                dl.add_text(text_pos, col, display_label.as_ref());
-                            });
-                        }
-
-                        if clicked {
-                            handle_entry_click(ui, state, id);
-                        }
-
-                        if ui.is_item_hovered() {
-                            if let Some(t) = visual.tooltip.as_deref() {
-                                ui.tooltip_text(t);
+                            if hovered || selected || active {
+                                let overlay_style_color = if selected || active {
+                                    StyleColor::HeaderActive
+                                } else {
+                                    StyleColor::HeaderHovered
+                                };
+                                let mut overlay = style.color(overlay_style_color);
+                                overlay[3] *= if selected || active { 0.55 } else { 0.35 };
+                                dl.add_rect(item_min, item_max, overlay)
+                                    .filled(true)
+                                    .rounding(style.frame_rounding())
+                                    .build();
                             }
-                        }
+                            if focused {
+                                let mut border = style.color(StyleColor::NavCursor);
+                                border[3] *= 0.9;
+                                dl.add_rect(item_min, item_max, border)
+                                    .rounding(style.frame_rounding())
+                                    .thickness(1.0)
+                                    .build();
+                            }
 
-                        if let Some(_popup) = ui.begin_popup_context_item() {
-                            draw_entry_context_menu(ui, state, request_confirm, id, selected);
-                        }
+                            let label_min = [item_min[0] + pad_x, img_max[1] + spacing_y];
+                            let mut label_max = [item_max[0] - pad_x, item_max[1] - pad_y];
+                            if label_max[0] < label_min[0] {
+                                label_max[0] = label_min[0];
+                            }
+                            if label_max[1] < label_min[1] {
+                                label_max[1] = label_min[1];
+                            }
+                            let label_h = (label_max[1] - label_min[1]).max(0.0);
+                            let text_y = label_min[1] + ((label_h - font_size).max(0.0) * 0.5);
+                            let text_pos = [label_min[0], text_y];
+                            let col = visual
+                                .text_color
+                                .map(|c| dear_imgui_rs::Color::from_array(c))
+                                .unwrap_or_else(|| dear_imgui_rs::Color::rgb(1.0, 1.0, 1.0));
+                            let _font = visual.font_id.map(|id| ui.push_font(id));
+                            {
+                                let max_label_w =
+                                    (item_max[0] - item_min[0] - pad_x * 2.0).max(0.0);
+                                let display_label = ellipsize_text(ui, &label, max_label_w);
+                                dl.with_clip_rect(label_min, label_max, || {
+                                    dl.add_text(text_pos, col, display_label.as_ref());
+                                });
+                            }
 
-                        if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
-                            state.ui.runtime.error = None;
-                            *request_confirm |= matches!(
-                                state.core.handle_event(CoreEvent::DoubleClickEntry { id }),
-                                CoreEventOutcome::RequestConfirm
-                            );
+                            if clicked {
+                                handle_entry_click(ui, state, id);
+                            }
+
+                            if ui.is_item_hovered() {
+                                if let Some(t) = visual.tooltip.as_deref() {
+                                    ui.tooltip_text(t);
+                                }
+                            }
+
+                            if let Some(_popup) = ui.begin_popup_context_item() {
+                                draw_entry_context_menu(ui, state, request_confirm, id, selected);
+                            }
+
+                            if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left)
+                            {
+                                state.ui.runtime.error = None;
+                                *request_confirm |= matches!(
+                                    state.core.handle_event(CoreEvent::DoubleClickEntry { id }),
+                                    CoreEventOutcome::RequestConfirm
+                                );
+                            }
                         }
                     }
                 }
-            }
-            if let Some(_popup) = ui.begin_popup_context_window() {
-                draw_file_list_window_context_menu(ui, state, has_thumbnail_backend);
-            }
+                if let Some(_popup) = ui.begin_popup_context_window() {
+                    draw_file_list_window_context_menu(ui, state, has_thumbnail_backend);
+                }
+            })
         });
 }
 
@@ -947,14 +933,21 @@ fn draw_thumbnail_cell(ui: &Ui, view: &mut FileDialogUiState, e: &DirEntry) {
     } else {
         let p0 = ui.cursor_screen_pos();
         let p1 = [p0[0] + size[0], p0[1] + size[1]];
-        let dl = ui.get_window_draw_list();
-        dl.add_rect(p0, p1, dear_imgui_rs::Color::new(0.2, 0.2, 0.2, 1.0))
-            .filled(true)
-            .build();
+        ui.with_window_draw_list(|dl| {
+            dl.add_rect(p0, p1, dear_imgui_rs::Color::new(0.2, 0.2, 0.2, 1.0))
+                .filled(true)
+                .build();
+        });
         ui.dummy(size);
     }
     if ui.is_item_visible() {
         view.thumbnails.request_visible(&e.path, max_size_u32);
+    }
+}
+
+fn move_focus_and_reveal(state: &mut FileDialogState, delta: i32, modifiers: Modifiers) {
+    if let Some(id) = state.core.move_focus(delta, modifiers) {
+        state.ui.operations.reveal_id_next = Some(id);
     }
 }
 
@@ -985,9 +978,12 @@ fn update_type_select(state: &mut FileDialogState, input: Option<char>, now: Ins
         .type_select_buffer
         .push(ch.to_ascii_lowercase());
     state.ui.runtime.type_select_last_input = Some(now);
-    let _ = state.core.handle_event(CoreEvent::SelectByPrefix(
-        state.ui.runtime.type_select_buffer.clone(),
-    ));
+    if let Some(id) = state
+        .core
+        .select_by_prefix(&state.ui.runtime.type_select_buffer)
+    {
+        state.ui.operations.reveal_id_next = Some(id);
+    }
 }
 
 fn collect_type_select_char(ui: &Ui) -> Option<char> {
@@ -1075,5 +1071,37 @@ mod tests {
             second + timeout + Duration::from_millis(1),
         );
         assert_eq!(state.ui.runtime.type_select_buffer, "c");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn keyboard_navigation_reveals_the_target_even_if_already_focused() {
+        use crate::StdFileSystem;
+        use crate::fs_ops::tests::TempDir;
+
+        let temp = TempDir::new();
+        let target_path = temp.path().join("zebra.txt");
+        std::fs::write(temp.path().join("apple.txt"), []).unwrap();
+        std::fs::write(&target_path, []).unwrap();
+        let mut state = FileDialogState::with_blocking_filesystem(
+            DialogMode::OpenFile,
+            Box::new(StdFileSystem),
+        );
+        state.core.set_cwd(temp.path().to_owned());
+        state.tick_scan();
+
+        move_focus_and_reveal(&mut state, -1, Modifiers::default());
+        let target = state.ui.operations.reveal_id_next.take().unwrap();
+        assert_eq!(
+            state.core.entry_path_by_id(target),
+            Some(target_path.as_path())
+        );
+        assert_eq!(state.core.focused_entry_id(), Some(target));
+
+        let now = Instant::now();
+        update_type_select(&mut state, Some('z'), now);
+        assert_eq!(state.ui.operations.reveal_id_next.take(), Some(target));
+        update_type_select(&mut state, Some('q'), now);
+        assert_eq!(state.ui.operations.reveal_id_next, None);
     }
 }

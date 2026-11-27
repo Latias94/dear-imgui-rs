@@ -101,6 +101,16 @@ pub mod snapshot;
 // Re-export commonly used types
 #[doc(hidden)]
 pub use callback_state::{RendererRenderStateGuard, RendererRenderStateGuardError};
-pub use draw_data::*;
+pub use draw_data::{
+    DrawCmd, DrawCmdIterator, DrawCmdParams, DrawData, DrawIdx, DrawList, DrawListIterator,
+    DrawRequirements, DrawVert, RawCallbackCommand,
+};
 pub use frame::{PendingFrame, ReconciledFrame};
-pub use snapshot::*;
+pub use snapshot::{
+    DetachedRendererConsumer, DrawCmdSnapshot, DrawDataSnapshot, DrawListSnapshot, FrameSnapshot,
+    RendererConsumerCapability, RendererConsumerError, SnapshotCommitError,
+    SnapshotCompletionProgress, SnapshotEpoch, SnapshotError, SnapshotTextureId,
+    SynchronousRendererConsumer, TextureBinding, TextureFeedback, TextureFeedbackError, TextureOp,
+    TextureRequest, TextureRequestKind, TextureUploadIdentity, TextureUploadRect,
+    ViewportDrawDataSnapshot,
+};
