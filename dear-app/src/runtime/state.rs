@@ -233,10 +233,6 @@ pub(crate) struct WindowState {
 
 impl WindowState {
     pub(crate) fn new(event_loop: &ActiveEventLoop, config: &AppConfig) -> Result<Self, RunError> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: config.wgpu.backends,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
         let size = LogicalSize::new(config.window_size.0, config.window_size.1);
         let window = Arc::new(
             event_loop
@@ -247,6 +243,15 @@ impl WindowState {
                 )
                 .map_err(RunError::WindowCreation)?,
         );
+        // Pass the display handle so the GL backend can pick the native
+        // windowing platform (e.g. X11 EGL) and present to the window.
+        let descriptor = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
+            event_loop.owned_display_handle(),
+        ));
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: config.wgpu.backends,
+            ..descriptor
+        });
         let surface = instance
             .create_surface(window.clone())
             .map_err(RunError::SurfaceCreation)?;
