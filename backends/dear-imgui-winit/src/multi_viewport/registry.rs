@@ -154,6 +154,7 @@ impl ViewportEntry {
         unsafe { self.native_ownership_loss(viewport).is_none() }
     }
 
+    #[cfg(target_os = "windows")]
     fn viewport_id(&self) -> Option<u32> {
         let viewport = unsafe { self.resolve_viewport()? };
         Some(unsafe { (*viewport).ID })

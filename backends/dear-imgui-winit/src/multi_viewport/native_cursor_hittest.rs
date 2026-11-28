@@ -21,12 +21,6 @@ pub(super) struct NativeCursorHitTest {
     windows: windows::WindowsCursorHitTest,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum MouseCaptureTransfer {
-    NotOwned,
-    Transferred,
-}
-
 impl NativeCursorHitTest {
     pub(super) fn install(window: &Window) -> Result<Self, WinitPlatformError> {
         #[cfg(target_os = "windows")]
@@ -99,7 +93,7 @@ pub(super) fn query_native_mouse_state() -> Option<NativeMouseState> {
 pub(super) fn transfer_mouse_capture(
     source: &Window,
     target: &Window,
-) -> Result<MouseCaptureTransfer, WinitPlatformError> {
+) -> Result<(), WinitPlatformError> {
     #[cfg(target_os = "windows")]
     {
         windows::transfer_mouse_capture(source, target)
@@ -108,7 +102,7 @@ pub(super) fn transfer_mouse_capture(
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (source, target);
-        Ok(MouseCaptureTransfer::NotOwned)
+        Ok(())
     }
 }
 
@@ -213,7 +207,7 @@ mod windows {
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use winit::window::Window;
 
-    use super::{MouseCaptureTransfer, NativeMouseState, WinitPlatformError};
+    use super::{NativeMouseState, WinitPlatformError};
 
     pub(super) struct WindowsCursorHitTest {
         hwnd: HWND,
@@ -338,11 +332,11 @@ mod windows {
     pub(super) fn transfer_mouse_capture(
         source: &Window,
         target: &Window,
-    ) -> Result<MouseCaptureTransfer, WinitPlatformError> {
+    ) -> Result<(), WinitPlatformError> {
         let source = window_handle(source)?;
         let target = window_handle(target)?;
         if unsafe { GetCapture() } != source {
-            return Ok(MouseCaptureTransfer::NotOwned);
+            return Ok(());
         }
 
         if unsafe { ReleaseCapture() } == 0 {
@@ -360,7 +354,7 @@ mod windows {
                 message: io::Error::last_os_error().to_string(),
             });
         }
-        Ok(MouseCaptureTransfer::Transferred)
+        Ok(())
     }
 
     pub(super) fn raise_window_without_activation(

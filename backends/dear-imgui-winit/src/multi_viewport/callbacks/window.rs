@@ -276,19 +276,9 @@ pub(in super::super) unsafe extern "C" fn winit_destroy_window(
             let Some(main_window) = control.main_window() else {
                 return control.retire_window_input(source_id, None);
             };
-            let main_id = main_window.id();
-            match transfer_mouse_capture(source_window, &main_window) {
-                Ok(MouseCaptureTransfer::Transferred) => {
-                    control.retire_window_input(source_id, Some(main_id))
-                }
-                Ok(MouseCaptureTransfer::NotOwned) => {
-                    control.retire_window_input(source_id, Some(main_id))
-                }
-                Err(error) => {
-                    control.retire_window_input(source_id, Some(main_id))?;
-                    Err(error)
-                }
-            }
+            let transfer = transfer_mouse_capture(source_window, &main_window);
+            control.retire_window_input(source_id, Some(main_window.id()))?;
+            transfer
         }) {
             control.record_fault(error);
         }
