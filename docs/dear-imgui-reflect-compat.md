@@ -271,7 +271,7 @@ Enums
     overridden with `#[imgui(name = "...")]`.
 - [x] Enum radio style
   - Type attribute: `#[imgui(enum_style = "radio")]`.
-  - Renders one radio button per variant, using `radio_button_bool` with a
+  - Renders one radio button per variant, using `radio_button` with a
     boolean `active` state per button and mapping the chosen index back to
     the enum variant. This corresponds to ImReflect's `as_radio()` mode for
     enums (we do not currently support enum sliders or drags).
@@ -282,16 +282,14 @@ Enums
     field types must implement `Default` to allow switching (mirrors the
     "default construct on switch" behavior in ImReflect, adapted to Rust).
 
-Text (Strings and ImString)
----------------------------
+Text (Strings)
+--------------
 
 Single-line text:
 
 - [x] Basic editable text
-  - Default behavior uses `ui.input_text(label, &mut String)` or
-    `ui.input_text_imstr(label, &mut ImString)` when no text-specific
-    attributes are present, matching ImReflect's default single-line string
-    editing via `InputText`.
+  - Default behavior uses `ui.input_text(label, &mut String)`, matching
+    ImReflect's default single-line string editing via `InputText`.
 - [x] Hint text
   - Attribute: `hint = "..."` applies to single-line inputs and is forwarded
     to the underlying builder as a `String` (`builder.hint(String::from(...))`).
@@ -330,7 +328,7 @@ Multi-line text:
   - ImReflect uses a special display mode for `const std::string` (disabled
     `TextWrapped` plus hover tooltip).
   - `dear-imgui-reflect` provides a similar display-only mode for string
-    fields via `#[imgui(display_only)]` on `String`/`ImString` fields. These
+    fields via `#[imgui(display_only)]` on `String` fields. These
     fields are rendered using `text_wrapped` with the label and value
     combined, and a hover tooltip shows the full string content when hovered.
     Unlike simple `read_only`, this avoids drawing an input box entirely and

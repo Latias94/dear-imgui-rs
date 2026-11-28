@@ -7,9 +7,10 @@ use dear_imgui_rs::{
 };
 
 pub(crate) fn request_test_device() -> Option<(Device, Queue)> {
-    #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
-    let instance = Instance::new(&InstanceDescriptor::default());
-    #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
+    request_test_device_and_adapter().map(|(device, queue, _)| (device, queue))
+}
+
+pub(crate) fn request_test_device_and_adapter() -> Option<(Device, Queue, Adapter)> {
     let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
     let request_adapter = |force_fallback_adapter| {
         pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
@@ -22,7 +23,9 @@ pub(crate) fn request_test_device() -> Option<(Device, Queue)> {
         .or_else(|_| request_adapter(false))
         .ok();
     let result = adapter.and_then(|adapter| {
-        pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).ok()
+        pollster::block_on(adapter.request_device(&DeviceDescriptor::default()))
+            .ok()
+            .map(|(device, queue)| (device, queue, adapter))
     });
     assert!(
         result.is_some() || std::env::var_os("DEAR_IMGUI_REQUIRE_WGPU_ADAPTER").is_none(),
@@ -171,9 +174,19 @@ fn managed_content_replacements_keep_ids_and_reject_invalid_candidates_atomicall
         ManagedRequestOutcome::Uploaded(texture_id)
     );
     let replacement_view = manager.texture_view(texture_id).unwrap().clone();
+    let replacement_texture = manager
+        .managed_textures
+        .get(id)
+        .unwrap()
+        .resource
+        .texture()
+        .clone();
     assert_ne!(replacement_view, first_view);
     assert!(!render_resources.image_bind_groups.contains_key(&texture_id));
-    assert_eq!(manager.managed_textures[&id].rgba_pixels, [17; 16]);
+    assert_eq!(
+        manager.managed_textures.get(id).unwrap().rgba_pixels,
+        [17; 16]
+    );
     let replacement_binding = render_resources
         .get_or_create_image_bind_group(&device, texture_id, &replacement_view)?
         .clone();
@@ -212,14 +225,32 @@ fn managed_content_replacements_keep_ids_and_reject_invalid_candidates_atomicall
         row_pitch: 8,
         pixels: vec![0; 15],
     };
-    for invalid in [&invalid_update, &invalid_create] {
+    let out_of_bounds = TextureOp::Update {
+        format: TextureFormat::Alpha8,
+        width: 2,
+        height: 2,
+        rects: vec![TextureUploadRect {
+            rect: TextureRect {
+                x: 1,
+                y: 1,
+                w: 2,
+                h: 1,
+            },
+            row_pitch: 2,
+            data: vec![5; 2],
+        }],
+    };
+    for invalid in [&invalid_update, &invalid_create, &out_of_bounds] {
         assert!(matches!(
             manager.apply_managed_request(id, invalid, &device, &queue, &mut render_resources),
             Err(RendererError::BadTexture(_))
         ));
         assert_eq!(manager.managed_texture_id(id), Some(texture_id));
         assert_eq!(manager.texture_view(texture_id), Some(&replacement_view));
-        assert_eq!(manager.managed_textures[&id].rgba_pixels, [17; 16]);
+        assert_eq!(
+            manager.managed_textures.get(id).unwrap().rgba_pixels,
+            [17; 16]
+        );
         assert_eq!(
             render_resources.image_bind_groups.get(&texture_id),
             Some(&replacement_binding)
@@ -245,14 +276,19 @@ fn managed_content_replacements_keep_ids_and_reject_invalid_candidates_atomicall
         manager.apply_managed_request(id, &patch, &device, &queue, &mut render_resources)?,
         ManagedRequestOutcome::Uploaded(texture_id)
     );
-    assert_ne!(manager.texture_view(texture_id), Some(&replacement_view));
+    assert_eq!(manager.texture_view(texture_id), Some(&replacement_view));
+    let entry = manager.managed_textures.get(id).unwrap();
+    assert_eq!(entry.resource.texture(), &replacement_texture);
     assert_eq!(
-        manager.managed_textures[&id].rgba_pixels,
+        entry.rgba_pixels,
         [
             17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 255, 255, 255, 91
         ]
     );
-    assert!(!render_resources.image_bind_groups.contains_key(&texture_id));
+    assert_eq!(
+        render_resources.image_bind_groups.get(&texture_id),
+        Some(&replacement_binding)
+    );
     assert_eq!(manager.managed_texture_count(), 1);
     Ok(())
 }

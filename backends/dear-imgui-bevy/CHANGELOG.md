@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Breaking Changes
+
+- Context admission and immediate removal now transfer `dear_imgui_rs::Context` owners. Use `ImguiContexts::insert_context` to admit an existing owner. Match `ImguiContextError::ContextScope` for failures to enter or complete a scoped Context operation.
+
 ## 0.22.0 - 2026-11-01
 
 Upgrade all workspace crates together to `"0.22"` and review the shared [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy). The workspace/core MSRV rises to Rust 1.95; this backend retains its Rust 1.97.1 minimum.

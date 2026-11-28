@@ -14,6 +14,10 @@ The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window i
 
 `dear-imgui-bevy` defaults to the renderer plus deterministic Bevy UI ordering. Native multi-viewport is supported through an explicit feature and runtime opt-in. WASM supports the normal and headless feature sets but cannot create native platform windows.
 
+The manifest pins `bevy_ecs_macro_logic` to `=0.20.1` because `bevy_ecs_macros 0.20.1`
+allows newer compatible releases of its macro implementation. The direct pin keeps the two crates
+on the same Bevy release when an application resolves dependencies with its own lockfile.
+
 ## Installation
 
 Both the `0.23` and `0.22` release trains target Bevy exactly `0.20.1`. Backend `0.21.0` and the `0.20` train target Bevy `0.20.0`. Backend `0.19.0` targets Bevy `0.19.1`.
@@ -139,6 +143,8 @@ The serial Context driver runs immediately after `PreUpdate` by default. Bevy in
 
 `ImguiContexts::promote_primary(context_id)` selects an existing idle Context as the primary input and fallback-window target. `replace_primary(context, config)` first admits a new Context and changes the primary pointer only after admission succeeds; the previous primary remains registered for explicit asynchronous removal. Neither operation silently moves pass ownership, docking settings, or native viewport ownership between Contexts.
 
+To transfer an existing `dear_imgui_rs::Context` to Bevy, call `ImguiAppExt::adopt_imgui_primary_context` before plugin installation or `ImguiContexts::insert_context` for an additional pass. Admission returns the owner on failure, including when it already has an open frame. The Bevy driver and `configure` temporarily bind their target and restore the previous binding. Registry mutations still require that none of that registry's UI passes are running.
+
 An App claims its `ImguiContexts` registry exactly once. Temporarily removing that non-send value from the World does not reopen admission; reinsert the same value before continuing or call terminal shutdown. This prevents two registries from sharing one set of private passes and backend resources. A retained registry becomes explicitly terminal after shutdown: `primary_id`, `ids`, and `contains` return `ImguiContextError::AppTerminated` instead of disguising that state as `None`, an empty iterator, or `false`.
 
 ### Fonts
@@ -209,9 +215,56 @@ ImguiPlugin::default()
 
 The renderer writes the final single-sample attachment, so the overlay composes consistently with 1x/4x MSAA, LDR/HDR cameras, Bevy UI, and ordered custom post-processing.
 
-Dear ImGui vertex colors and managed RGBA texture bytes use sRGB RGB channels and linear alpha. They are decoded separately before tint multiplication. Bevy `Image` textures follow their declared GPU format: sRGB formats are decoded by the GPU, while unorm and float formats are sampled as linear values. The renderer encodes its fragment output in the camera stack's resolved `Linear`, `Srgb`, or `Oklab` compositing space. Changing the camera's compositing space changes translucent blending, not the appearance of opaque colors.
+### Color Space and Compositing
 
-When upgrading, replace managed textures containing linear RGB bytes with Bevy `Image` textures declaring a linear unorm or float format. Midtones and translucent blending may differ from the previous approximate gamma handling. No public renderer API changes are required; the uniform representation is private to the backend.
+Dear ImGui vertex colors stay in sRGB across rasterization so vertex-colored gradients interpolate perceptually, then decode to linear light in the fragment shader before texture modulation while alpha stays linear. Managed RGBA texture bytes use sRGB RGB channels and linear alpha. Bevy `Image` textures follow their declared GPU format: sRGB formats are decoded by the GPU, while unorm and float formats are sampled as linear values.
+
+The renderer encodes its fragment output into the camera stack's resolved `Linear`, `Srgb`, or `Oklab` compositing space (`ResolvedCompositingSpace`). Changing the compositing space changes translucent alpha blending, not the appearance of opaque colors.
+
+By default, `dear-imgui-bevy` renders directly onto the routed camera's single-sample target:
+
+- In Bevy `0.20.1`, `Camera3d` views (both HDR `Rgba16Float` and non-HDR `Rgba8UnormSrgb`) always resolve to `Linear` compositing (`CompositingSpace::Srgb` is only honored on `Camera2d` views).
+- Linear-space compositing keeps font anti-aliasing and translucent UI over the scene physically accurate and matches `dear-imgui-wgpu` on sRGB swapchains (`Bgra8UnormSrgb`) and `dear-imgui-ash` on `B8G8R8A8_SRGB`.
+- Because hardware alpha blending on linear targets computes `(1 - a) * dst_linear + a * src_linear`, widgets whose translucency Dear ImGui authored assuming sRGB-space blending (most noticeably the black value-dimming gradient in `ColorPicker3` / `ColorPicker4`) look slightly brighter in dark midtones than in non-sRGB backends (such as OpenGL without `GL_FRAMEBUFFER_SRGB` or browser WebGPU `bgra8unorm`).
+
+#### Optional sRGB-Space UI Blending Over 3D/HDR Cameras
+
+If your application prefers Dear ImGui's translucent widgets (such as `ColorPicker3` / `ColorPicker4`) to blend in sRGB space over a `Camera3d` (HDR or non-HDR), spawn a dedicated non-HDR overlay `Camera2d` with a higher `Camera::order`, transparent clear color, and `CompositingSpace::Srgb`:
+
+```rust
+use bevy::{
+    camera::Hdr,
+    prelude::*,
+    render::view::Msaa,
+};
+
+fn spawn_scene_and_srgb_ui_overlay(mut commands: Commands) {
+    // 3D scene camera (HDR or non-HDR) on order 0.
+    commands.spawn((Camera3d::default(), Hdr));
+
+    // Dedicated non-HDR 2D overlay camera on a higher order.
+    // Non-HDR + CompositingSpace::Srgb allocates its own Rgba8Unorm target,
+    // so it does not share a main texture with the Camera3d above.
+    commands.spawn((
+        Camera2d,
+        Camera {
+            order: 1,
+            clear_color: ClearColorConfig::Custom(Color::NONE),
+            ..Default::default()
+        },
+        CompositingSpace::Srgb,
+        Msaa::Off,
+    ));
+}
+```
+
+- **Routing**: When the overlay `Camera2d` has the unique highest `Camera::order` on the primary window, `dear-imgui-bevy` automatically routes the primary Context to it. When multiple cameras or Contexts are present, bind the overlay camera explicitly with `ImguiRenderRoute::new(context_id, overlay_camera)` and `ImguiInputRoute::from_camera(context_id, overlay_camera)`. For non-HDR 2D-only apps, you can instead place `CompositingSpace::Srgb` directly on your existing `Camera2d`.
+- **Trade-offs**:
+  - Inside opaque Dear ImGui windows (`alpha == 1.0`, including `ColorPicker3` / `ColorPicker4` squares and nested widgets), all blending happens in sRGB space and Bevy's built-in `upscaling` pass decodes sRGB back to linear cleanly when compositing over the 3D scene.
+  - Semi-transparent Dear ImGui regions drawn directly over the cleared transparent overlay (`Color::NONE`) — such as translucent window backgrounds or drop shadows over the 3D scene — appear slightly darker than with default linear-direct rendering, because Bevy `0.20.1`'s `upscaling` blit decodes `srgb_to_linear` without unpremultiplying RGB and applies `BlendState::ALPHA_BLENDING` a second time.
+  - If your application also renders Bevy UI, note that the higher-order `Camera2d` composites above lower-order cameras; use `IsDefaultUiCamera` or `UiTargetCamera` to control which camera hosts Bevy UI.
+
+When upgrading from earlier backend versions, replace managed textures containing linear RGB bytes with Bevy `Image` textures declaring a linear unorm or float format. Midtones and translucent blending may differ from the previous approximate gamma handling. No public renderer API changes are required; the uniform representation is private to the backend.
 
 ### Input Capture
 

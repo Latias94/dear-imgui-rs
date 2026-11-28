@@ -4,7 +4,10 @@
 > [`tools/README.md`](../tools/README.md). This document covers sys binding
 > generation, provenance, and the release evidence contract.
 
-The `-sys` crates must build docs on docs.rs without network, Git metadata, or submodules. Core Dear ImGui publishes three checked-in artifacts: `bindings_pregenerated_windows.rs`, `bindings_pregenerated.rs` for the supported non-Windows native whitelist, and `wasm_bindings_pregenerated.rs` for the fixed browser import ABI. Extension sys crates keep their native and optional WASM pregenerated files.
+The `-sys` crates must build docs on docs.rs without network, Git metadata, or
+submodules. Core Dear ImGui checks in `bindings_pregenerated.rs` for both native
+ABI profiles and `wasm_bindings_pregenerated.rs` for the fixed browser import ABI.
+Extension sys crates keep their native and optional WASM pregenerated files.
 
 Supported crates:
 - `dear-imgui-sys` (third-party: cimgui)
@@ -25,12 +28,18 @@ Supported crates:
 
 ## Binding update workflow
 
-Script: `tools/update_submodule_and_bindings.py`
+Build `xtask` with the workspace Rust toolchain. Canonical generation uses
+libclang 14.0 and the rustfmt from Rust 1.95.0. Install the formatter toolchain
+with `rustup toolchain install 1.95.0 --profile minimal --component rustfmt`.
+Set `LIBCLANG_PATH` to the LLVM 14 library directory if needed.
+
+Run `tools/update_submodule_and_bindings.py` to update source metadata and
+regenerate the maintained binding files.
 
 Key flags:
 - `--crates`: comma-separated list or `all`.
 - `--submodules`: `update` (update all known submodules), `auto` (update only selected crates), `skip` (don’t touch submodules).
-- `--wasm`: regenerate/verify the core WASM profile and compile-check the explicit provider feature.
+- `--wasm`: compile-check the explicit core WASM provider feature after generation.
 - The WASM import module is fixed to `imgui-sys-v1`; it is not a command-line option.
 - Per-submodule branches:
   - `--cimgui-branch` (default `docking_inter`)
@@ -85,18 +94,27 @@ What the script does:
 
 - Optionally updates selected submodules and synchronizes the exact cimgui/nested Dear ImGui revisions stored in `dear-imgui-sys/Cargo.toml` package metadata.
 - Refuses staged, unstaged, or untracked changes in the source submodules before recording provenance.
-- Routes core generation through the shared binding specification so Windows, non-Windows, and WASM artifacts are produced and compared as one contract.
-- Runs extension bindgen with native compilation disabled, then writes the corresponding pregenerated files.
-- Invokes `cargo run -p xtask -- verify-bindings --allow-dirty` after generation so the second pass reproduces rather than merely trusting the files just written.
+- Invokes `cargo run -p xtask -- verify-bindings --update --allow-dirty` to
+  reproduce each maintained profile twice before writing the checked-in files.
+- Verifies the full compatibility target sets for the Windows and non-Windows
+  profiles, then merges their two Windows-only padding fields behind
+  `#[cfg(windows)]` in the shared native file.
 
-Canonical core verification is also available directly:
+Run the binding checks or generation commands directly when source metadata
+already matches the vendored sources.
 
 ```bash
-# Reproduce and compare all three checked-in core profiles.
+# Reproduce and compare the native and WASM artifacts for all maintained crates.
 cargo run -p xtask -- verify-bindings
 
-# Maintainer-only regeneration after an intentional source/specification change.
+# Validate checked-in bindings without running bindgen.
+cargo run -p xtask -- verify-bindings --check-only
+
+# Regenerate the files after an intentional source or specification change.
 cargo run -p xtask -- verify-bindings --update --allow-dirty
+
+# Regenerate just the CTE WASM import binding.
+cargo run -p xtask -- wasm-bindgen-cte
 ```
 
 Canonical generation rejects `BINDGEN_EXTRA_CLANG_ARGS*`; target facts, header shims, formatter, allow/block lists, enum normalization, opaque types, and provider name all participate in the deterministic specification hash.

@@ -142,6 +142,105 @@ pub fn clear_fence_references(images_in_flight: &mut [vk::Fence], fence: vk::Fen
     }
 }
 
+pub(super) struct MainCommandTarget {
+    #[cfg(not(feature = "ash-dynamic-rendering"))]
+    pub(super) render_pass: vk::RenderPass,
+    #[cfg(not(feature = "ash-dynamic-rendering"))]
+    pub(super) framebuffer: vk::Framebuffer,
+    #[cfg(feature = "ash-dynamic-rendering")]
+    pub(super) image: vk::Image,
+    #[cfg(feature = "ash-dynamic-rendering")]
+    pub(super) image_view: vk::ImageView,
+    #[cfg(feature = "ash-dynamic-rendering")]
+    pub(super) old_layout: vk::ImageLayout,
+    pub(super) extent: vk::Extent2D,
+    pub(super) clear_color: [f32; 4],
+}
+
+pub(super) fn record_command_buffer<F, T>(
+    device: &Device,
+    cmd: vk::CommandBuffer,
+    target: MainCommandTarget,
+    record_draws: F,
+) -> Result<T, Box<dyn std::error::Error>>
+where
+    F: FnOnce(vk::CommandBuffer) -> Result<T, Box<dyn std::error::Error>>,
+{
+    let result = unsafe {
+        device.begin_command_buffer(
+            cmd,
+            &vk::CommandBufferBeginInfo::default()
+                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+        )?;
+
+        let clear_value = vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: target.clear_color,
+            },
+        };
+
+        #[cfg(not(feature = "ash-dynamic-rendering"))]
+        device.cmd_begin_render_pass(
+            cmd,
+            &vk::RenderPassBeginInfo::default()
+                .render_pass(target.render_pass)
+                .framebuffer(target.framebuffer)
+                .render_area(vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent: target.extent,
+                })
+                .clear_values(std::slice::from_ref(&clear_value)),
+            vk::SubpassContents::INLINE,
+        );
+
+        #[cfg(feature = "ash-dynamic-rendering")]
+        {
+            transition_swapchain_image(
+                device,
+                cmd,
+                target.image,
+                target.old_layout,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            );
+            let color_attachment = vk::RenderingAttachmentInfo::default()
+                .image_view(target.image_view)
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .clear_value(clear_value);
+            device.cmd_begin_rendering(
+                cmd,
+                &vk::RenderingInfo::default()
+                    .render_area(vk::Rect2D {
+                        offset: vk::Offset2D { x: 0, y: 0 },
+                        extent: target.extent,
+                    })
+                    .layer_count(1)
+                    .color_attachments(std::slice::from_ref(&color_attachment)),
+            );
+        }
+
+        let result = record_draws(cmd)?;
+
+        #[cfg(not(feature = "ash-dynamic-rendering"))]
+        device.cmd_end_render_pass(cmd);
+        #[cfg(feature = "ash-dynamic-rendering")]
+        {
+            device.cmd_end_rendering(cmd);
+            transition_swapchain_image(
+                device,
+                cmd,
+                target.image,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                vk::ImageLayout::PRESENT_SRC_KHR,
+            );
+        }
+        device.end_command_buffer(cmd)?;
+        result
+    };
+    Ok(result)
+}
+
 /// Records one color swapchain-image layout transition.
 ///
 /// # Safety
@@ -149,7 +248,7 @@ pub fn clear_fence_references(images_in_flight: &mut [vk::Fence], fence: vk::Fen
 /// `command_buffer` must be recording on `device`, `image` must be a live color image owned by
 /// that device, and `old_layout` must describe the image's current tracked layout.
 #[cfg(feature = "ash-dynamic-rendering")]
-pub unsafe fn transition_swapchain_image(
+unsafe fn transition_swapchain_image(
     device: &Device,
     command_buffer: vk::CommandBuffer,
     image: vk::Image,
@@ -157,11 +256,7 @@ pub unsafe fn transition_swapchain_image(
     new_layout: vk::ImageLayout,
 ) {
     let (src_stage, src_access) = match old_layout {
-        vk::ImageLayout::UNDEFINED => (
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::AccessFlags::empty(),
-        ),
-        vk::ImageLayout::PRESENT_SRC_KHR => (
+        vk::ImageLayout::UNDEFINED | vk::ImageLayout::PRESENT_SRC_KHR => (
             vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
             vk::AccessFlags::empty(),
         ),

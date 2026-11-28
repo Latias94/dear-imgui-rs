@@ -168,7 +168,9 @@ impl AppRenderer {
     ) -> Result<AppPreparedFrame<'frame>, Box<dyn std::error::Error>> {
         match self {
             Self::Single(renderer) => {
-                let pending_frame = frame.try_render(renderer.renderer_consumer()?)?;
+                let pending_frame = frame
+                    .try_render(renderer.renderer_consumer()?)
+                    .map_err(|(_frame, error)| error)?;
                 Ok(AppPreparedFrame::Single(
                     renderer.reconcile_frame(pending_frame)?,
                 ))
@@ -447,7 +449,9 @@ impl<S: ViewportScenario> AppWindow<S> {
             target_os = "linux"
         ));
         let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle_from_env(
+                Box::new(event_loop.owned_display_handle()),
+            ));
         let window: Arc<Window> = Arc::new(
             event_loop.create_window(
                 Window::default_attributes()

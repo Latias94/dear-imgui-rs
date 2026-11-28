@@ -1,10 +1,13 @@
 use crate::{
     CteError, CteResult, Position, Selection, error::c_string, sys, validation::duration_millis_i32,
 };
-use dear_imgui_rs::Ui;
+use dear_imgui_rs::{
+    Ui,
+    ffi::{RawBox, RawCString},
+};
 use std::{
     cell::{Cell, UnsafeCell},
-    ffi::{CString, c_char, c_void},
+    ffi::{c_char, c_void},
     panic::{AssertUnwindSafe, catch_unwind},
     ptr,
     rc::Rc,
@@ -75,39 +78,45 @@ pub struct LineNumberEvent {
     pub color: u32,
 }
 
-type EmptyCallback = dyn FnMut();
-type TransactionCallback = dyn for<'a> FnMut(TextChange<'a>);
-type DecoratorCallback = dyn FnMut(&Ui, DecoratorEvent);
-type CaretCallback = dyn FnMut(&Ui, CaretEvent);
-type LineNumberCallback = dyn FnMut(&Ui, LineNumberEvent);
-type PopupCallback = dyn FnMut(&Ui, PopupEvent);
+type EmptyCallback = Box<dyn FnMut()>;
+type TransactionCallback = Box<dyn for<'a> FnMut(TextChange<'a>)>;
+type DecoratorCallback = Box<dyn FnMut(&Ui, DecoratorEvent)>;
+type CaretCallback = Box<dyn FnMut(&Ui, CaretEvent)>;
+type LineNumberCallback = Box<dyn FnMut(&Ui, LineNumberEvent)>;
+type PopupCallback = Box<dyn FnMut(&Ui, PopupEvent)>;
 
-pub(crate) type AutocompleteCallback = dyn FnMut(std::ptr::NonNull<sys::AutoCompleteState>);
+pub(crate) type AutocompleteCallback = Box<dyn FnMut(std::ptr::NonNull<sys::AutoCompleteState>)>;
 
-pub(crate) struct CallbackSlot<T: ?Sized> {
+pub(crate) struct CallbackSlot<T> {
     invoking: Cell<bool>,
-    callback: UnsafeCell<Box<T>>,
+    callback: UnsafeCell<T>,
 }
 
-impl<T: ?Sized> CallbackSlot<T> {
-    pub(crate) fn new(callback: Box<T>) -> Box<Self> {
-        Box::new(Self {
+impl<T> CallbackSlot<T> {
+    pub(crate) fn new(callback: T) -> Self {
+        Self {
             invoking: Cell::new(false),
             callback: UnsafeCell::new(callback),
-        })
-    }
-
-    pub(crate) fn userdata(&self) -> *mut c_void {
-        (self as *const Self).cast_mut().cast()
-    }
-
-    pub(crate) fn invoke<R>(&self, reentrant: R, invoke: impl FnOnce(&mut T) -> R) -> R {
-        if self.invoking.replace(true) {
-            return reentrant;
         }
-        let _guard = InvocationGuard(&self.invoking);
-        let callback = unsafe { &mut **self.callback.get() };
-        invoke(callback)
+    }
+
+    /// Invokes the callback once, ignoring reentry into the same slot.
+    ///
+    /// # Safety
+    ///
+    /// `slot` must be null or point to a live slot accessible only on this thread. The call
+    /// must not move or destroy the slot while it is executing.
+    pub(crate) unsafe fn invoke(slot: *mut Self, invoke: impl FnOnce(&mut T)) {
+        if slot.is_null() {
+            return;
+        }
+        let invoking = unsafe { &(*slot).invoking };
+        if invoking.replace(true) {
+            return;
+        }
+        let _guard = InvocationGuard(invoking);
+        let callback = UnsafeCell::raw_get(unsafe { &raw const (*slot).callback });
+        invoke(unsafe { &mut *callback });
     }
 }
 
@@ -134,47 +143,44 @@ impl Drop for ActiveUiGuard {
     }
 }
 
-struct UiCallbackSlot<T: ?Sized> {
+struct UiCallbackSlot<T> {
     active_ui: Rc<ActiveUi>,
     callback: CallbackSlot<T>,
 }
 
-impl<T: ?Sized> UiCallbackSlot<T> {
-    fn new(active_ui: Rc<ActiveUi>, callback: Box<T>) -> Box<Self> {
-        Box::new(Self {
+impl<T> UiCallbackSlot<T> {
+    fn new(active_ui: Rc<ActiveUi>, callback: T) -> Self {
+        Self {
             active_ui,
-            callback: CallbackSlot {
-                invoking: Cell::new(false),
-                callback: UnsafeCell::new(callback),
-            },
-        })
+            callback: CallbackSlot::new(callback),
+        }
     }
 
-    fn userdata(&self) -> *mut c_void {
-        (self as *const Self).cast_mut().cast()
-    }
-
-    fn invoke(&self, invoke: impl FnOnce(&mut T, &Ui)) {
-        let ui = self.active_ui.current.get();
+    unsafe fn invoke(slot: *mut Self, invoke: impl FnOnce(&mut T, &Ui)) {
+        if slot.is_null() {
+            return;
+        }
+        let active_ui = unsafe { &(*slot).active_ui };
+        let ui = active_ui.current.get();
         let Some(ui) = (unsafe { ui.as_ref() }) else {
             return;
         };
-        self.callback.invoke((), |callback| invoke(callback, ui));
+        unsafe { CallbackSlot::invoke(&raw mut (*slot).callback, |callback| invoke(callback, ui)) };
     }
 }
 
 pub(crate) struct CallbackRegistry {
     active_ui: Rc<ActiveUi>,
-    change: Option<Box<CallbackSlot<EmptyCallback>>>,
-    transaction: Option<Box<CallbackSlot<TransactionCallback>>>,
-    decorator: Option<Box<UiCallbackSlot<DecoratorCallback>>>,
-    caret: Option<Box<UiCallbackSlot<CaretCallback>>>,
-    line_number: Option<Box<UiCallbackSlot<LineNumberCallback>>>,
-    line_number_context: Option<Box<UiCallbackSlot<PopupCallback>>>,
-    text_context: Option<Box<UiCallbackSlot<PopupCallback>>>,
-    text_hover: Option<Box<UiCallbackSlot<PopupCallback>>>,
-    language_change: Option<Box<CallbackSlot<EmptyCallback>>>,
-    pub(crate) autocomplete: Option<Box<CallbackSlot<AutocompleteCallback>>>,
+    change: Option<RawBox<CallbackSlot<EmptyCallback>>>,
+    transaction: Option<RawBox<CallbackSlot<TransactionCallback>>>,
+    decorator: Option<RawBox<UiCallbackSlot<DecoratorCallback>>>,
+    caret: Option<RawBox<UiCallbackSlot<CaretCallback>>>,
+    line_number: Option<RawBox<UiCallbackSlot<LineNumberCallback>>>,
+    line_number_context: Option<RawBox<UiCallbackSlot<PopupCallback>>>,
+    text_context: Option<RawBox<UiCallbackSlot<PopupCallback>>>,
+    text_hover: Option<RawBox<UiCallbackSlot<PopupCallback>>>,
+    language_change: Option<RawBox<CallbackSlot<EmptyCallback>>>,
+    pub(crate) autocomplete: Option<RawBox<CallbackSlot<AutocompleteCallback>>>,
 }
 
 impl CallbackRegistry {
@@ -205,11 +211,7 @@ impl CallbackRegistry {
     }
 
     pub(crate) fn clear_owned(&mut self) {
-        drop(self.take_owned());
-    }
-
-    pub(crate) fn take_owned(&mut self) -> Self {
-        std::mem::replace(self, Self::new())
+        drop(std::mem::replace(self, Self::new()));
     }
 
     pub(crate) fn trie_conflict(&self) -> Option<&'static str> {
@@ -235,8 +237,8 @@ impl TextEditor {
         self.reject_trie_conflict(OPERATION)?;
         let delay_ms = duration_millis_i32(OPERATION, "delay", delay)?;
         self.clear_change_callback()?;
-        let slot = CallbackSlot::new(Box::new(callback) as Box<EmptyCallback>);
-        let userdata = slot.userdata();
+        let slot = RawBox::new(CallbackSlot::new(Box::new(callback) as EmptyCallback));
+        let userdata = slot.as_ptr().cast();
         let status = self.try_with_context(OPERATION, |raw| unsafe {
             sys::dear_imgui_cte_text_editor_set_change_callback(
                 raw,
@@ -277,8 +279,8 @@ impl TextEditor {
     {
         const OPERATION: &str = "TextEditor::set_transaction_callback";
         self.clear_transaction_callback()?;
-        let slot = CallbackSlot::new(Box::new(callback) as Box<TransactionCallback>);
-        let userdata = slot.userdata();
+        let slot = RawBox::new(CallbackSlot::new(Box::new(callback) as TransactionCallback));
+        let userdata = slot.as_ptr().cast();
         let status = self.try_with_context(OPERATION, |raw| unsafe {
             sys::dear_imgui_cte_set_transaction_callback(
                 raw,
@@ -321,11 +323,11 @@ impl TextEditor {
             });
         }
         self.clear_line_decorator()?;
-        let slot = UiCallbackSlot::new(
+        let slot = RawBox::new(UiCallbackSlot::new(
             Rc::clone(&self.callbacks.active_ui),
-            Box::new(callback) as Box<DecoratorCallback>,
-        );
-        let userdata = slot.userdata();
+            Box::new(callback) as DecoratorCallback,
+        ));
+        let userdata = slot.as_ptr().cast();
         let status = self.try_with_context(OPERATION, |raw| unsafe {
             sys::dear_imgui_cte_set_line_decorator(raw, width, Some(decorator_trampoline), userdata)
         })?;
@@ -353,11 +355,11 @@ impl TextEditor {
     {
         const OPERATION: &str = "TextEditor::set_custom_caret_callback";
         self.clear_custom_caret_callback()?;
-        let slot = UiCallbackSlot::new(
+        let slot = RawBox::new(UiCallbackSlot::new(
             Rc::clone(&self.callbacks.active_ui),
-            Box::new(callback) as Box<CaretCallback>,
-        );
-        let userdata = slot.userdata();
+            Box::new(callback) as CaretCallback,
+        ));
+        let userdata = slot.as_ptr().cast();
         let status = self.try_with_context(OPERATION, |raw| unsafe {
             sys::dear_imgui_cte_set_custom_caret_callback(raw, Some(caret_trampoline), userdata)
         })?;
@@ -386,11 +388,11 @@ impl TextEditor {
     {
         const OPERATION: &str = "TextEditor::set_custom_line_number_callback";
         self.clear_custom_line_number_callback()?;
-        let slot = UiCallbackSlot::new(
+        let slot = RawBox::new(UiCallbackSlot::new(
             Rc::clone(&self.callbacks.active_ui),
-            Box::new(callback) as Box<LineNumberCallback>,
-        );
-        let userdata = slot.userdata();
+            Box::new(callback) as LineNumberCallback,
+        ));
+        let userdata = slot.as_ptr().cast();
         let status = self.try_with_context(OPERATION, |raw| unsafe {
             sys::dear_imgui_cte_set_custom_line_number_callback(
                 raw,
@@ -428,10 +430,7 @@ impl TextEditor {
     where
         F: FnMut(&Ui, PopupEvent) + 'static,
     {
-        self.install_popup_callback(
-            PopupKind::LineNumberContext,
-            Box::new(callback) as Box<PopupCallback>,
-        )
+        self.install_popup_callback(PopupKind::LineNumberContext, Box::new(callback))
     }
 
     pub fn clear_line_number_context_callback(&mut self) -> CteResult<()> {
@@ -446,10 +445,7 @@ impl TextEditor {
     where
         F: FnMut(&Ui, PopupEvent) + 'static,
     {
-        self.install_popup_callback(
-            PopupKind::TextContext,
-            Box::new(callback) as Box<PopupCallback>,
-        )
+        self.install_popup_callback(PopupKind::TextContext, Box::new(callback))
     }
 
     pub fn clear_text_context_callback(&mut self) -> CteResult<()> {
@@ -464,10 +460,7 @@ impl TextEditor {
     where
         F: FnMut(&Ui, PopupEvent) + 'static,
     {
-        self.install_popup_callback(
-            PopupKind::TextHover,
-            Box::new(callback) as Box<PopupCallback>,
-        )
+        self.install_popup_callback(PopupKind::TextHover, Box::new(callback))
     }
 
     pub fn clear_text_hover_callback(&mut self) -> CteResult<()> {
@@ -481,8 +474,8 @@ impl TextEditor {
         const OPERATION: &str = "TextEditor::set_language_change_callback";
         self.reject_trie_conflict(OPERATION)?;
         self.clear_language_change_callback()?;
-        let slot = CallbackSlot::new(Box::new(callback) as Box<EmptyCallback>);
-        let userdata = slot.userdata();
+        let slot = RawBox::new(CallbackSlot::new(Box::new(callback) as EmptyCallback));
+        let userdata = slot.as_ptr().cast();
         let status = self.try_with_context(OPERATION, |raw| unsafe {
             sys::dear_imgui_cte_set_language_change_callback(
                 raw,
@@ -509,20 +502,17 @@ impl TextEditor {
     }
 
     /// Calls `callback` synchronously for every known identifier.
-    pub fn for_each_identifier<F>(&self, mut callback: F) -> CteResult<()>
+    pub fn for_each_identifier<F>(&self, callback: F) -> CteResult<()>
     where
         F: FnMut(&str),
     {
         const OPERATION: &str = "TextEditor::for_each_identifier";
-        let mut state = IdentifierState {
-            invoking: Cell::new(false),
-            callback: UnsafeCell::new(&mut callback),
-        };
+        let state = RawBox::new(CallbackSlot::new(callback));
         let status = self.try_with_context(OPERATION, |raw| unsafe {
             sys::dear_imgui_cte_iterate_identifiers(
                 raw,
                 Some(identifier_trampoline::<F>),
-                (&mut state as *mut IdentifierState<'_, F>).cast(),
+                state.as_ptr().cast(),
             )
         })?;
         check_status(OPERATION, status)
@@ -538,12 +528,18 @@ impl TextEditor {
         F: FnMut(&str) -> String,
     {
         const OPERATION: &str = "TextEditor::filter_selections";
-        if self.is_read_only() {
+        let (read_only, cursor_count) = self.try_with_context(OPERATION, |raw| unsafe {
+            (
+                sys::TextEditor_IsReadOnlyEnabled(raw),
+                sys::TextEditor_GetNumberOfCursors(raw),
+            )
+        })?;
+        if read_only {
             return Ok(());
         }
 
         let mut outputs = Vec::new();
-        for cursor in 0..self.cursor_count() {
+        for cursor in 0..cursor_count {
             let selection = self.cursor_selection(cursor)?;
             if selection.start.line != selection.end.line {
                 return Err(CteError::InvalidValue {
@@ -557,7 +553,7 @@ impl TextEditor {
             if selection.end.column != 0 && !line.is_empty() {
                 let input = self.cursor_text(cursor)?;
                 let output = callback(&input);
-                outputs.push(c_string(OPERATION, &output)?);
+                outputs.push((RawCString::new(c_string(OPERATION, &output)?), output.len()));
             }
         }
 
@@ -573,12 +569,18 @@ impl TextEditor {
         F: FnMut(&str) -> String,
     {
         const OPERATION: &str = "TextEditor::filter_lines";
-        if self.is_read_only() {
+        let (read_only, line_count) = self.try_with_context(OPERATION, |raw| unsafe {
+            (
+                sys::TextEditor_IsReadOnlyEnabled(raw),
+                sys::TextEditor_GetLineCount(raw),
+            )
+        })?;
+        if read_only {
             return Ok(());
         }
 
-        let mut outputs = Vec::with_capacity(self.line_count());
-        for line in 0..self.line_count() {
+        let mut outputs = Vec::with_capacity(line_count);
+        for line in 0..line_count {
             let input = self.line_text(line)?;
             let output = callback(&input);
             if output.contains(['\r', '\n']) {
@@ -588,7 +590,7 @@ impl TextEditor {
                     requirement: "must not contain line breaks",
                 });
             }
-            outputs.push(c_string(OPERATION, &output)?);
+            outputs.push((RawCString::new(c_string(OPERATION, &output)?), output.len()));
         }
 
         self.apply_filter_outputs(OPERATION, true, outputs)
@@ -610,11 +612,14 @@ impl TextEditor {
     fn install_popup_callback(
         &mut self,
         kind: PopupKind,
-        callback: Box<PopupCallback>,
+        callback: PopupCallback,
     ) -> CteResult<()> {
         self.clear_popup_callback(kind)?;
-        let slot = UiCallbackSlot::new(Rc::clone(&self.callbacks.active_ui), callback);
-        let userdata = slot.userdata();
+        let slot = RawBox::new(UiCallbackSlot::new(
+            Rc::clone(&self.callbacks.active_ui),
+            callback,
+        ));
+        let userdata = slot.as_ptr().cast();
         let status = self.try_with_context(kind.set_operation(), |raw| unsafe {
             match kind {
                 PopupKind::LineNumberContext => {
@@ -664,16 +669,16 @@ impl TextEditor {
         &mut self,
         operation: &'static str,
         lines: bool,
-        outputs: Vec<CString>,
+        outputs: Vec<(RawCString, usize)>,
     ) -> CteResult<()> {
-        let mut state = FilterState {
+        let state = RawBox::new(FilterState {
             invoking: Cell::new(false),
             outputs,
-            next: 0,
-        };
+            next: Cell::new(0),
+        });
         let status = self.try_with_context(operation, |raw| unsafe {
             let callback: sys::DearImGuiCteFilterCallback = Some(filter_trampoline);
-            let userdata = (&mut state as *mut FilterState).cast();
+            let userdata = state.as_ptr().cast();
             if lines {
                 sys::dear_imgui_cte_filter_lines(raw, callback, userdata)
             } else {
@@ -681,7 +686,8 @@ impl TextEditor {
             }
         })?;
         check_status(operation, status)?;
-        if state.next != state.outputs.len() {
+        let state = unsafe { state.as_ref_unchecked() };
+        if state.next.get() != state.outputs.len() {
             return Err(CteError::NativeStatus {
                 operation,
                 status: sys::DearImGuiCteStatus_CallbackFailed as u32,
@@ -729,7 +735,7 @@ impl PopupKind {
     fn slot(
         self,
         registry: &mut CallbackRegistry,
-    ) -> &mut Option<Box<UiCallbackSlot<PopupCallback>>> {
+    ) -> &mut Option<RawBox<UiCallbackSlot<PopupCallback>>> {
         match self {
             Self::LineNumberContext => &mut registry.line_number_context,
             Self::TextContext => &mut registry.text_context,
@@ -738,15 +744,10 @@ impl PopupKind {
     }
 }
 
-struct IdentifierState<'a, F> {
-    invoking: Cell<bool>,
-    callback: UnsafeCell<&'a mut F>,
-}
-
 struct FilterState {
     invoking: Cell<bool>,
-    outputs: Vec<CString>,
-    next: usize,
+    outputs: Vec<(RawCString, usize)>,
+    next: Cell<usize>,
 }
 
 pub(crate) fn check_status(
@@ -774,108 +775,120 @@ pub(crate) fn abort_on_panic<R>(message: &'static str, f: impl FnOnce() -> R) ->
 }
 
 unsafe extern "C" fn change_trampoline(userdata: *mut c_void) {
-    let Some(slot) = (unsafe { userdata.cast::<CallbackSlot<EmptyCallback>>().as_ref() }) else {
-        return;
-    };
-    abort_on_panic("dear-imgui-cte: panic in change callback", || {
-        slot.invoke((), |callback| callback())
+    abort_on_panic("dear-imgui-cte: panic in change callback", || unsafe {
+        CallbackSlot::invoke(userdata.cast::<CallbackSlot<EmptyCallback>>(), |callback| {
+            callback()
+        });
     });
 }
 
 unsafe extern "C" fn language_change_trampoline(userdata: *mut c_void) {
-    let Some(slot) = (unsafe { userdata.cast::<CallbackSlot<EmptyCallback>>().as_ref() }) else {
-        return;
-    };
-    abort_on_panic("dear-imgui-cte: panic in language-change callback", || {
-        slot.invoke((), |callback| callback())
-    });
+    abort_on_panic(
+        "dear-imgui-cte: panic in language-change callback",
+        || unsafe {
+            CallbackSlot::invoke(userdata.cast::<CallbackSlot<EmptyCallback>>(), |callback| {
+                callback()
+            });
+        },
+    );
 }
 
 unsafe extern "C" fn transaction_trampoline(
     userdata: *mut c_void,
     change: *const sys::DearImGuiCteChangeView,
 ) {
-    let Some(slot) = (unsafe {
-        userdata
-            .cast::<CallbackSlot<TransactionCallback>>()
-            .as_ref()
-    }) else {
-        return;
-    };
-    let Some(change) = (unsafe { change.as_ref() }) else {
-        return;
-    };
-    abort_on_panic("dear-imgui-cte: panic in transaction callback", || {
-        let text = unsafe { callback_str(change.text, change.text_len, "transaction callback") };
-        let event = TextChange {
-            kind: if change.insert {
-                TextChangeKind::Insert
-            } else {
-                TextChangeKind::Delete
+    abort_on_panic("dear-imgui-cte: panic in transaction callback", || unsafe {
+        CallbackSlot::invoke(
+            userdata.cast::<CallbackSlot<TransactionCallback>>(),
+            |callback| {
+                let Some(change) = change.as_ref() else {
+                    return;
+                };
+                let text = callback_str(change.text, change.text_len, "transaction callback");
+                callback(TextChange {
+                    kind: if change.insert {
+                        TextChangeKind::Insert
+                    } else {
+                        TextChangeKind::Delete
+                    },
+                    range: Selection::new(
+                        Position::from_raw(change.start),
+                        Position::from_raw(change.end),
+                    ),
+                    text,
+                });
             },
-            range: Selection::new(
-                Position::from_raw(change.start),
-                Position::from_raw(change.end),
-            ),
-            text,
-        };
-        slot.invoke((), |callback| callback(event));
+        );
     });
 }
 
 unsafe extern "C" fn decorator_trampoline(userdata: *mut c_void, decorator: *mut sys::Decorator) {
-    let Some(slot) = (unsafe {
-        userdata
-            .cast::<UiCallbackSlot<DecoratorCallback>>()
-            .as_ref()
-    }) else {
-        return;
-    };
-    let Some(decorator) = (unsafe { decorator.as_ref() }) else {
-        return;
-    };
-    abort_on_panic("dear-imgui-cte: panic in line-decorator callback", || {
-        let event = DecoratorEvent {
-            line: decorator.line,
-            width: decorator.width,
-            height: decorator.height,
-            glyph_size: [decorator.glyphSize.x, decorator.glyphSize.y],
-        };
-        slot.invoke(|callback, ui| callback(ui, event));
-    });
+    abort_on_panic(
+        "dear-imgui-cte: panic in line-decorator callback",
+        || unsafe {
+            UiCallbackSlot::invoke(
+                userdata.cast::<UiCallbackSlot<DecoratorCallback>>(),
+                |callback, ui| {
+                    let Some(decorator) = decorator.as_ref() else {
+                        return;
+                    };
+                    callback(
+                        ui,
+                        DecoratorEvent {
+                            line: decorator.line,
+                            width: decorator.width,
+                            height: decorator.height,
+                            glyph_size: [decorator.glyphSize.x, decorator.glyphSize.y],
+                        },
+                    );
+                },
+            );
+        },
+    );
 }
 
 unsafe extern "C" fn caret_trampoline(userdata: *mut c_void, caret: *const sys::CustomCaret) {
-    let Some(slot) = (unsafe { userdata.cast::<UiCallbackSlot<CaretCallback>>().as_ref() }) else {
-        return;
-    };
-    let Some(caret) = (unsafe { caret.as_ref() }) else {
-        return;
-    };
-    abort_on_panic("dear-imgui-cte: panic in custom-caret callback", || {
-        let event = CaretEvent {
-            glyph_position: [caret.glyphPos.x, caret.glyphPos.y],
-            glyph_size: [caret.glyphSize.x, caret.glyphSize.y],
-            visible: caret.caretVisible,
-            color: caret.caretColor,
-            cursor: caret.cursorIndex,
-        };
-        slot.invoke(|callback, ui| callback(ui, event));
-    });
+    abort_on_panic(
+        "dear-imgui-cte: panic in custom-caret callback",
+        || unsafe {
+            UiCallbackSlot::invoke(
+                userdata.cast::<UiCallbackSlot<CaretCallback>>(),
+                |callback, ui| {
+                    let Some(caret) = caret.as_ref() else {
+                        return;
+                    };
+                    callback(
+                        ui,
+                        CaretEvent {
+                            glyph_position: [caret.glyphPos.x, caret.glyphPos.y],
+                            glyph_size: [caret.glyphSize.x, caret.glyphSize.y],
+                            visible: caret.caretVisible,
+                            color: caret.caretColor,
+                            cursor: caret.cursorIndex,
+                        },
+                    );
+                },
+            );
+        },
+    );
 }
 
 unsafe extern "C" fn popup_trampoline(userdata: *mut c_void, popup: *mut sys::PopupData) {
-    let Some(slot) = (unsafe { userdata.cast::<UiCallbackSlot<PopupCallback>>().as_ref() }) else {
-        return;
-    };
-    let Some(popup) = (unsafe { popup.as_ref() }) else {
-        return;
-    };
-    abort_on_panic("dear-imgui-cte: panic in popup callback", || {
-        let event = PopupEvent {
-            position: Position::from_raw(popup.pos),
-        };
-        slot.invoke(|callback, ui| callback(ui, event));
+    abort_on_panic("dear-imgui-cte: panic in popup callback", || unsafe {
+        UiCallbackSlot::invoke(
+            userdata.cast::<UiCallbackSlot<PopupCallback>>(),
+            |callback, ui| {
+                let Some(popup) = popup.as_ref() else {
+                    return;
+                };
+                callback(
+                    ui,
+                    PopupEvent {
+                        position: Position::from_raw(popup.pos),
+                    },
+                );
+            },
+        );
     });
 }
 
@@ -883,28 +896,28 @@ unsafe extern "C" fn line_number_trampoline(
     userdata: *mut c_void,
     number: *const sys::CustomLineNumber,
 ) {
-    let Some(slot) = (unsafe {
-        userdata
-            .cast::<UiCallbackSlot<LineNumberCallback>>()
-            .as_ref()
-    }) else {
-        return;
-    };
-    let Some(number) = (unsafe { number.as_ref() }) else {
-        return;
-    };
     abort_on_panic(
         "dear-imgui-cte: panic in custom-line-number callback",
-        || {
-            let event = LineNumberEvent {
-                position: [number.pos.x, number.pos.y],
-                size: [number.size.x, number.size.y],
-                digits: number.digits,
-                line: number.lineNumber,
-                cursor_line: number.cursorLineNumber,
-                color: number.color,
-            };
-            slot.invoke(|callback, ui| callback(ui, event));
+        || unsafe {
+            UiCallbackSlot::invoke(
+                userdata.cast::<UiCallbackSlot<LineNumberCallback>>(),
+                |callback, ui| {
+                    let Some(number) = number.as_ref() else {
+                        return;
+                    };
+                    callback(
+                        ui,
+                        LineNumberEvent {
+                            position: [number.pos.x, number.pos.y],
+                            size: [number.size.x, number.size.y],
+                            digits: number.digits,
+                            line: number.lineNumber,
+                            cursor_line: number.cursorLineNumber,
+                            color: number.color,
+                        },
+                    );
+                },
+            );
         },
     );
 }
@@ -914,17 +927,11 @@ unsafe extern "C" fn identifier_trampoline<F: FnMut(&str)>(
     identifier: *const c_char,
     identifier_len: usize,
 ) {
-    let Some(state) = (unsafe { userdata.cast::<IdentifierState<'_, F>>().as_mut() }) else {
-        return;
-    };
-    if state.invoking.replace(true) {
-        return;
-    }
-    let _guard = InvocationGuard(&state.invoking);
-    abort_on_panic("dear-imgui-cte: panic in identifier callback", || {
-        let identifier = unsafe { callback_str(identifier, identifier_len, "identifier callback") };
-        let callback = unsafe { &mut **state.callback.get() };
-        callback(identifier);
+    abort_on_panic("dear-imgui-cte: panic in identifier callback", || unsafe {
+        CallbackSlot::invoke(userdata.cast::<CallbackSlot<F>>(), |callback| {
+            let identifier = callback_str(identifier, identifier_len, "identifier callback");
+            callback(identifier);
+        });
     });
 }
 
@@ -935,20 +942,21 @@ unsafe extern "C" fn filter_trampoline(
     output: *mut *const c_char,
     output_len: *mut usize,
 ) -> sys::DearImGuiCteStatus {
-    let Some(state) = (unsafe { userdata.cast::<FilterState>().as_mut() }) else {
+    let Some(state) = (unsafe { userdata.cast::<FilterState>().as_ref() }) else {
         return sys::DearImGuiCteStatus_NullArgument;
     };
     if output.is_null() || output_len.is_null() || state.invoking.replace(true) {
         return sys::DearImGuiCteStatus_CallbackFailed;
     }
     let _guard = InvocationGuard(&state.invoking);
-    let Some(value) = state.outputs.get(state.next) else {
+    let next = state.next.get();
+    let Some((value, len)) = state.outputs.get(next) else {
         return sys::DearImGuiCteStatus_CallbackFailed;
     };
-    state.next += 1;
+    state.next.set(next + 1);
     unsafe {
         *output = value.as_ptr();
-        *output_len = value.as_bytes().len();
+        *output_len = *len;
     }
     sys::DearImGuiCteStatus_Ok
 }
@@ -986,14 +994,50 @@ mod tests {
         let calls_for_callback = Rc::clone(&calls);
         let userdata = Rc::new(Cell::new(ptr::null_mut()));
         let userdata_for_callback = Rc::clone(&userdata);
-        let slot = CallbackSlot::new(Box::new(move || {
+        let slot = RawBox::new(CallbackSlot::new(Box::new(move || {
             calls_for_callback.set(calls_for_callback.get() + 1);
             unsafe { change_trampoline(userdata_for_callback.get()) };
-        }) as Box<EmptyCallback>);
-        userdata.set(slot.userdata());
+        }) as EmptyCallback));
+        let native_userdata = slot.as_ptr().cast();
+        userdata.set(native_userdata);
 
-        unsafe { change_trampoline(slot.userdata()) };
-        unsafe { change_trampoline(slot.userdata()) };
+        let slot = std::hint::black_box(slot);
+        unsafe { change_trampoline(native_userdata) };
+        unsafe { change_trampoline(native_userdata) };
+        drop(slot);
+
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn identifier_trampoline_rejects_reentry_before_borrowing_the_callback() {
+        type IdentifierCallback<'scope> = Box<dyn FnMut(&str) + 'scope>;
+
+        let calls = Cell::new(0);
+        let userdata = Cell::new(ptr::null_mut());
+        let callback = Box::new(|identifier: &str| {
+            calls.set(calls.get() + 1);
+            unsafe {
+                identifier_trampoline::<IdentifierCallback<'_>>(
+                    userdata.get(),
+                    identifier.as_ptr().cast(),
+                    identifier.len(),
+                )
+            };
+        }) as IdentifierCallback<'_>;
+        let slot = RawBox::new(CallbackSlot::new(callback));
+        userdata.set(slot.as_ptr().cast());
+
+        let identifier = b"identifier";
+        for _ in 0..2 {
+            unsafe {
+                identifier_trampoline::<IdentifierCallback<'_>>(
+                    userdata.get(),
+                    identifier.as_ptr().cast(),
+                    identifier.len(),
+                )
+            };
+        }
 
         assert_eq!(calls.get(), 2);
     }
@@ -1004,9 +1048,9 @@ mod tests {
 
         let transaction_seen = Rc::new(RefCell::new(None));
         let seen = Rc::clone(&transaction_seen);
-        let transaction = CallbackSlot::new(Box::new(move |event: TextChange<'_>| {
+        let transaction = RawBox::new(CallbackSlot::new(Box::new(move |event: TextChange<'_>| {
             *seen.borrow_mut() = Some((event.kind, event.range, event.text.to_owned()));
-        }) as Box<TransactionCallback>);
+        }) as TransactionCallback));
         let transaction_text = "change";
         let raw_transaction = sys::DearImGuiCteChangeView {
             insert: false,
@@ -1015,7 +1059,7 @@ mod tests {
             text: transaction_text.as_ptr().cast(),
             text_len: transaction_text.len(),
         };
-        unsafe { transaction_trampoline(transaction.userdata(), &raw_transaction) };
+        unsafe { transaction_trampoline(transaction.as_ptr().cast(), &raw_transaction) };
         assert_eq!(
             transaction_seen.borrow().clone(),
             Some((
@@ -1045,13 +1089,13 @@ mod tests {
         };
         let decorator_seen = Rc::new(Cell::new(None));
         let seen = Rc::clone(&decorator_seen);
-        let decorator = UiCallbackSlot::new(
+        let decorator = RawBox::new(UiCallbackSlot::new(
             Rc::clone(&registry.active_ui),
             Box::new(move |ui: &Ui, event: DecoratorEvent| {
                 assert_eq!(ui.context_id(), expected_context);
                 seen.set(Some(event));
-            }) as Box<DecoratorCallback>,
-        );
+            }) as DecoratorCallback,
+        ));
         let mut raw_decorator = sys::Decorator {
             line: 7,
             width: 2.0,
@@ -1059,7 +1103,7 @@ mod tests {
             glyphSize: [8.0, 16.0].into(),
             userData: ptr::null_mut(),
         };
-        unsafe { decorator_trampoline(decorator.userdata(), &mut raw_decorator) };
+        unsafe { decorator_trampoline(decorator.as_ptr().cast(), &mut raw_decorator) };
         assert_eq!(decorator_seen.get(), Some(expected_decorator));
 
         let expected_caret = CaretEvent {
@@ -1071,11 +1115,10 @@ mod tests {
         };
         let caret_seen = Rc::new(Cell::new(None));
         let seen = Rc::clone(&caret_seen);
-        let caret = UiCallbackSlot::new(
+        let caret = RawBox::new(UiCallbackSlot::new(
             Rc::clone(&registry.active_ui),
-            Box::new(move |_ui: &Ui, event: CaretEvent| seen.set(Some(event)))
-                as Box<CaretCallback>,
-        );
+            Box::new(move |_ui: &Ui, event: CaretEvent| seen.set(Some(event))) as CaretCallback,
+        ));
         let raw_caret = sys::CustomCaret {
             drawList: ptr::null_mut(),
             glyphPos: [10.0, 20.0].into(),
@@ -1084,21 +1127,21 @@ mod tests {
             caretColor: 0x1122_3344,
             cursorIndex: 3,
         };
-        unsafe { caret_trampoline(caret.userdata(), &raw_caret) };
+        unsafe { caret_trampoline(caret.as_ptr().cast(), &raw_caret) };
         assert_eq!(caret_seen.get(), Some(expected_caret));
 
         let popup_seen = Rc::new(Cell::new(None));
         let seen = Rc::clone(&popup_seen);
-        let popup = UiCallbackSlot::new(
+        let popup = RawBox::new(UiCallbackSlot::new(
             Rc::clone(&registry.active_ui),
             Box::new(move |_ui: &Ui, event: PopupEvent| seen.set(Some(event.position)))
-                as Box<PopupCallback>,
-        );
+                as PopupCallback,
+        ));
         let mut raw_popup = sys::PopupData {
             pos: Position::new(4, 5).into_raw(),
             userData: ptr::null_mut(),
         };
-        unsafe { popup_trampoline(popup.userdata(), &mut raw_popup) };
+        unsafe { popup_trampoline(popup.as_ptr().cast(), &mut raw_popup) };
         assert_eq!(popup_seen.get(), Some(Position::new(4, 5)));
 
         drop(context.render_legacy());

@@ -1,6 +1,4 @@
-use super::texture::{
-    RgbaExtent, RgbaRect, apply_rgba_rect, texture_data_to_rgba_subrect, texture_upload_to_rgba,
-};
+use super::texture::{texture_data_to_rgba_subrect, texture_upload_to_rgba};
 use dear_imgui_rs::texture::{OwnedTextureData, TextureFormat as ImFormat};
 
 #[test]
@@ -41,8 +39,8 @@ fn request_upload_rgba32_honors_row_pitch() {
 
     let out = texture_upload_to_rgba(ImFormat::RGBA32, 2, 2, 12, &pixels).unwrap();
     assert_eq!(
-        out,
-        vec![
+        out.as_ref(),
+        &[
             10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160,
         ]
     );
@@ -54,62 +52,16 @@ fn request_upload_alpha8_honors_row_pitch() {
 
     let out = texture_upload_to_rgba(ImFormat::Alpha8, 2, 2, 3, &pixels).unwrap();
     assert_eq!(
-        out,
-        vec![
+        out.as_ref(),
+        &[
             255, 255, 255, 10, 255, 255, 255, 20, 255, 255, 255, 30, 255, 255, 255, 40,
         ]
     );
 }
 
 #[test]
-fn managed_update_composes_a_complete_replacement_image() {
-    let mut rgba = vec![
-        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, // row 0
-        13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, // row 1
-    ];
-    let update = [101, 102, 103, 104, 105, 106, 107, 108];
-
-    assert!(apply_rgba_rect(
-        &mut rgba,
-        RgbaExtent {
-            width: 3,
-            height: 2,
-        },
-        RgbaRect {
-            x: 1,
-            y: 0,
-            width: 1,
-            height: 2,
-        },
-        &update,
-    ));
-    assert_eq!(
-        rgba,
-        vec![
-            1, 2, 3, 4, 101, 102, 103, 104, 9, 10, 11, 12, // row 0
-            13, 14, 15, 16, 105, 106, 107, 108, 21, 22, 23, 24, // row 1
-        ]
-    );
-}
-
-#[test]
-fn managed_update_rejects_out_of_bounds_without_mutating_shadow() {
-    let mut rgba = vec![1_u8; 3 * 2 * 4];
-    let original = rgba.clone();
-
-    assert!(!apply_rgba_rect(
-        &mut rgba,
-        RgbaExtent {
-            width: 3,
-            height: 2,
-        },
-        RgbaRect {
-            x: 2,
-            y: 1,
-            width: 2,
-            height: 1,
-        },
-        &[2_u8; 2 * 4]
-    ));
-    assert_eq!(rgba, original);
+fn request_upload_borrows_tightly_packed_rgba32() {
+    let pixels = [10, 20, 30, 40];
+    let out = texture_upload_to_rgba(ImFormat::RGBA32, 1, 1, 4, &pixels).unwrap();
+    assert!(matches!(out, std::borrow::Cow::Borrowed(bytes) if bytes == pixels));
 }

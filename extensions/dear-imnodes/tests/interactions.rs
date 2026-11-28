@@ -43,7 +43,7 @@ fn queue_mouse(imgui: &mut Context, position: [f32; 2], button: Option<(MouseBut
 
 fn draw_editor_frame(
     imgui: &mut Context,
-    nodes: &imnodes::Context,
+    nodes: &imnodes::ImNodesContext,
     editor: &imnodes::EditorContext,
     node_positions: Option<[[f32; 2]; 2]>,
 ) -> EditorFrame {
@@ -93,7 +93,7 @@ fn mouse_focus_and_middle_drag_update_the_bound_editor() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    let nodes = imnodes::Context::create(&imgui);
+    let nodes = imnodes::ImNodesContext::create(&imgui);
     let editor = nodes.create_editor_context();
     let bound_editor = nodes.bind_editor(&editor);
 
@@ -128,7 +128,7 @@ fn box_selection_tracks_nodes_in_the_active_editor_context() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    let nodes = imnodes::Context::create(&imgui);
+    let nodes = imnodes::ImNodesContext::create(&imgui);
     let editor = nodes.create_editor_context();
     let bound_editor = nodes.bind_editor(&editor);
 
@@ -159,7 +159,7 @@ fn minimap_hover_snapshot_includes_overlapping_nodes_in_draw_order() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    let nodes = imnodes::Context::create(&imgui);
+    let nodes = imnodes::ImNodesContext::create(&imgui);
 
     let draw = |imgui: &mut Context| {
         let ui = imgui.frame();

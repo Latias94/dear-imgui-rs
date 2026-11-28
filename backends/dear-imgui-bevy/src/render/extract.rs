@@ -150,8 +150,6 @@ pub(super) fn resolve_extracted_imgui_render_routes(
     diagnostics: Res<crate::route::ImguiDiagnostics>,
 ) {
     let route_epoch = extracted.route_epoch();
-    let mut context_ids = extracted.context_ids().collect::<Vec<_>>();
-    context_ids.sort_by_key(|context_id| context_id.get().get());
     let mut route_diagnostics = Vec::new();
     let mut views_by_main_camera = HashMap::<Entity, IndexedExtractedView<'_>>::new();
     for candidate @ (view, _, _, _) in &views {
@@ -164,13 +162,13 @@ pub(super) fn resolve_extracted_imgui_render_routes(
             });
     }
 
-    for context_id in context_ids {
-        let route_snapshots = extracted.route_snapshots(context_id).to_vec();
+    for context_id in extracted.sorted_context_ids() {
+        let route_snapshots = extracted.route_snapshots(context_id);
         let mut camera_targets = Vec::with_capacity(route_snapshots.len());
         for route in route_snapshots {
             let Some(indexed_view) = views_by_main_camera.get(&route.camera) else {
                 route_diagnostics.push(extraction_diagnostic(
-                    &route,
+                    route,
                     crate::route::ImguiDiagnosticKind::MissingExtractedView,
                 ));
                 continue;
@@ -184,7 +182,7 @@ pub(super) fn resolve_extracted_imgui_render_routes(
                 || (camera.schedule != Core2d.intern() && camera.schedule != Core3d.intern())
             {
                 Some(crate::route::ImguiDiagnosticKind::UnsupportedCameraSchedule)
-            } else if !extracted_view_matches_route(&route, view, camera)
+            } else if !extracted_view_matches_route(route, view, camera)
                 || !texture_usages.0.contains(TextureUsages::RENDER_ATTACHMENT)
             {
                 Some(crate::route::ImguiDiagnosticKind::StaleExtractedView)
@@ -192,7 +190,7 @@ pub(super) fn resolve_extracted_imgui_render_routes(
                 None
             };
             if let Some(kind) = diagnostic_kind {
-                route_diagnostics.push(extraction_diagnostic(&route, kind));
+                route_diagnostics.push(extraction_diagnostic(route, kind));
                 continue;
             }
 
@@ -204,7 +202,7 @@ pub(super) fn resolve_extracted_imgui_render_routes(
                 order: route.order,
                 camera_order: route.camera_order,
                 camera_schedule: route.camera_schedule,
-                target: route.target,
+                target: route.target.clone(),
                 target_format: view.target_format,
                 texture_usages: texture_usages.0,
                 msaa: *msaa,
@@ -236,34 +234,14 @@ fn extracted_view_matches_route(
     view: &ExtractedView,
     camera: &ExtractedCamera,
 ) -> bool {
-    if camera.target.as_ref() != Some(&route.target)
-        || camera.order != route.camera_order
-        || camera.physical_target_size.map(|size| [size.x, size.y])
-            != Some(route.physical_target_size)
-    {
-        return false;
-    }
-
-    let mut camera_viewport = camera.viewport.clone();
-    if let Some(viewport) = &mut camera_viewport {
-        viewport.clamp_to_size(UVec2::from(route.physical_target_size));
-    }
-    let camera_viewport = camera_viewport.as_ref().map(ImguiCameraViewport::from);
-    let (viewport_position, viewport_size) = route
-        .camera_viewport
-        .map_or(([0, 0], route.physical_target_size), |viewport| {
-            (viewport.physical_position, viewport.physical_size)
-        });
-
-    camera_viewport == route.camera_viewport
-        && camera.physical_viewport_size.map(|size| [size.x, size.y]) == Some(viewport_size)
-        && view.viewport
-            == UVec4::new(
-                viewport_position[0],
-                viewport_position[1],
-                viewport_size[0],
-                viewport_size[1],
-            )
+    camera.target.as_ref() == Some(&route.target)
+        && camera.order == route.camera_order
+        && ImguiCameraViewport::matches_extracted_view(
+            route.camera_viewport,
+            route.physical_target_size,
+            view,
+            camera,
+        )
 }
 
 fn extraction_diagnostic(

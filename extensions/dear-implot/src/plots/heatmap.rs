@@ -506,6 +506,10 @@ impl<'ui> crate::PlotScope<'ui> {
     }
 
     /// Plot a heatmap with custom scale and bounds
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Retains the public convenience call for callers supplying explicit grid, scale, and bounds"
+    )]
     pub fn heatmap_plot_scaled(
         &self,
         label: &str,

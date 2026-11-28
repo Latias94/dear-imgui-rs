@@ -110,6 +110,7 @@ bool capture_active(ImGuiTestEngine* engine) noexcept {
            engine->CaptureTool._StateIsPickingWindow;
 }
 
+#if IMGUI_TEST_ENGINE_ENABLE_CAPTURE
 bool screen_capture_trampoline(
     ImGuiID viewport_id,
     int x,
@@ -157,6 +158,7 @@ bool screen_capture_trampoline(
     }
     return captured;
 }
+#endif
 
 std::atomic<std::uint64_t>& counter_ref(Counter counter) noexcept {
     switch (counter) {
@@ -1414,6 +1416,7 @@ ImGuiTestEngineStatus imgui_test_engine_clear_capture_provider(
         if (!installed) {
             return ImGuiTestEngineStatus_Success;
         }
+        abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
         if (abi::presentation_pending(engine)) {
             abi::request_capture_abort(engine);
         } else if (abi::capture_active(engine) || abi::capture_wait_pending(engine)) {

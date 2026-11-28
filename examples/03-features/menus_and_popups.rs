@@ -97,19 +97,17 @@ impl MenuDemo {
 
                 ui.text_disabled("Right-click the document for more actions");
                 ui.separator();
-                ui.child_window("sections")
-                    .size([0.0, 260.0])
-                    .build(ui, || {
-                        for (index, title) in self.sections.iter().enumerate() {
-                            if ui
-                                .selectable_config(format!("{title}##section-{index}"))
-                                .selected(self.selected == Some(index))
-                                .build()
-                            {
-                                self.selected = Some(index);
-                            }
+                ui.child_window("sections").size([0.0, 260.0]).build(|| {
+                    for (index, title) in self.sections.iter().enumerate() {
+                        if ui
+                            .selectable_config(format!("{title}##section-{index}"))
+                            .selected(self.selected == Some(index))
+                            .build()
+                        {
+                            self.selected = Some(index);
                         }
-                    });
+                    }
+                });
 
                 if let Some(_popup) = ui.begin_popup_context_window() {
                     if ui.menu_item("Add Section") {

@@ -1524,7 +1524,7 @@ mod tests {
             random = random
                 .wrapping_mul(6_364_136_223_846_793_005)
                 .wrapping_add(1);
-            let event = if random % 4 == 0 {
+            let event = if random.is_multiple_of(4) {
                 ModelEvent::Quit
             } else {
                 ModelEvent::Motion {

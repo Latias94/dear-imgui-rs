@@ -1,13 +1,7 @@
+use crate::validation::assert_finite_vec2;
 use crate::{Id, sys};
 use std::cell::UnsafeCell;
 use std::ffi::{CStr, c_void};
-
-fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
-    assert!(
-        value[0].is_finite() && value[1].is_finite(),
-        "{caller} {name} must contain finite values"
-    );
-}
 
 fn assert_non_negative_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
     assert_finite_vec2(caller, name, value);

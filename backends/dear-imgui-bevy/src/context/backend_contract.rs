@@ -37,18 +37,9 @@ pub enum ImguiRendererOwnershipError {
 }
 
 /// Failure to enter or finish a temporary active-Context scope.
-pub type ImguiContextScopeError = dear_imgui_rs::ContextScopeError;
+pub type ImguiContextScopeError = dear_imgui_rs::error::context::ScopeKind;
 
-pub(crate) fn separate_scoped_error<E>(
-    error: dear_imgui_rs::ScopedActivationError<E>,
-) -> Result<ImguiContextScopeError, E> {
-    match error.into_closure_error() {
-        Ok(error) => Err(error),
-        Err(error) => Ok(error),
-    }
-}
-
-pub(crate) enum ImguiActiveRendererContextError<E> {
+pub(crate) enum ImguiRendererContextError<E> {
     Operation(E),
     ContextScope(ImguiContextScopeError),
     #[cfg(feature = "render")]
@@ -57,12 +48,13 @@ pub(crate) enum ImguiActiveRendererContextError<E> {
     ViewportBridge(viewport::ImguiViewportRuntimeError),
 }
 
-impl<E> ImguiActiveRendererContextError<E> {
-    pub(crate) fn from_scoped(error: dear_imgui_rs::ScopedActivationError<Self>) -> Self {
-        match separate_scoped_error(error) {
-            Ok(error) => Self::ContextScope(error),
-            Err(error) => error,
-        }
+impl<E> ImguiRendererContextError<E> {
+    pub(crate) fn from_context_operation(
+        error: dear_imgui_rs::error::context::Operation<Self>,
+    ) -> Self {
+        error
+            .into_closure_error()
+            .unwrap_or_else(Self::ContextScope)
     }
 }
 
@@ -86,10 +78,10 @@ impl std::error::Error for ImguiRendererOwnershipError {}
 /// Reason a registered Context cannot finish Context-local teardown yet.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ImguiContextRemovalPendingReason {
-    /// The Context could not enter or finish the active scope required for teardown.
+    /// The Context could not enter or finish the scope required for teardown.
     ContextScope(ImguiContextScopeError),
     RenderWorldReleasePending,
-    Renderer(dear_imgui_rs::render::RendererConsumerError),
+    Renderer(dear_imgui_rs::FrameError),
     #[cfg(feature = "render")]
     RendererOwnership(ImguiRendererOwnershipError),
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -119,11 +111,12 @@ impl std::fmt::Display for ImguiContextRemovalPendingReason {
 }
 
 impl ImguiContextRemovalPendingReason {
-    pub(crate) fn from_scoped(error: dear_imgui_rs::ScopedActivationError<Self>) -> Self {
-        match separate_scoped_error(error) {
-            Ok(error) => Self::ContextScope(error),
-            Err(error) => error,
-        }
+    pub(crate) fn from_context_operation(
+        error: dear_imgui_rs::error::context::Operation<Self>,
+    ) -> Self {
+        error
+            .into_closure_error()
+            .unwrap_or_else(Self::ContextScope)
     }
 }
 
@@ -632,65 +625,46 @@ impl ImguiRendererRuntimeContract {
 
 #[cfg(test)]
 mod context_scope_error_tests {
-    use super::{ImguiActiveRendererContextError, ImguiContextScopeError, separate_scoped_error};
+    use dear_imgui_rs::error::context::{BindingKind, Operation};
+
+    use super::{
+        ImguiContextRemovalPendingReason, ImguiContextScopeError, ImguiRendererContextError,
+    };
 
     #[test]
-    fn scoped_activation_translation_preserves_every_core_scope_failure() {
-        assert_eq!(
-            separate_scoped_error::<()>(dear_imgui_rs::ScopedActivationError::Scope(
-                dear_imgui_rs::ContextScopeError::Activation(
-                    dear_imgui_rs::ContextActivationReason::ContextAlreadyActive,
+    fn backend_translation_preserves_every_core_scope_failure() {
+        for scope in [
+            ImguiContextScopeError::FrameAlreadyOpen,
+            ImguiContextScopeError::FrameLeftOpen,
+            ImguiContextScopeError::ContextUnavailable(BindingKind::NativeDestroyed),
+        ] {
+            assert_eq!(
+                ImguiContextRemovalPendingReason::from_context_operation(Operation::Scope(scope),),
+                ImguiContextRemovalPendingReason::ContextScope(scope),
+            );
+            assert!(matches!(
+                ImguiRendererContextError::<()>::from_context_operation(
+                    Operation::Scope(scope),
                 ),
-            )),
-            Ok(ImguiContextScopeError::Activation(
-                dear_imgui_rs::ContextActivationReason::ContextAlreadyActive,
-            ))
-        );
-        assert_eq!(
-            separate_scoped_error::<()>(dear_imgui_rs::ScopedActivationError::Scope(
-                dear_imgui_rs::ContextScopeError::FrameLeftOpen,
-            )),
-            Ok(ImguiContextScopeError::FrameLeftOpen)
-        );
-        assert_eq!(
-            separate_scoped_error::<()>(dear_imgui_rs::ScopedActivationError::Scope(
-                dear_imgui_rs::ContextScopeError::ContextUnavailable(
-                    dear_imgui_rs::ContextBindingError::NativeDestroyed,
-                ),
-            )),
-            Ok(ImguiContextScopeError::ContextUnavailable(
-                dear_imgui_rs::ContextBindingError::NativeDestroyed,
-            ))
-        );
-        assert_eq!(
-            separate_scoped_error(dear_imgui_rs::ScopedActivationError::Closure(
-                "operation failed",
-            )),
-            Err("operation failed")
-        );
+                ImguiRendererContextError::ContextScope(error) if error == scope
+            ));
+        }
     }
 
     #[test]
-    fn renderer_scope_translation_keeps_closure_errors_on_the_operation_channel() {
-        let operation = ImguiActiveRendererContextError::from_scoped(
-            dear_imgui_rs::ScopedActivationError::Closure(
-                ImguiActiveRendererContextError::Operation("operation failed"),
-            ),
-        );
+    fn backend_translation_keeps_closure_errors_on_the_operation_channel() {
         assert!(matches!(
-            operation,
-            ImguiActiveRendererContextError::Operation("operation failed")
+            ImguiRendererContextError::from_context_operation(Operation::Closure(
+                ImguiRendererContextError::Operation("operation failed"),
+            )),
+            ImguiRendererContextError::Operation("operation failed")
         ));
-
-        let scope = ImguiActiveRendererContextError::<()>::from_scoped(
-            dear_imgui_rs::ScopedActivationError::Scope(
-                dear_imgui_rs::ContextScopeError::FrameLeftOpen,
-            ),
+        assert_eq!(
+            ImguiContextRemovalPendingReason::from_context_operation(Operation::Closure(
+                ImguiContextRemovalPendingReason::RenderWorldReleasePending,
+            )),
+            ImguiContextRemovalPendingReason::RenderWorldReleasePending,
         );
-        assert!(matches!(
-            scope,
-            ImguiActiveRendererContextError::ContextScope(ImguiContextScopeError::FrameLeftOpen)
-        ));
     }
 }
 

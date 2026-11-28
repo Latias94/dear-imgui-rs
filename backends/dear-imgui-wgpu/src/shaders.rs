@@ -58,14 +58,17 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let color = in.color * textureSample(u_texture, u_sampler, in.uv);
+    let texel = textureSample(u_texture, u_sampler, in.uv);
+    let rgb = max(in.color.rgb, vec3<f32>(0.0));
+    var vertex_rgb = rgb;
     if uniforms.gamma < 0.0 {
-        let low = color.rgb / 12.92;
-        let high = pow((color.rgb + 0.055) / 1.055, vec3<f32>(2.4));
-        return vec4<f32>(select(low, high, color.rgb > vec3<f32>(0.04045)), color.a);
+        let low = rgb / 12.92;
+        let high = pow((rgb + 0.055) / 1.055, vec3<f32>(2.4));
+        vertex_rgb = select(low, high, rgb > vec3<f32>(0.04045));
+    } else if uniforms.gamma != 1.0 {
+        vertex_rgb = pow(rgb, vec3<f32>(uniforms.gamma));
     }
-    let corrected = pow(color.rgb, vec3<f32>(uniforms.gamma));
-    return vec4<f32>(corrected, color.a);
+    return vec4<f32>(vertex_rgb, in.color.a) * texel;
 }
 "#;
 
@@ -122,22 +125,7 @@ pub fn create_vertex_buffer_layout() -> VertexBufferLayout<'static> {
     }
 }
 
-/// Create vertex state for render pipeline
-#[cfg(not(feature = "wgpu-30"))]
-pub fn create_vertex_state<'a>(
-    shader_module: &'a ShaderModule,
-    buffers: &'a [VertexBufferLayout],
-) -> VertexState<'a> {
-    VertexState {
-        module: shader_module,
-        entry_point: Some(VS_ENTRY_POINT),
-        compilation_options: Default::default(),
-        buffers,
-    }
-}
-
 /// Create vertex state for render pipeline.
-#[cfg(feature = "wgpu-30")]
 pub fn create_vertex_state<'a>(
     shader_module: &'a ShaderModule,
     buffers: &'a [Option<VertexBufferLayout>],

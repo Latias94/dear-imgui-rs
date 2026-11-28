@@ -5,7 +5,7 @@ use crate::{
     sys,
     text_editor::TextEditor,
 };
-use dear_imgui_rs::{Key, KeyChord, KeyMods};
+use dear_imgui_rs::{Key, KeyChord, KeyMods, ffi::RawBox};
 use std::{
     ffi::{CStr, c_char, c_void},
     marker::PhantomData,
@@ -407,13 +407,13 @@ impl TextEditor {
 
         // The editor owns this slot and unregisters it before dropping its native handle.
         let editor = self.raw_ptr();
-        let slot = CallbackSlot::new(Box::new(move |raw| {
+        let slot = RawBox::new(CallbackSlot::new(Box::new(move |raw| {
             callback(&mut AutocompleteRequest {
                 raw,
                 editor,
                 _callback: PhantomData,
             });
-        }) as Box<AutocompleteCallback>);
+        }) as AutocompleteCallback));
         let native = NativeAutocompleteConfig::create()?;
         check_status(OPERATION, unsafe {
             sys::dear_imgui_cte_autocomplete_config_set_characters(
@@ -463,7 +463,7 @@ impl TextEditor {
             sys::dear_imgui_cte_autocomplete_config_set_callback(
                 native.raw(),
                 Some(autocomplete_trampoline),
-                slot.userdata(),
+                slot.as_ptr().cast(),
             )
         })?;
         self.clear_autocomplete()?;
@@ -679,19 +679,20 @@ unsafe extern "C" fn autocomplete_trampoline(
     userdata: *mut c_void,
     state: *mut sys::DearImGuiCteAutocompleteState,
 ) {
-    let Some(slot) = (unsafe {
-        userdata
-            .cast::<CallbackSlot<AutocompleteCallback>>()
-            .as_ref()
-    }) else {
-        return;
-    };
     let Some(raw) = NonNull::new(state) else {
         return;
     };
-    abort_on_panic("dear-imgui-cte: panic in autocomplete callback", || {
-        slot.invoke((), |callback| callback(raw));
-    });
+    abort_on_panic(
+        "dear-imgui-cte: panic in autocomplete callback",
+        || unsafe {
+            CallbackSlot::invoke(
+                userdata.cast::<CallbackSlot<AutocompleteCallback>>(),
+                |callback| {
+                    callback(raw);
+                },
+            );
+        },
+    );
 }
 
 unsafe fn bytes_from_raw<'a>(

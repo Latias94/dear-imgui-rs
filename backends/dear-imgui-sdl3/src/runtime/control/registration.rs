@@ -28,13 +28,14 @@ impl RuntimeRegistration {
 
     pub(crate) fn prepare_with_backend(
         context: &mut Context,
+        window: &sdl3::video::Window,
         renderer_shutdown: Option<fn()>,
         renderer_device_objects_destroy: Option<fn()>,
         renderer_texture_update: Option<fn(&mut TextureData)>,
         platform_graphics: PlatformGraphicsKind,
         native_renderer: NativeRendererKind,
     ) -> Result<Self, Sdl3BackendError> {
-        let platform_session = Sdl3PlatformSession::acquire()?;
+        let platform_session = Sdl3PlatformSession::acquire(context.id(), Some(window.id()))?;
         let baseline = preflight_platform_claim(context, native_renderer)?;
         let renderer_shutdown = renderer_shutdown.map(|shutdown| Rc::new(shutdown) as Rc<dyn Fn()>);
         let renderer_device_objects_destroy =
@@ -328,9 +329,9 @@ impl RuntimeRegistration {
                     let consumer = consumer
                         .as_ref()
                         .expect("initialized SDL3 renderer lost its renderer consumer");
-                    match context.prepare_renderer_texture_reset(consumer.as_ref()) {
-                        Ok(reset) => Some(reset),
-                        Err(error) => return Err(error.into()),
+                    {
+                        let reset = context.prepare_renderer_texture_reset(consumer.as_ref())?;
+                        Some(reset)
                     }
                 }
                 None => None,
@@ -411,6 +412,9 @@ pub(crate) fn unregister_runtime(key: usize) {
 }
 
 pub(crate) fn with_current_runtime<R>(callback: impl FnOnce(&RuntimeControl) -> R) -> Option<R> {
+    if unsafe { sys::igGetCurrentContext() }.is_null() {
+        return None;
+    }
     let key = unsafe { sys::igGetPlatformIO_Nil() as usize };
     RUNTIMES.with(|runtimes| {
         let control = runtimes.borrow().get(&key).cloned()?.upgrade()?;

@@ -1,5 +1,5 @@
 use dear_imgui_rs::{Condition, Context, FramePrepareOptions};
-use dear_imnodes::{Context as ImNodesContext, ImNodesExt, NodeId};
+use dear_imnodes::{ImNodesContext, ImNodesExt, NodeId};
 use dear_imnodes_sys as sys;
 use std::sync::Mutex;
 

@@ -6,10 +6,6 @@
 extern "C" {
 #endif
 
-// Extra helpers to fetch ImGui IO modifier pointers
-CIMGUI_API bool* imnodes_getIOKeyShiftPtr();
-CIMGUI_API bool* imnodes_getIOKeyAltPtr();
-
 // Reset the active editor context to the current ImNodes context's default editor.
 CIMGUI_API void imnodes_EditorContextResetToDefault();
 

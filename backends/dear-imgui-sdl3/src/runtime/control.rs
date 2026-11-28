@@ -190,7 +190,7 @@ impl RuntimeControl {
             .map(Sdl3PlatformSession::generation)
     }
 
-    fn resolve_live_viewport(
+    pub(crate) fn resolve_live_viewport(
         &self,
         viewport: *mut sys::ImGuiViewport,
     ) -> Option<*mut sys::ImGuiViewport> {
@@ -237,7 +237,7 @@ impl RuntimeControl {
         &self,
         viewport: *mut sys::ImGuiViewport,
     ) -> Option<*mut sys::ImGuiViewport> {
-        self.resolve_live_viewport(viewport).or_else(|| {
+        self.resolve_live_viewport(viewport).or({
             #[cfg(test)]
             {
                 self.synthetic_viewport_key(viewport).map(|_| viewport)
@@ -847,13 +847,13 @@ impl RuntimeControl {
         viewport: *mut sys::ImGuiViewport,
         size: *const sys::ImVec2,
     ) {
-        let invocation = self
+        let callback = self
             .renderer_callbacks
             .borrow()
             .as_ref()
-            .map(RendererCallbackOwnership::original_set_window_size_invocation);
-        if let Some(invocation) = invocation {
-            invocation.invoke(viewport, size);
+            .map(RendererCallbackOwnership::original_set_window_size);
+        if let Some(callback) = callback {
+            unsafe { callback.invoke(viewport, size) };
         }
     }
 
@@ -899,7 +899,7 @@ impl RuntimeControl {
         if !self.callback_teardown_active() || viewport.is_null() || state.is_empty() {
             return;
         }
-        let Some(key) = self.viewport_key(viewport).or_else(|| {
+        let Some(key) = self.viewport_key(viewport).or({
             #[cfg(test)]
             {
                 self.synthetic_viewport_key(viewport)
@@ -955,10 +955,10 @@ impl RuntimeControl {
                                 .is_some_and(|state| state.is_empty())
                         }
                 });
-            if can_restore {
-                if unsafe { self.restore_viewport_platform_state(viewport, deferred.state) } {
-                    restored_platform.insert(address);
-                }
+            if can_restore
+                && unsafe { self.restore_viewport_platform_state(viewport, deferred.state) }
+            {
+                restored_platform.insert(address);
             }
         }
 
@@ -1013,7 +1013,7 @@ impl RuntimeControl {
         state: ViewportPlatformState,
         instance_id: NativeWindowInstanceId,
     ) {
-        let Some(key) = self.viewport_key(viewport).or_else(|| {
+        let Some(key) = self.viewport_key(viewport).or({
             #[cfg(test)]
             {
                 self.synthetic_viewport_key(viewport)
@@ -1114,7 +1114,7 @@ impl RuntimeControl {
         &self,
         viewport: *mut sys::ImGuiViewport,
     ) -> Option<ViewportLeaseKey> {
-        self.viewport_key(viewport).or_else(|| {
+        self.viewport_key(viewport).or({
             #[cfg(test)]
             {
                 self.synthetic_viewport_key(viewport)

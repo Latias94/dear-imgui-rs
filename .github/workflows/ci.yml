@@ -18,53 +18,6 @@ env:
   # Reduce disk usage in CI (helps avoid "No space left on device" from LLVM/rustc).
   CARGO_INCREMENTAL: "0"
   RUSTFLAGS: "-Cdebuginfo=0"
-  # Existing workspace-wide lint debt. Broad Clippy routes deny every warning except this
-  # explicit baseline; new release and binding tooling below has no allowances.
-  CLIPPY_HISTORICAL_LINTS: >-
-    -A dead_code
-    -A clippy::assertions_on_constants
-    -A clippy::collapsible_if
-    -A clippy::collapsible_match
-    -A clippy::default_constructed_unit_structs
-    -A clippy::derivable_impls
-    -A clippy::doc_lazy_continuation
-    -A clippy::drop_non_drop
-    -A clippy::explicit_auto_deref
-    -A clippy::explicit_counter_loop
-    -A clippy::field_reassign_with_default
-    -A clippy::get_first
-    -A clippy::if_same_then_else
-    -A clippy::items_after_test_module
-    -A clippy::large_enum_variant
-    -A clippy::let_and_return
-    -A clippy::manual_c_str_literals
-    -A clippy::manual_div_ceil
-    -A clippy::manual_is_multiple_of
-    -A clippy::manual_unwrap_or
-    -A clippy::manual_unwrap_or_default
-    -A clippy::missing_const_for_thread_local
-    -A clippy::missing_safety_doc
-    -A clippy::module_inception
-    -A clippy::needless_borrow
-    -A clippy::needless_lifetimes
-    -A clippy::needless_option_as_deref
-    -A clippy::needless_range_loop
-    -A clippy::new_ret_no_self
-    -A clippy::new_without_default
-    -A clippy::nonminimal_bool
-    -A clippy::obfuscated_if_else
-    -A clippy::question_mark
-    -A clippy::redundant_closure
-    -A clippy::result_large_err
-    -A clippy::should_implement_trait
-    -A clippy::single_match
-    -A clippy::too_many_arguments
-    -A clippy::type_complexity
-    -A clippy::unnecessary_cast
-    -A clippy::unnecessary_lazy_evaluations
-    -A clippy::useless_conversion
-    -A clippy::vec_box
-    -A clippy::wrong_self_convention
 
 jobs:
   workflow-lint:
@@ -153,6 +106,13 @@ jobs:
 
       - name: Test cross-platform release tooling
         run: cargo nextest run -p xtask
+
+      - name: Test shared backend contracts
+        run: cargo nextest run -j 1 -p dear-imgui-backend-support
+
+      - name: Inspect the shared backend package on Windows
+        if: runner.os == 'Windows'
+        run: cargo package -p dear-imgui-backend-support --list
 
       - name: Link OpenGL3 backend shim
         run: cargo nextest run -p dear-imgui-sys --no-default-features --features backend-shim-opengl3 --test backend_shims
@@ -351,7 +311,7 @@ jobs:
           python3 tools/ci/run_contract.py expect-failure
           --label package-test-engine
           --contains "feature \`test-engine\` is source-only and cannot be packaged as a prebuilt core artifact"
-          -- cargo check -p dear-imgui-sys --no-default-features --features package-bin,test-engine
+          -- cargo run -p xtask -- package dear-imgui-sys --features test-engine
 
   test-engine-sanitizers:
     name: Test Engine C ABI sanitizers
@@ -495,7 +455,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      RUSTUP_TOOLCHAIN: '1.95.0'
+      RUSTUP_TOOLCHAIN: '1.97.1'
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -505,8 +465,10 @@ jobs:
       - name: Init required nested submodules (selective)
         run: python3 tools/ci/update_submodules.py
 
-      - name: Install Rust toolchain
-        run: rustup toolchain install ${{ env.RUSTUP_TOOLCHAIN }} --profile minimal --no-self-update --component rustfmt
+      - name: Install workspace and canonical formatting toolchains
+        run: |
+          rustup toolchain install ${{ env.RUSTUP_TOOLCHAIN }} --profile minimal --no-self-update
+          rustup toolchain install 1.95.0 --profile minimal --no-self-update --component rustfmt
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
@@ -542,7 +504,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      RUSTUP_TOOLCHAIN: '1.95.0'
+      RUSTUP_TOOLCHAIN: '1.97.1'
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -573,10 +535,9 @@ jobs:
           libxkbcommon-dev libwayland-dev libudev-dev
           mesa-common-dev libgl1-mesa-dev cmake
 
-      - name: Check publishable non-Bevy crates at the declared MSRV
+      - name: Check publishable crates at the declared MSRV
         run: >-
           cargo check --workspace
-          --exclude dear-imgui-bevy
           --exclude dear-imgui-examples
           --exclude dear-imgui-web-demo
           --exclude xtask
@@ -608,32 +569,16 @@ jobs:
         run: cargo test --doc -p dear-imgui-sdl3 --features "sdlgpu3-renderer,multi-viewport"
 
   wgpu-routes:
-    name: WGPU ${{ matrix.wgpu }} + ${{ matrix.platform }}
+    name: WGPU 30 + ${{ matrix.platform }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - wgpu: '27'
-            platform: Winit
-            features: wgpu-27,multi-viewport-winit
-            lint_features: wgpu-27
-          - wgpu: '28'
-            platform: Winit
-            features: wgpu-28,multi-viewport-winit
-            lint_features: wgpu-28
-          - wgpu: '29'
-            platform: Winit
-            features: wgpu-29,multi-viewport-winit
-            lint_features: wgpu-29
-          - wgpu: '30'
-            platform: Winit
-            features: wgpu-30,multi-viewport-winit
-            lint_features: wgpu-30,multi-viewport-winit
-          - wgpu: '30'
-            platform: SDL3
-            features: wgpu-30,multi-viewport-sdl3
-            lint_features: wgpu-30,multi-viewport-sdl3
+          - platform: Winit
+            features: multi-viewport-winit
+          - platform: SDL3
+            features: multi-viewport-sdl3
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -654,7 +599,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
-          key: wgpu-${{ matrix.wgpu }}-${{ matrix.platform }}
+          key: wgpu-30-${{ matrix.platform }}
 
       - name: Refresh Linux package metadata
         run: sudo apt-get update
@@ -673,9 +618,9 @@ jobs:
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
-      - name: Check opt-in WGPU tracing route
-        if: matrix.wgpu == '30' && matrix.platform == 'Winit'
-        run: cargo check -p dear-imgui-wgpu --lib --no-default-features --features wgpu-30,tracing
+      - name: Check all additive WGPU features
+        if: matrix.platform == 'Winit'
+        run: cargo check -p dear-imgui-wgpu --all-features
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
@@ -685,11 +630,12 @@ jobs:
           IMGUI_SYS_FORCE_BUILD: "1"
 
       - name: Test WGPU raw callback render contract
-        if: matrix.wgpu == '30' && matrix.platform == 'Winit'
+        if: matrix.platform == 'Winit'
         run: >-
           cargo nextest run -p dear-imgui-wgpu --test integration_test
           --no-default-features --features "${{ matrix.features }}"
           direct_and_split_render_paths_execute_raw_callbacks_with_scoped_state
+          dropping_renderer_releases_its_gpu_handles_and_allows_replacement
           zero_sized_framebuffer_still_reconciles_the_pending_frame
         env:
           DEAR_IMGUI_REQUIRE_WGPU_ADAPTER: "1"
@@ -699,7 +645,7 @@ jobs:
         run: >-
           python3 tools/ci/run_contract.py clippy --
           -p dear-imgui-wgpu --all-targets --no-default-features
-          --features "${{ matrix.lint_features }}"
+          --features "${{ matrix.features }}"
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
@@ -795,6 +741,10 @@ jobs:
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
+      - name: Check all additive Ash features
+        if: matrix.platform == 'Winit' && matrix.rendering == 'classic'
+        run: cargo check -p dear-imgui-ash --all-features
+
       - name: Test exact Ash route including NoRendererClear policy
         run: cargo nextest run -p dear-imgui-ash --lib --no-default-features --features "${{ matrix.features }}"
         env:
@@ -805,44 +755,6 @@ jobs:
           python3 tools/ci/run_contract.py clippy --
           -p dear-imgui-ash --all-targets --no-default-features
           --features "${{ matrix.features }}"
-        env:
-          IMGUI_SYS_FORCE_BUILD: "1"
-
-  feature-conflict-contracts:
-    name: Mutually exclusive feature contracts
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          submodules: true
-
-      - name: Init required nested submodules (selective)
-        run: python3 tools/ci/update_submodules.py
-
-      - name: Install Rust toolchain
-        run: rustup toolchain install --profile minimal --no-self-update
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          cache-bin: "false"
-          key: feature-conflict-contracts
-
-      - name: Refresh Linux package metadata
-        run: sudo apt-get update
-
-      - name: Install Linux deps
-        run: >-
-          sudo apt-get install -y
-          build-essential cmake ninja-build pkg-config
-          libasound2-dev
-          libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
-          libxkbcommon-dev libwayland-dev libudev-dev
-          mesa-common-dev libgl1-mesa-dev
-
-      - name: Reject mutually exclusive renderer features
-        run: python3 tools/ci/run_contract.py renderer-feature-conflicts
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
@@ -1052,6 +964,9 @@ jobs:
 
       - name: Lint cross-platform release tooling without warnings
         run: cargo clippy -p xtask --all-targets -- -D warnings
+
+      - name: Lint shared backend contracts without warnings
+        run: cargo clippy -p dear-imgui-backend-support --all-targets --no-deps -- -D warnings
 
       - name: Lint core multi-viewport callback ownership
         run: >-
@@ -1274,7 +1189,7 @@ jobs:
     env:
       CARGO_TARGET_DIR: ${{ matrix.target_dir }}
       CI_TARGET: ${{ matrix.target }}
-      RUSTUP_TOOLCHAIN: '1.95.0'
+      RUSTUP_TOOLCHAIN: '1.97.1'
       RUSTFLAGS: ${{ matrix.rustflags }}
       IMGUI_SYS_FORCE_BUILD: "1"
       IMPLOT_SYS_FORCE_BUILD: "1"
@@ -1292,7 +1207,7 @@ jobs:
       - name: Init required nested submodules (selective)
         run: python tools/ci/update_submodules.py
 
-      - name: Install Rust 1.95.0 and target standard library
+      - name: Install the declared MSRV and target standard library
         run: rustup toolchain install ${{ env.RUSTUP_TOOLCHAIN }} --profile minimal --no-self-update --target ${{ matrix.target }}
 
       - name: Enter the Arm64 MSVC developer environment
@@ -1574,9 +1489,9 @@ jobs:
       - name: Reject packaging the source-only ABI probe
         run: >-
           python3 tools/ci/run_contract.py expect-failure
-          --label package-bin-abi-probe
+          --label package-abi-probe
           --contains "feature \`abi-probe\` is CI-only and cannot be packaged as a prebuilt core artifact"
-          -- cargo check -p dear-imgui-sys --no-default-features --features package-bin,abi-probe
+          -- cargo run -p xtask -- package dear-imgui-sys --features abi-probe
 
       - name: Reject the ABI probe when native compilation is disabled
         env:
@@ -1870,7 +1785,7 @@ jobs:
       - name: Test native build policy with real Cargo consumers
         run: python3 -B -m unittest discover -s tools/integration_tests -p 'test_*.py' -v
 
-      - name: Package, unpack, and consume core crates
+      - name: Package, unpack, and consume workspace crates
         run: python3 tools/ci/verify_packaged_core.py
 
   fmt:

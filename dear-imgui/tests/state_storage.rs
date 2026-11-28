@@ -61,19 +61,27 @@ fn state_storage_helpers_no_panic() {
 fn standalone_storage_keeps_its_values_when_bound_to_a_window() {
     let _guard = test_guard();
     let mut owned = imgui::OwnedStateStorage::new();
-    let key = imgui::Id::from(42);
-    {
-        let mut view = unsafe { imgui::StateStorage::from_raw(owned.as_raw_mut()) };
-        view.set_int(key, 17);
-        view.clear();
-        assert_eq!(view.get_int(key, -1), -1);
-        view.set_float(key, 2.5);
-    }
+    let count = imgui::Id::from(42);
+    let selected = imgui::Id::from(43);
+    let scale = imgui::Id::from(44);
+    owned.set_int(count, 17);
+    owned.set_bool(selected, true);
+    owned.set_float(scale, 2.5);
+    assert_eq!(owned.get_int(count, -1), 17);
+    assert!(owned.get_bool(selected, false));
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
     let ui = ctx.frame();
-    ui.with_state_storage(&mut owned, |view| assert_eq!(view.get_float(key, 0.0), 2.5));
+    ui.with_state_storage(&mut owned, |mut view| {
+        assert_eq!(view.get_float(scale, 0.0), 2.5);
+        view.set_float(scale, 3.5);
+    });
+    assert_eq!(owned.get_float(scale, 0.0), 3.5);
+    owned.clear();
+    assert_eq!(owned.get_int(count, -1), -1);
+    assert!(!owned.get_bool(selected, false));
+    assert_eq!(owned.get_float(scale, 0.0), 0.0);
 }
 
 #[test]
@@ -131,12 +139,14 @@ fn override_restores_its_window_while_a_list_box_is_current() {
             let current_storage = || ui.with_current_state_storage(|storage| storage.as_raw());
             let parent_storage = current_storage();
             let mut replacement = imgui::OwnedStateStorage::new();
-            let (list, list_storage) = ui.with_state_storage(&mut replacement, |_| {
-                let list = ui.list_box_config("items").begin(ui).expect("visible list");
-                (list, current_storage())
-            });
+            let list_storage = ui
+                .with_state_storage(&mut replacement, |_| {
+                    unsafe { imgui::sys::igBeginListBox(c"items".as_ptr(), [0.0, 0.0].into()) }
+                        .then(current_storage)
+                })
+                .expect("visible list");
             let after_override = current_storage();
-            list.end();
+            unsafe { imgui::sys::igEndListBox() };
             assert_eq!(after_override, list_storage);
             assert_eq!(current_storage(), parent_storage);
         })

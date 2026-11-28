@@ -240,7 +240,7 @@ fn an_engine_owned_frame_can_retry_synchronous_render_with_its_own_consumer() {
     let _guard = test_guard();
     let mut other = imgui::Context::create();
     let foreign = other.create_synchronous_renderer_consumer().unwrap();
-    let _other = other.suspend_or_panic();
+    let _other = other;
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
@@ -249,12 +249,80 @@ fn an_engine_owned_frame_can_retry_synchronous_render_with_its_own_consumer() {
     let stamp = ctx.frame_lifecycle_stamp();
     assert!(matches!(
         ctx.try_render(&foreign),
-        Err(imgui::render::SnapshotError::Consumer(
-            imgui::render::RendererConsumerError::ForeignContext { .. }
-        ))
+        Err(imgui::FrameError::ForeignContext { .. })
     ));
     assert_eq!(ctx.frame_lifecycle_stamp(), stamp);
     assert!(reconcile_test_frame(ctx.try_render(&consumer).unwrap(), &[]).valid());
+}
+
+#[test]
+fn a_frame_token_can_retry_synchronous_render_after_a_consumer_rejection() {
+    let _guard = test_guard();
+    let mut foreign_context = imgui::Context::create();
+    let foreign = foreign_context
+        .create_synchronous_renderer_consumer()
+        .unwrap();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
+    let frame = ctx.begin_frame();
+
+    frame.ui().text("Before preflight");
+    let (frame, error) = frame
+        .try_render(&foreign)
+        .expect_err("consumer belongs to another context");
+    assert!(matches!(error, imgui::FrameError::ForeignContext { .. }));
+    assert_eq!(frame.lifecycle_state(), imgui::FrameLifecycleState::InFrame);
+    frame.ui().text("After preflight");
+    assert!(reconcile_test_frame(frame.render(&consumer), &[]).valid());
+}
+
+#[test]
+fn a_frame_token_can_only_retry_synchronous_capture_after_native_render() {
+    let _guard = test_guard();
+    let mut other = imgui::Context::create();
+    let detached = other.create_detached_renderer_consumer().unwrap();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let synchronous = ctx.create_synchronous_renderer_consumer().unwrap();
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255; 4],
+    )
+    .unwrap();
+    let id = ctx.register_texture(texture);
+    let native = unsafe { *(*ctx.as_raw()).UserTextures.Data };
+
+    for try_detached in [true, false] {
+        let frame = ctx.begin_frame();
+        frame.ui().image(id, [16.0, 16.0]);
+        let bytes_per_pixel = unsafe { std::mem::replace(&mut (*native).BytesPerPixel, 0) };
+        let result = frame.try_render(&synchronous);
+        unsafe { (*native).BytesPerPixel = bytes_per_pixel };
+        let (frame, error) = result.expect_err("invalid texture layout should prevent capture");
+        assert!(matches!(
+            error,
+            imgui::FrameError::TextureInvalidLayout { .. }
+        ));
+        assert_eq!(
+            frame.lifecycle_state(),
+            imgui::FrameLifecycleState::Rendered
+        );
+
+        if try_detached {
+            assert!(matches!(
+                frame.render_snapshot(&detached),
+                Err(imgui::FrameError::FrameAlreadyRendered)
+            ));
+        } else {
+            let frame = frame
+                .try_render(&synchronous)
+                .unwrap_or_else(|(_, error)| panic!("synchronous capture should retry: {error}"));
+            assert!(reconcile_test_frame(frame, &[]).valid());
+        }
+    }
 }
 
 #[test]
@@ -389,14 +457,136 @@ fn frame_token_captures_font_managed_draws_with_a_context_consumer() {
 }
 
 #[test]
+fn top_level_frame_submission_keeps_its_context_current() {
+    let _guard = test_guard();
+    let mut owner = imgui::Context::create();
+    prepare_context(&mut owner);
+    let _consumer = owner.create_synchronous_renderer_consumer().unwrap();
+    let owner_raw = owner.as_raw();
+    let foreign = imgui::Context::create();
+    let current = || unsafe { imgui::sys::igGetCurrentContext() };
+    assert_eq!(current(), foreign.as_raw());
+
+    let ui = owner.frame();
+    assert_eq!(current(), owner_raw);
+    ui.text("direct submission");
+    assert!(owner.end_frame());
+
+    unsafe { imgui::sys::igSetCurrentContext(foreign.as_raw()) };
+    let frame = owner.begin_frame();
+    assert_eq!(current(), owner_raw);
+    frame.ui().text("token submission");
+    drop(frame);
+}
+
+#[test]
+fn a_nested_frame_keeps_the_outer_binding_current() {
+    let _guard = test_guard();
+    let mut owner = imgui::Context::create();
+    prepare_context(&mut owner);
+    let _consumer = owner.create_synchronous_renderer_consumer().unwrap();
+    let owner_raw = owner.as_raw();
+    let outer = imgui::Context::create();
+    let current = || unsafe { imgui::sys::igGetCurrentContext() };
+
+    outer.binding().with_bound_context(|| {
+        let frame = owner.begin_frame();
+        assert_eq!(current(), outer.as_raw());
+        frame.with_ui(|ui| {
+            assert_eq!(current(), owner_raw);
+            ui.text("nested submission");
+        });
+        assert_eq!(current(), outer.as_raw());
+        drop(frame);
+        assert_eq!(current(), outer.as_raw());
+    });
+}
+
+#[test]
+fn lexical_ui_builders_keep_their_owner_current_during_nested_frames() {
+    let _guard = test_guard();
+    let mut owner = imgui::Context::create();
+    prepare_context(&mut owner);
+    let _owner_consumer = owner.create_synchronous_renderer_consumer().unwrap();
+    let owner_raw = owner.as_raw();
+    let mut foreign = imgui::Context::create();
+    prepare_context(&mut foreign);
+    let _foreign_consumer = foreign.create_synchronous_renderer_consumer().unwrap();
+
+    let ui = owner.frame();
+    let mut check_binding = || {
+        foreign.frame().text("nested frame");
+        let current = unsafe { imgui::sys::igGetCurrentContext() };
+        assert!(foreign.end_frame());
+        assert_eq!(current, owner_raw);
+        ui.text("owning frame");
+    };
+
+    ui.window("Window")
+        .size([300.0, 200.0], imgui::Condition::Always)
+        .build(&mut check_binding)
+        .unwrap();
+    ui.child_window("Child")
+        .size([160.0, 60.0])
+        .build(&mut check_binding)
+        .unwrap();
+    ui.list_box_config("List box")
+        .size([160.0, 60.0])
+        .build(&mut check_binding)
+        .unwrap();
+    ui.with_window_draw_list(|_| check_binding());
+    ui.get_background_draw_list()
+        .channels_split(2, |_| check_binding());
+    assert!(owner.end_frame());
+}
+
+#[test]
+fn failed_frame_entry_and_unwinding_frame_callback_restore_the_previous_context() {
+    let _guard = test_guard();
+    let mut owner = imgui::Context::create();
+    let owner_raw = owner.as_raw();
+    let previous = imgui::Context::create();
+    let current = || unsafe { imgui::sys::igGetCurrentContext() };
+
+    assert_panics!({
+        let _ = owner.try_frame();
+    });
+    assert_eq!(current(), previous.as_raw());
+    assert_eq!(
+        owner.frame_lifecycle_state(),
+        imgui::FrameLifecycleState::Idle
+    );
+
+    prepare_context(&mut owner);
+    let consumer = owner.create_synchronous_renderer_consumer().unwrap();
+    assert_panics!({
+        let _ = owner.frame_with_result(&consumer, |_ui| {
+            assert_eq!(current(), owner_raw);
+            panic!("abort frame callback");
+        });
+    });
+    assert_eq!(current(), previous.as_raw());
+    assert_eq!(
+        owner.frame_lifecycle_state(),
+        imgui::FrameLifecycleState::Idle
+    );
+}
+
+#[test]
 fn frame_with_result_lets_engines_run_multiple_ui_steps_before_rendering() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
     let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
+    let owner_raw = ctx.as_raw();
+    let previous = imgui::Context::create();
+    let previous_raw = previous.as_raw();
+    let current = || unsafe { imgui::sys::igGetCurrentContext() };
+    assert_eq!(current(), previous_raw);
 
     let result = ctx.frame_with_result(&consumer, |ui| {
+        assert_eq!(current(), owner_raw);
         ui.text("system A");
         ui.text("system B");
         42usize
@@ -404,6 +594,7 @@ fn frame_with_result_lets_engines_run_multiple_ui_steps_before_rendering() {
     let (value, pending_frame) = result.into_parts();
 
     assert_eq!(value, 42);
+    assert_eq!(current(), previous_raw);
     let feedback = pending_frame
         .texture_requests()
         .iter()
@@ -467,7 +658,7 @@ fn synchronous_reconciled_frame_completion_binds_its_owner_context() {
     let ctx_b = imgui::Context::create();
     let binding_b = ctx_b.binding();
     let raw_b = ctx_b.as_raw();
-    let suspended_b = ctx_b.suspend_or_panic();
+    let suspended_b = ctx_b;
 
     let mut ctx_a = imgui::Context::create();
     prepare_context(&mut ctx_a);
@@ -665,7 +856,7 @@ fn invalid_synchronous_feedback_abandons_without_wedging_the_consumer() {
 
     assert!(matches!(
         pending.reconcile_texture_feedback(invalid),
-        Err(imgui::render::RendererConsumerError::DuplicateFeedback { .. })
+        Err(imgui::FrameError::DuplicateFeedback { .. })
     ));
     ctx.with_texture(texture_id, |texture| {
         assert_eq!(texture.status(), imgui::TextureStatus::OK);
@@ -720,7 +911,7 @@ fn synchronous_destroy_retry_does_not_acknowledge_retirement_or_block_drawing() 
     drop(frame);
     assert_eq!(
         ctx.with_texture(texture_id, |_| ()),
-        Err(imgui::ManagedTextureError::Retiring(texture_id))
+        Err(imgui::TextureError::Retiring(texture_id))
     );
 
     let retry = ctx.begin_frame().render(&consumer);
@@ -731,7 +922,7 @@ fn synchronous_destroy_retry_does_not_acknowledge_retirement_or_block_drawing() 
     drop(reconcile_test_frame(retry, &[]));
     assert_eq!(
         ctx.with_texture(texture_id, |_| ()),
-        Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))
+        Err(imgui::TextureError::AlreadyRemoved(texture_id))
     );
 }
 
@@ -767,7 +958,7 @@ fn renderer_consumer_kind_is_selected_at_creation() {
     let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
     assert!(matches!(
         ctx.create_detached_renderer_consumer(),
-        Err(imgui::render::RendererConsumerError::ConsumerAlreadyActive)
+        Err(imgui::FrameError::ConsumerAlreadyActive)
     ));
 
     let pending = ctx.begin_frame().render(&consumer);
@@ -869,13 +1060,51 @@ fn renderer_reset_commit_is_unit_for_an_empty_context() {
 }
 
 #[test]
+fn next_frame_resets_textures_after_a_synchronous_renderer_releases_them() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let renderer = ctx.create_synchronous_renderer_consumer().unwrap();
+    let reset = renderer.reset_signal();
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255; 4],
+    )
+    .unwrap();
+    let id = ctx.register_texture(texture);
+    let first = ctx.begin_frame();
+    first.ui().image(id, [16.0; 2]);
+    drop(reconcile_test_frame(
+        first.render(&renderer),
+        &[(id, imgui::TextureId::new(91))],
+    ));
+
+    reset.mark_renderer_dropped();
+    ctx.poll_snapshot_completions().unwrap();
+    ctx.with_texture(id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::OK)
+    })
+    .unwrap();
+    drop(renderer);
+
+    drop(ctx.begin_frame());
+    ctx.with_texture(id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert!(texture.texture_id().is_null());
+    })
+    .unwrap();
+}
+
+#[test]
 fn renderer_reset_commit_binds_its_owner_context() {
     let _guard = test_guard();
 
     let foreign = imgui::Context::create();
     let foreign_binding = foreign.binding();
     let foreign_raw = foreign.as_raw();
-    let suspended_foreign = foreign.suspend_or_panic();
+    let suspended_foreign = foreign;
 
     let mut owner = imgui::Context::create();
     prepare_context(&mut owner);
@@ -959,7 +1188,7 @@ fn renderer_reset_acknowledges_retiring_textures_after_the_last_epoch() {
     drop(ctx.begin_frame());
     assert_eq!(
         ctx.with_texture(texture_id, |_| ()),
-        Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))
+        Err(imgui::TextureError::AlreadyRemoved(texture_id))
     );
 }
 
@@ -1031,7 +1260,7 @@ fn renderer_reset_handles_atlas_active_and_retiring_bindings_as_one_transaction(
     drop(pending);
     assert_eq!(
         ctx.with_texture(retiring, |_| ()),
-        Err(imgui::ManagedTextureError::AlreadyRemoved(retiring))
+        Err(imgui::TextureError::AlreadyRemoved(retiring))
     );
 }
 

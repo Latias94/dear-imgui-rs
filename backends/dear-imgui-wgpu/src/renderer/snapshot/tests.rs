@@ -81,7 +81,6 @@ fn record_texture_readback(
         })];
         let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
             color_attachments: &attachments,
-            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
             multiview_mask: None,
             ..Default::default()
         });
@@ -126,9 +125,6 @@ fn read_texture_texels(device: &wgpu::Device, readback: &wgpu::Buffer) -> [[u8; 
     rx.recv_timeout(std::time::Duration::from_secs(10))
         .unwrap()
         .unwrap();
-    #[cfg(any(feature = "wgpu-27", feature = "wgpu-28", feature = "wgpu-29"))]
-    let bytes = readback.slice(..).get_mapped_range();
-    #[cfg(feature = "wgpu-30")]
     let bytes = readback.slice(..).get_mapped_range().unwrap();
     let pixels = [4, 12].map(|x| {
         let offset = 8 * 256 + x * 4;
@@ -137,6 +133,91 @@ fn read_texture_texels(device: &wgpu::Device, readback: &wgpu::Buffer) -> [[u8; 
     drop(bytes);
     readback.unmap();
     pixels
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn live_draw_rebinds_zero_and_nonzero_vertex_offsets_after_raw_callbacks() -> RendererResult<()> {
+    use crate::{WgpuRenderState, texture::request_test_device_and_adapter};
+    use dear_imgui_rs::{Color, sys};
+    use wgpu::{BufferDescriptor, BufferUsages, DownlevelFlags, TextureFormat};
+
+    unsafe extern "C" fn replace_vertex_buffer(
+        _list: *const sys::ImDrawList,
+        _command: *const sys::ImDrawCmd,
+    ) {
+        let _ = unsafe {
+            WgpuRenderState::with_current(|mut state| {
+                let (device, pass) = state.resources();
+                let blank_vertices = device.create_buffer(&BufferDescriptor {
+                    label: Some("raw callback vertex buffer"),
+                    size: 256,
+                    usage: BufferUsages::VERTEX,
+                    mapped_at_creation: false,
+                });
+                pass.set_vertex_buffer(0, blank_vertices.slice(..));
+            })
+        };
+    }
+
+    let Some((device, queue, adapter)) = request_test_device_and_adapter() else {
+        return Ok(());
+    };
+    let adapter_supports_base_vertex = adapter
+        .get_downlevel_capabilities()
+        .flags
+        .contains(DownlevelFlags::BASE_VERTEX);
+    for (adapter, expected_base_vertex) in
+        [(None, false), (Some(adapter), adapter_supports_base_vertex)]
+    {
+        let mut context = Context::create();
+        let mut init_info =
+            WgpuInitInfo::new(device.clone(), queue.clone(), TextureFormat::Rgba8Unorm);
+        init_info.adapter = adapter;
+        let mut renderer = WgpuRenderer::new(init_info, &mut context)?;
+        assert_eq!(
+            renderer
+                .gpu
+                .backend_data
+                .as_ref()
+                .unwrap()
+                .supports_base_vertex,
+            expected_base_vertex,
+        );
+        context.io_mut().set_display_size([16.0, 16.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        {
+            let ui = context.frame();
+            let background = ui.get_background_draw_list();
+            unsafe { background.add_callback(replace_vertex_buffer, std::ptr::null_mut(), 0) };
+            background
+                .add_rect([0.0, 0.0], [8.0, 16.0], Color::RED)
+                .filled(true)
+                .build();
+
+            let foreground = ui.get_foreground_draw_list();
+            foreground
+                .add_rect([8.0, 0.0], [9.0, 1.0], Color::WHITE)
+                .filled(true)
+                .build();
+            unsafe { foreground.add_callback(replace_vertex_buffer, std::ptr::null_mut(), 0) };
+            foreground
+                .add_rect([8.0, 0.0], [16.0, 16.0], Color::GREEN)
+                .filled(true)
+                .build();
+        }
+
+        let (commands, readback) = record_texture_readback(&device, |pass| {
+            let pending = context.try_render(renderer.renderer_consumer()?)?;
+            renderer.render(pending, pass, FramebufferExtent::new(16, 16))?;
+            Ok(())
+        })?;
+        queue.submit([commands]);
+        let pixels = read_texture_texels(&device, &readback);
+        renderer.shutdown(&mut context)?;
+        assert_eq!(pixels, [[255, 0, 0, 255], [0, 255, 0, 255]]);
+    }
+    Ok(())
 }
 
 #[test]
@@ -234,11 +315,18 @@ fn srgb_mode_decodes_rgb_before_alpha_blending() -> RendererResult<()> {
             dear_imgui_rs::texture::TextureFormat::RGBA32,
             2,
             1,
-            &[10, 64, 128, 255, 255, 128, 64, 128],
+            &[255, 128, 255, 255, 128, 128, 128, 128],
         )
         .unwrap(),
     );
-    draw_managed_texels(context.frame(), texture);
+    let draw = context.frame().get_foreground_draw_list();
+    for (x, u, tint) in [
+        (0.0, 0.25, dear_imgui_rs::Color::from_rgb_bytes(10, 64, 128)),
+        (8.0, 0.75, dear_imgui_rs::Color::WHITE),
+    ] {
+        draw.add_image(texture, [x, 0.0], [x + 8.0, 16.0], [u, 0.5], [u, 0.5], tint);
+    }
+    drop(draw);
     let pending = context.try_render(renderer.renderer_consumer()?)?;
     let (commands, readback) = record_texture_readback(&device, |pass| {
         renderer
@@ -246,11 +334,22 @@ fn srgb_mode_decodes_rgb_before_alpha_blending() -> RendererResult<()> {
             .map(|_| ())
     })?;
     queue.submit([commands]);
-    // Transparent black exposes both the decoded RGB times source alpha and source alpha itself.
-    assert_eq!(
-        read_texture_texels(&device, &readback),
-        [[1, 13, 55, 255], [128, 28, 7, 128]]
-    );
+    let samples: [([u8; 3], [u8; 4]); 2] =
+        [([10, 64, 128], [255, 128, 255, 255]), ([255; 3], [128; 4])];
+    let expected = samples.map(|(tint, texel)| {
+        let [r, g, b] = tint.map(|value| f32::from(value) / 255.0);
+        let [r, g, b, _] = dear_imgui_backend_support::srgb_vertex_color_to_linear([r, g, b, 1.0]);
+        let alpha = f32::from(texel[3]) / 255.0;
+        let vertex = [r, g, b];
+        let sample = [texel[0], texel[1], texel[2]];
+        let mut output = [0; 4];
+        for index in 0..3 {
+            output[index] = (vertex[index] * f32::from(sample[index]) * alpha).round() as u8;
+        }
+        output[3] = texel[3];
+        output
+    });
+    assert_eq!(read_texture_texels(&device, &readback), expected);
     renderer.shutdown(&mut context)
 }
 
@@ -847,7 +946,6 @@ fn detached_executor_records_and_reads_back_on_a_worker_thread() -> RendererResu
                 })];
                 let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
                     color_attachments: &attachments,
-                    #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
                     multiview_mask: None,
                     ..Default::default()
                 });
@@ -890,7 +988,6 @@ fn detached_executor_records_and_reads_back_on_a_worker_thread() -> RendererResu
                 })];
                 let _pass = producer.begin_render_pass(&RenderPassDescriptor {
                     color_attachments: &attachments,
-                    #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
                     multiview_mask: None,
                     ..Default::default()
                 });
@@ -924,9 +1021,6 @@ fn detached_executor_records_and_reads_back_on_a_worker_thread() -> RendererResu
                 .recv_timeout(std::time::Duration::from_secs(10))
                 .map_err(|error| error.to_string())?
                 .map_err(|error| format!("map failed: {error:?}"))?;
-            #[cfg(any(feature = "wgpu-27", feature = "wgpu-28", feature = "wgpu-29"))]
-            let bytes = readback.slice(..).get_mapped_range();
-            #[cfg(feature = "wgpu-30")]
             let bytes = readback
                 .slice(..)
                 .get_mapped_range()
@@ -952,12 +1046,10 @@ fn detached_executor_records_and_reads_back_on_a_worker_thread() -> RendererResu
         .recv()
         .expect("worker should return readback")
         .expect("worker render should succeed");
-    // The linear segment preserves black. Tinting blue before decoding round-trips to 64.
-    assert_eq!(
-        managed_pixel,
-        [0, 64, 64, 255],
-        "sRGB decode and attachment encode must round-trip the tinted managed texel"
-    );
+    // The green sample passes through linear blending. The blue tint is decoded before sampling.
+    assert_eq!([managed_pixel[0], managed_pixel[3]], [0, 255]);
+    assert!(managed_pixel[1].abs_diff(137) <= 1, "{managed_pixel:?}");
+    assert!(managed_pixel[2].abs_diff(93) <= 1, "{managed_pixel:?}");
     assert_eq!(
         scene_pixel,
         [255, 0, 0, 255],

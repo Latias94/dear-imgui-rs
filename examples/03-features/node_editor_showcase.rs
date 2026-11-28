@@ -394,7 +394,8 @@ impl AppWindow {
             )?,
         );
 
-        let (device, queue, surface, surface_desc) = wgpu_init::init_wgpu_for_window(&window)?;
+        let (device, queue, surface, surface_desc) =
+            wgpu_init::init_wgpu_for_window(event_loop, &window)?;
 
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
@@ -477,14 +478,14 @@ impl AppWindow {
         let ui = self.imgui.context.frame();
 
         draw_blueprints_window(
-            &ui,
+            ui,
             &self.imgui.node_editor,
             self.header_background,
             self.header_background_size,
             &mut self.graph,
         );
 
-        self.imgui.platform.prepare_render(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(ui, &self.window)?;
         let pending_frame = self
             .imgui
             .context
@@ -620,8 +621,8 @@ fn load_header_background_texture() -> Result<texture::OwnedTextureData, Box<dyn
     let (width, height) = image.dimensions();
     let texture = texture::OwnedTextureData::from_pixels(
         texture::TextureFormat::RGBA32,
-        u32::try_from(width).expect("header texture width fits u32"),
-        u32::try_from(height).expect("header texture height fits u32"),
+        width,
+        height,
         image.as_raw(),
     )?;
     Ok(texture)
@@ -660,7 +661,7 @@ fn draw_left_pane(ui: &Ui, node_editor: &EditorContext, graph: &mut GraphState) 
     ui.child_window("blueprints_left_pane")
         .size([300.0, 0.0])
         .border(true)
-        .build(ui, || {
+        .build(|| {
             ui.text("Blueprints");
             ui.separator();
             if ui.button("Fit Content") {
@@ -730,10 +731,10 @@ fn draw_editor_pane(
                 editor.add_node_to_selection(node);
             }
             for link in &graph.links {
-                if let Some(start) = pin_spec(link.start_pin) {
-                    if start.ty == PinType::Flow {
-                        editor.add_link_to_selection(link.id);
-                    }
+                if let Some(start) = pin_spec(link.start_pin)
+                    && start.ty == PinType::Flow
+                {
+                    editor.add_link_to_selection(link.id);
                 }
             }
             graph.pending_select_flow = false;
@@ -911,16 +912,20 @@ fn draw_comment_hint(editor: &NodeEditorFrame<'_>) {
         let min = hint.min();
         let label_min = [min[0] + 12.0, min[1] - 24.0];
         let label_max = [label_min[0] + 176.0, label_min[1] + 22.0];
-        hint.background_draw_list()
-            .add_rect(label_min, label_max, [0.12, 0.14, 0.16, 0.88])
-            .filled(true)
-            .rounding(4.0)
-            .build();
-        hint.foreground_draw_list().add_text(
-            [label_min[0] + 8.0, label_min[1] + 4.0],
-            [0.72, 0.83, 0.92, 1.0],
-            "Blueprint comment",
-        );
+        hint.with_background_draw_list(|draw_list| {
+            draw_list
+                .add_rect(label_min, label_max, [0.12, 0.14, 0.16, 0.88])
+                .filled(true)
+                .rounding(4.0)
+                .build();
+        });
+        hint.with_foreground_draw_list(|draw_list| {
+            draw_list.add_text(
+                [label_min[0] + 8.0, label_min[1] + 4.0],
+                [0.72, 0.83, 0.92, 1.0],
+                "Blueprint comment",
+            );
+        });
     });
 }
 

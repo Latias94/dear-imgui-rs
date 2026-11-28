@@ -290,7 +290,7 @@ class CteBindingIdentityTests(unittest.TestCase):
 class PrebuiltArchiveSelectionTests(unittest.TestCase):
     def test_selects_each_required_profile_exactly_once(self):
         with TemporaryDirectory() as temporary:
-            package_dir = Path(temporary)
+            package_dir = Path(temporary).resolve()
             expected = {
                 profile: write_prebuilt_archive(package_dir, profile)
                 for profile in PROFILE_FEATURES
@@ -307,7 +307,7 @@ class PrebuiltArchiveSelectionTests(unittest.TestCase):
 
     def test_filters_target_and_crt_before_enforcing_uniqueness(self):
         with TemporaryDirectory() as temporary:
-            package_dir = Path(temporary)
+            package_dir = Path(temporary).resolve()
             expected = {}
             for profile in ("normal", "stack-layout"):
                 expected[profile] = write_prebuilt_archive(
@@ -474,7 +474,7 @@ class ExtensionArchiveSelectionTests(unittest.TestCase):
 
     def test_cte_archives_do_not_enter_core_selection(self):
         with TemporaryDirectory() as temporary:
-            package_dir = Path(temporary)
+            package_dir = Path(temporary).resolve()
             core = write_base_extension_matrix(package_dir)
             selected = PREBUILT.select_core_prebuilt_archives(
                 package_dir, "x86_64-unknown-linux-gnu", "",
@@ -517,7 +517,7 @@ class ExtensionArchiveSelectionTests(unittest.TestCase):
 
     def test_ignores_other_target_profile_and_candidate_routes(self):
         with TemporaryDirectory() as temporary:
-            package_dir = Path(temporary)
+            package_dir = Path(temporary).resolve()
             core = write_base_extension_matrix(package_dir)
             foreign_core = write_prebuilt_archive(
                 package_dir,
@@ -1302,7 +1302,7 @@ class ConsumerContractTests(unittest.TestCase):
         ambient = {
             "IMGUI_SYS_FORCE_BUILD": "ambient",
             "IMGUI_SYS_LIB_DIR": "ambient",
-            "IMGUI_SYS_PKG_FEATURES": "ambient",
+            "DEAR_IMGUI_RS_PACKAGE_DEAR_IMGUI_SYS": "ambient",
             "IMGUI_SYS_PREBUILT_URL": "https://invalid.example",
             "IMGUI_SYS_SKIP_CC": "ambient",
             "IMGUI_SYS_USE_PREBUILT": "ambient",
@@ -1341,15 +1341,17 @@ class ConsumerContractTests(unittest.TestCase):
         ):
             self.assertNotIn(name, normal_env)
             self.assertNotIn(name, stack_env)
-        self.assertNotIn("IMGUI_SYS_PKG_FEATURES", normal_env)
-        self.assertEqual(normal_env["IMGUI_SYS_FORCE_BUILD"], "1")
+        self.assertNotIn("DEAR_IMGUI_RS_PACKAGE_DEAR_IMGUI_SYS", normal_env)
+        self.assertNotIn("DEAR_IMGUI_RS_PACKAGE_DEAR_IMGUI_SYS", stack_env)
         self.assertEqual(normal_env["DEAR_IMGUI_RS_CANDIDATE_SHA"], CANDIDATE_SHA)
-        self.assertEqual(stack_env["IMGUI_SYS_FORCE_BUILD"], "1")
-        self.assertEqual(stack_env["IMGUI_SYS_PKG_FEATURES"], "stack-layout")
-        self.assertNotIn("--no-default-features", normal_command)
-        self.assertIn("package-bin", normal_command)
-        self.assertIn("--no-default-features", stack_command)
-        self.assertIn("package-bin,stack-layout", stack_command)
+        self.assertEqual(stack_env["DEAR_IMGUI_RS_CANDIDATE_SHA"], CANDIDATE_SHA)
+        for command in (normal_command, stack_command):
+            self.assertEqual(command[:7], (
+                "cargo", "run", "-p", "xtask", "--", "package", "dear-imgui-sys"
+            ))
+            self.assertEqual(command[command.index("--out-dir") + 1], str(Path("packages").resolve()))
+        self.assertEqual(normal_command[normal_command.index("--features") + 1], "")
+        self.assertEqual(stack_command[stack_command.index("--features") + 1], "stack-layout")
         extension_calls = run_command.call_args_list[1:8]
         self.assertEqual(len(extension_calls), len(PREBUILT.EXTENSION_SPECS))
         for call in extension_calls:
@@ -1388,23 +1390,19 @@ class ConsumerContractTests(unittest.TestCase):
         self.assertEqual(len(run_command.call_args_list), 18)
         core_calls = [
             call for call in run_command.call_args_list
-            if call.args[0][call.args[0].index("-p") + 1] == "dear-imgui-sys"
+            if call.args[0][call.args[0].index("package") + 1] == "dear-imgui-sys"
         ]
         self.assertEqual(
             {
-                next(
-                    argument.removeprefix("package-bin,")
-                    for argument in call.args[0]
-                    if argument.startswith("package-bin")
-                )
+                call.args[0][call.args[0].index("--features") + 1]
                 for call in core_calls
             },
-            {"package-bin", "stack-layout", "freetype", "stack-layout,freetype"},
+            {"", "stack-layout", "freetype", "stack-layout,freetype"},
         )
         for call in run_command.call_args_list:
             self.assertIn("--target", call.args[0])
             self.assertIn("x86_64-pc-windows-msvc", call.args[0])
-            self.assertEqual(call.kwargs["env"].get("IMGUI_SYS_PKG_CRT", "md"), "md")
+            self.assertEqual(call.args[0][call.args[0].index("--crt") + 1], "md")
 
 class PackageWorkspaceTests(unittest.TestCase):
     def test_packaged_provider_sources_follow_inventory_crate_roots(self):

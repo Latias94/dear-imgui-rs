@@ -1,9 +1,4 @@
 use super::*;
-#[cfg(any(
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
 use dear_imgui_rs::sys;
 
 pub(super) fn with_context<R>(imgui: &Context, caller: &str, f: impl FnOnce() -> R) -> R {
@@ -43,6 +38,62 @@ pub(super) mod ffi {
     }
 
     unsafe extern "C" {
+        pub fn dear_imgui_sdl3_invoke_viewport(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport),
+            viewport: *mut sys::ImGuiViewport,
+        );
+        pub fn dear_imgui_sdl3_invoke_viewport_render(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void),
+            viewport: *mut sys::ImGuiViewport,
+            argument: *mut c_void,
+        );
+        pub fn dear_imgui_sdl3_invoke_viewport_query(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport) -> bool,
+            viewport: *mut sys::ImGuiViewport,
+            fallback: bool,
+        ) -> bool;
+        pub fn dear_imgui_sdl3_invoke_viewport_title(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *const std::ffi::c_char),
+            viewport: *mut sys::ImGuiViewport,
+            title: *const std::ffi::c_char,
+        );
+        pub fn dear_imgui_sdl3_invoke_viewport_alpha(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, f32),
+            viewport: *mut sys::ImGuiViewport,
+            alpha: f32,
+        );
+        pub fn dear_imgui_sdl3_invoke_viewport_vulkan(
+            callback: unsafe extern "C" fn(
+                *mut sys::ImGuiViewport,
+                sys::ImU64,
+                *const c_void,
+                *mut sys::ImU64,
+            ) -> std::ffi::c_int,
+            viewport: *mut sys::ImGuiViewport,
+            instance: sys::ImU64,
+            allocator: *const c_void,
+            surface: *mut sys::ImU64,
+        ) -> std::ffi::c_int;
+        pub fn dear_imgui_sdl3_invoke_viewport_set_vec2(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2_c),
+            viewport: *mut sys::ImGuiViewport,
+            value: *const sys::ImVec2,
+        );
+        pub fn dear_imgui_sdl3_invoke_viewport_set_vec2_ptr(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2),
+            viewport: *mut sys::ImGuiViewport,
+            value: *const sys::ImVec2,
+        );
+        pub fn dear_imgui_sdl3_invoke_viewport_get_vec2(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2_c,
+            viewport: *mut sys::ImGuiViewport,
+            value: *mut sys::ImVec2,
+        ) -> bool;
+        pub fn dear_imgui_sdl3_invoke_viewport_get_vec2_out(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
+            viewport: *mut sys::ImGuiViewport,
+            value: *mut sys::ImVec2,
+        ) -> bool;
         #[cfg(test)]
         pub fn dear_imgui_sdl3_backend_sizeof_imgui_io() -> usize;
         #[cfg(all(test, sdl3_native_self_test))]
@@ -69,11 +120,11 @@ pub(super) mod ffi {
             current_frame: i32,
             buttons_down: i32,
         ) -> bool;
-        #[cfg(all(test, sdl3_native_self_test))]
+        #[cfg(all(test, target_os = "windows", sdl3_native_self_test))]
         pub fn dear_imgui_sdl3_create_live_viewport_for_test(
             id: u32,
         ) -> *mut dear_imgui_rs::sys::ImGuiViewport;
-        #[cfg(all(test, sdl3_native_self_test))]
+        #[cfg(all(test, target_os = "windows", sdl3_native_self_test))]
         pub fn dear_imgui_sdl3_delete_live_viewport_for_test(
             viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
         );
@@ -82,6 +133,7 @@ pub(super) mod ffi {
             sdl_gl_context: *mut c_void,
         ) -> bool;
         pub fn ImGui_ImplSDL3_InitForVulkan_Rust(window: *mut sdl3_sys::video::SDL_Window) -> bool;
+        #[cfg(target_os = "windows")]
         pub fn ImGui_ImplSDL3_InitForD3D_Rust(window: *mut sdl3_sys::video::SDL_Window) -> bool;
         pub fn ImGui_ImplSDL3_InitForMetal_Rust(window: *mut sdl3_sys::video::SDL_Window) -> bool;
         pub fn ImGui_ImplSDL3_InitForSDLRenderer_Rust(
@@ -243,10 +295,10 @@ pub enum Sdl3BackendError {
         expected: dear_imgui_rs::ContextId,
         actual: dear_imgui_rs::ContextId,
     },
-    #[error("another SDL3 platform runtime already owns the process-wide SDL session")]
+    #[error("the Dear ImGui Context already owns an SDL3 platform session")]
     PlatformSessionOccupied,
-    #[error(transparent)]
-    NativeWindowIdentityExhausted(#[from] dear_imgui_rs::NativeWindowIdentityExhausted),
+    #[error("SDL window {window_id} is already attached to an SDL3 platform session")]
+    PlatformWindowOccupied { window_id: u32 },
     #[error("SDL3 window policy is invalid: {reason}")]
     InvalidWindowConfiguration { reason: &'static str },
     #[error("SDL3 window policy `{attribute}` is unsupported by the active video driver")]
@@ -269,11 +321,7 @@ pub enum Sdl3BackendError {
     #[error("SDL3 text input contains an interior NUL byte")]
     TextInputContainsNul,
     #[error(transparent)]
-    Attachment(#[from] dear_imgui_rs::ContextAttachmentError),
-    #[error(transparent)]
-    PlatformAttachmentRelease(#[from] dear_imgui_rs::ContextPlatformAttachmentReleaseError),
-    #[error(transparent)]
-    Context(#[from] dear_imgui_rs::ContextBindingError),
+    Context(#[from] dear_imgui_rs::ContextError),
     #[error("another platform backend already owns `{callback}`")]
     PlatformCallbackOccupied { callback: &'static str },
     #[error("another platform backend already owns `{field}`")]
@@ -361,11 +409,9 @@ pub enum Sdl3BackendError {
     #[error("SDL3 shutdown is already releasing {phase}")]
     ShutdownInProgress { phase: &'static str },
     #[error(transparent)]
-    RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
+    Frame(#[from] dear_imgui_rs::FrameError),
     #[error(transparent)]
-    FrameCapture(#[from] dear_imgui_rs::render::SnapshotError),
-    #[error(transparent)]
-    TextureFeedback(#[from] dear_imgui_rs::render::TextureFeedbackError),
+    TextureFeedback(#[from] dear_imgui_rs::TextureError),
     #[error("managed texture {texture:?} received an update before renderer creation")]
     ManagedTextureNotCreated {
         texture: dear_imgui_rs::render::SnapshotTextureId,

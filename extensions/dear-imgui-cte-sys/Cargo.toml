@@ -45,23 +45,13 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 dear-imgui-sys.workspace = true
-flate2 = { workspace = true, optional = true }
-tar = { workspace = true, optional = true }
 
 [build-dependencies]
-bindgen = { workspace = true, optional = true }
 build-support = { workspace = true, features = ["binding-spec"] }
-cc.workspace = true
-
-[[bin]]
-name = "package"
-path = "bin/package/main.rs"
-required-features = ["package-bin"]
 
 [features]
 default = []
-bindgen = ["dep:bindgen", "dear-imgui-sys/bindgen"]
-package-bin = ["dep:flate2", "dep:tar"]
+bindgen = ["build-support/bindgen", "dear-imgui-sys/bindgen"]
 prebuilt = ["build-support/download"]
 build-from-source = []
 wasm = ["dear-imgui-sys/wasm"]

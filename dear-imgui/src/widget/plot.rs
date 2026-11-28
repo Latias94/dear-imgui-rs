@@ -142,24 +142,25 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
     pub fn build(self) {
         let count = plot_value_count_i32("PlotLines::build()", self.values.len());
         let values_offset = self.values_offset.into_i32("PlotLines::build()", count);
-        let (label_ptr, overlay_ptr) = self
-            .ui
-            .scratch_txt_with_opt(self.label.as_ref(), self.overlay_text.as_deref());
         let graph_size_vec: sys::ImVec2 = self.graph_size.into();
 
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igPlotLines_FloatPtr(
-                label_ptr,
-                self.values.as_ptr(),
-                count,
-                values_offset,
-                overlay_ptr,
-                self.scale_min,
-                self.scale_max,
-                graph_size_vec,
-                std::mem::size_of::<f32>() as i32,
-            );
-        });
+        self.ui.with_scratch_txt_with_opt(
+            self.label.as_ref(),
+            self.overlay_text.as_deref(),
+            |label_ptr, overlay_ptr| unsafe {
+                sys::igPlotLines_FloatPtr(
+                    label_ptr,
+                    self.values.as_ptr(),
+                    count,
+                    values_offset,
+                    overlay_ptr,
+                    self.scale_min,
+                    self.scale_max,
+                    graph_size_vec,
+                    std::mem::size_of::<f32>() as i32,
+                );
+            },
+        );
     }
 }
 
@@ -226,23 +227,24 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
     pub fn build(self) {
         let count = plot_value_count_i32("PlotHistogram::build()", self.values.len());
         let values_offset = self.values_offset.into_i32("PlotHistogram::build()", count);
-        let (label_ptr, overlay_ptr) = self
-            .ui
-            .scratch_txt_with_opt(self.label.as_ref(), self.overlay_text.as_deref());
         let graph_size_vec: sys::ImVec2 = self.graph_size.into();
 
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igPlotHistogram_FloatPtr(
-                label_ptr,
-                self.values.as_ptr(),
-                count,
-                values_offset,
-                overlay_ptr,
-                self.scale_min,
-                self.scale_max,
-                graph_size_vec,
-                std::mem::size_of::<f32>() as i32,
-            );
-        });
+        self.ui.with_scratch_txt_with_opt(
+            self.label.as_ref(),
+            self.overlay_text.as_deref(),
+            |label_ptr, overlay_ptr| unsafe {
+                sys::igPlotHistogram_FloatPtr(
+                    label_ptr,
+                    self.values.as_ptr(),
+                    count,
+                    values_offset,
+                    overlay_ptr,
+                    self.scale_min,
+                    self.scale_max,
+                    graph_size_vec,
+                    std::mem::size_of::<f32>() as i32,
+                );
+            },
+        );
     }
 }

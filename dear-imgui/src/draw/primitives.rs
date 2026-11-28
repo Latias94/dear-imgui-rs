@@ -1,12 +1,10 @@
 use crate::internal::len_i32;
 use crate::sys;
 
-use super::color::ImColor32;
-use super::counts::{DrawFlags, DrawSegmentCount};
-use super::list::DrawListMut;
-use super::util::{
-    CORNER_FLAGS, STROKE_FLAGS, STROKE_POSITION, assert_draw_flags, assert_non_negative_f32,
-    assert_polyline_flags, assert_positive_f32, finite_vec2,
+use super::{
+    CORNER_FLAGS, DrawFlags, DrawListMut, DrawSegmentCount, ImColor32, STROKE_FLAGS,
+    STROKE_POSITION, assert_draw_flags, assert_non_negative_f32, assert_polyline_flags,
+    assert_positive_f32, finite_vec2,
 };
 
 /// Represents a line about to be drawn.
@@ -62,24 +60,25 @@ impl<'ui> Line<'ui> {
 
     /// Draw the line on the window
     pub fn build(self) {
-        unsafe {
-            let p1 = sys::ImVec2 {
-                x: self.p1[0],
-                y: self.p1[1],
-            };
-            let p2 = sys::ImVec2 {
-                x: self.p2[0],
-                y: self.p2[1],
-            };
-            sys::ImDrawList_AddLine(
-                self.draw_list.draw_list,
-                p1,
-                p2,
-                self.color.into(),
-                self.thickness,
-                self.flags.bits() as sys::ImDrawFlags,
-            )
-        }
+        self.draw_list
+            .with_raw_bound("Line::build()", |draw_list| unsafe {
+                let p1 = sys::ImVec2 {
+                    x: self.p1[0],
+                    y: self.p1[1],
+                };
+                let p2 = sys::ImVec2 {
+                    x: self.p2[0],
+                    y: self.p2[1],
+                };
+                sys::ImDrawList_AddLine(
+                    draw_list,
+                    p1,
+                    p2,
+                    self.color.into(),
+                    self.thickness,
+                    self.flags.bits() as sys::ImDrawFlags,
+                )
+            });
     }
 }
 
@@ -160,30 +159,29 @@ impl<'ui> Rect<'ui> {
             y: self.p2[1],
         };
 
-        if self.filled {
-            unsafe {
-                sys::ImDrawList_AddRectFilled(
-                    self.draw_list.draw_list,
-                    p1,
-                    p2,
-                    self.color.into(),
-                    self.rounding,
-                    self.flags.bits() as sys::ImDrawFlags,
-                )
-            }
-        } else {
-            unsafe {
-                sys::ImDrawList_AddRect(
-                    self.draw_list.draw_list,
-                    p1,
-                    p2,
-                    self.color.into(),
-                    self.rounding,
-                    self.thickness,
-                    self.flags.bits() as sys::ImDrawFlags,
-                )
-            }
-        }
+        self.draw_list
+            .with_raw_bound("Rect::build()", |draw_list| unsafe {
+                if self.filled {
+                    sys::ImDrawList_AddRectFilled(
+                        draw_list,
+                        p1,
+                        p2,
+                        self.color.into(),
+                        self.rounding,
+                        self.flags.bits() as sys::ImDrawFlags,
+                    )
+                } else {
+                    sys::ImDrawList_AddRect(
+                        draw_list,
+                        p1,
+                        p2,
+                        self.color.into(),
+                        self.rounding,
+                        self.thickness,
+                        self.flags.bits() as sys::ImDrawFlags,
+                    )
+                }
+            });
     }
 }
 
@@ -263,29 +261,28 @@ impl<'ui> Circle<'ui> {
         };
         let num_segments = self.num_segments.into_i32("Circle::num_segments()");
 
-        if self.filled {
-            unsafe {
-                sys::ImDrawList_AddCircleFilled(
-                    self.draw_list.draw_list,
-                    center,
-                    self.radius,
-                    self.color.into(),
-                    num_segments,
-                )
-            }
-        } else {
-            unsafe {
-                sys::ImDrawList_AddCircle(
-                    self.draw_list.draw_list,
-                    center,
-                    self.radius,
-                    self.color.into(),
-                    num_segments,
-                    self.thickness,
-                    self.flags.bits() as sys::ImDrawFlags,
-                )
-            }
-        }
+        self.draw_list
+            .with_raw_bound("Circle::build()", |draw_list| unsafe {
+                if self.filled {
+                    sys::ImDrawList_AddCircleFilled(
+                        draw_list,
+                        center,
+                        self.radius,
+                        self.color.into(),
+                        num_segments,
+                    )
+                } else {
+                    sys::ImDrawList_AddCircle(
+                        draw_list,
+                        center,
+                        self.radius,
+                        self.color.into(),
+                        num_segments,
+                        self.thickness,
+                        self.flags.bits() as sys::ImDrawFlags,
+                    )
+                }
+            });
     }
 }
 
@@ -355,24 +352,25 @@ impl<'ui> BezierCurve<'ui> {
 
     /// Draw the curve on the window.
     pub fn build(self) {
-        unsafe {
-            let pos0: sys::ImVec2 = self.pos0.into();
-            let cp0: sys::ImVec2 = self.cp0.into();
-            let cp1: sys::ImVec2 = self.cp1.into();
-            let pos1: sys::ImVec2 = self.pos1.into();
+        self.draw_list
+            .with_raw_bound("BezierCurve::build()", |draw_list| unsafe {
+                let pos0: sys::ImVec2 = self.pos0.into();
+                let cp0: sys::ImVec2 = self.cp0.into();
+                let cp1: sys::ImVec2 = self.cp1.into();
+                let pos1: sys::ImVec2 = self.pos1.into();
 
-            sys::ImDrawList_AddBezierCubic(
-                self.draw_list.draw_list,
-                pos0,
-                cp0,
-                cp1,
-                pos1,
-                self.color.into(),
-                self.thickness,
-                self.num_segments.into_i32("BezierCurve::num_segments()"),
-                self.flags.bits() as sys::ImDrawFlags,
-            )
-        }
+                sys::ImDrawList_AddBezierCubic(
+                    draw_list,
+                    pos0,
+                    cp0,
+                    cp1,
+                    pos1,
+                    self.color.into(),
+                    self.thickness,
+                    self.num_segments.into_i32("BezierCurve::num_segments()"),
+                    self.flags.bits() as sys::ImDrawFlags,
+                )
+            });
     }
 }
 
@@ -397,10 +395,7 @@ impl<'ui> Polyline<'ui> {
             points: points
                 .into_iter()
                 .enumerate()
-                .map(|(i, point)| {
-                    let name = format!("points[{i}]");
-                    finite_vec2("Polyline::new()", &name, point)
-                })
+                .map(|(index, point)| super::finite_point("Polyline::new()", index, point))
                 .collect(),
             color: c.into(),
             thickness: 1.0,
@@ -440,28 +435,27 @@ impl<'ui> Polyline<'ui> {
     /// Draw the line on the window
     pub fn build(self) {
         let count = len_i32("Polyline::build()", "points", self.points.len());
-        if self.filled {
-            unsafe {
-                sys::ImDrawList_AddConvexPolyFilled(
-                    self.draw_list.draw_list,
-                    self.points.as_ptr(),
-                    count,
-                    self.color.into(),
-                    self.flags.bits() as sys::ImDrawFlags,
-                )
-            }
-        } else {
-            unsafe {
-                sys::ImDrawList_AddPolyline(
-                    self.draw_list.draw_list,
-                    self.points.as_ptr(),
-                    count,
-                    self.color.into(),
-                    self.thickness,
-                    self.flags.bits() as sys::ImDrawFlags,
-                )
-            }
-        }
+        self.draw_list
+            .with_raw_bound("Polyline::build()", |draw_list| unsafe {
+                if self.filled {
+                    sys::ImDrawList_AddConvexPolyFilled(
+                        draw_list,
+                        self.points.as_ptr(),
+                        count,
+                        self.color.into(),
+                        self.flags.bits() as sys::ImDrawFlags,
+                    )
+                } else {
+                    sys::ImDrawList_AddPolyline(
+                        draw_list,
+                        self.points.as_ptr(),
+                        count,
+                        self.color.into(),
+                        self.thickness,
+                        self.flags.bits() as sys::ImDrawFlags,
+                    )
+                }
+            });
     }
 }
 
@@ -538,28 +532,21 @@ impl<'ui> Triangle<'ui> {
             y: self.p3[1],
         };
 
-        if self.filled {
-            unsafe {
-                sys::ImDrawList_AddTriangleFilled(
-                    self.draw_list.draw_list,
-                    p1,
-                    p2,
-                    p3,
-                    self.color.into(),
-                )
-            }
-        } else {
-            unsafe {
-                sys::ImDrawList_AddTriangle(
-                    self.draw_list.draw_list,
-                    p1,
-                    p2,
-                    p3,
-                    self.color.into(),
-                    self.thickness,
-                    self.flags.bits() as sys::ImDrawFlags,
-                )
-            }
-        }
+        self.draw_list
+            .with_raw_bound("Triangle::build()", |draw_list| unsafe {
+                if self.filled {
+                    sys::ImDrawList_AddTriangleFilled(draw_list, p1, p2, p3, self.color.into())
+                } else {
+                    sys::ImDrawList_AddTriangle(
+                        draw_list,
+                        p1,
+                        p2,
+                        p3,
+                        self.color.into(),
+                        self.thickness,
+                        self.flags.bits() as sys::ImDrawFlags,
+                    )
+                }
+            });
     }
 }

@@ -1,7 +1,10 @@
+use std::ffi::{CString, c_char};
 use std::path::PathBuf;
 use std::ptr;
 
-use crate::ini_settings::{IniSettingsRetention, IniSettingsRetentionError};
+use crate::error::context::ContextError;
+use crate::ffi::RawCString;
+use crate::ini_settings::IniSettingsRetention;
 use crate::sys;
 
 use super::Context;
@@ -14,9 +17,7 @@ impl Context {
     #[doc(alias = "Platform_SessionDate")]
     #[doc(alias = "ConfigIniSettingsSaveLastUsedDate")]
     #[doc(alias = "ConfigIniSettingsAutoDiscardMonths")]
-    pub fn ini_settings_retention(
-        &self,
-    ) -> Result<IniSettingsRetention, IniSettingsRetentionError> {
+    pub fn ini_settings_retention(&self) -> Result<IniSettingsRetention, ContextError> {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             let platform_io = self.platform_io_ptr("Context::ini_settings_retention()");
@@ -57,16 +58,16 @@ impl Context {
     pub fn set_ini_settings_retention(
         &mut self,
         retention: IniSettingsRetention,
-    ) -> Result<(), IniSettingsRetentionError> {
+    ) -> Result<(), ContextError> {
         retention.validate()?;
         let (session_date, save_last_used_date, auto_discard_months) = retention.raw_parts();
 
         let _guard = CTX_MUTEX.lock();
         if unsafe { (*self.raw).FrameCount } != 0 {
-            return Err(IniSettingsRetentionError::LockedAfterFirstFrame);
+            return Err(ContextError::LockedAfterFirstFrame);
         }
         if unsafe { (*self.raw).SettingsLoaded } {
-            return Err(IniSettingsRetentionError::LockedAfterSettingsLoad);
+            return Err(ContextError::LockedAfterSettingsLoad);
         }
 
         unsafe {
@@ -92,28 +93,15 @@ impl Context {
     pub fn set_ini_filename<P: Into<PathBuf>>(
         &mut self,
         filename: Option<P>,
-    ) -> crate::error::ImGuiResult<()> {
-        use crate::error::SafeStringConversion;
+    ) -> Result<(), ContextError> {
         let _guard = CTX_MUTEX.lock();
 
-        self.ini_filename = match filename {
-            Some(f) => Some(f.into().to_string_lossy().to_cstring_safe()?),
-            None => None,
-        };
+        let filename = filename.map(path_cstring).transpose()?.map(RawCString::new);
 
-        unsafe {
-            let io = self.io_ptr("Context::set_ini_filename()");
-            let ptr = self
-                .ini_filename
-                .as_ref()
-                .map(|s| s.as_ptr())
-                .unwrap_or(ptr::null());
-            (*io).IniFilename = ptr;
-        }
+        let io = self.io_ptr("Context::set_ini_filename()");
+        unsafe { replace_io_string(&mut self.ini_filename, &raw mut (*io).IniFilename, filename) };
         Ok(())
     }
-
-    // removed legacy set_ini_filename_or_panic (use set_ini_filename())
 
     /// Sets the log filename
     ///
@@ -123,28 +111,15 @@ impl Context {
     pub fn set_log_filename<P: Into<PathBuf>>(
         &mut self,
         filename: Option<P>,
-    ) -> crate::error::ImGuiResult<()> {
-        use crate::error::SafeStringConversion;
+    ) -> Result<(), ContextError> {
         let _guard = CTX_MUTEX.lock();
 
-        self.log_filename = match filename {
-            Some(f) => Some(f.into().to_string_lossy().to_cstring_safe()?),
-            None => None,
-        };
+        let filename = filename.map(path_cstring).transpose()?.map(RawCString::new);
 
-        unsafe {
-            let io = self.io_ptr("Context::set_log_filename()");
-            let ptr = self
-                .log_filename
-                .as_ref()
-                .map(|s| s.as_ptr())
-                .unwrap_or(ptr::null());
-            (*io).LogFilename = ptr;
-        }
+        let io = self.io_ptr("Context::set_log_filename()");
+        unsafe { replace_io_string(&mut self.log_filename, &raw mut (*io).LogFilename, filename) };
         Ok(())
     }
-
-    // removed legacy set_log_filename_or_panic (use set_log_filename())
 
     /// Sets the platform name
     ///
@@ -154,28 +129,24 @@ impl Context {
     pub fn set_platform_name<S: Into<String>>(
         &mut self,
         name: Option<S>,
-    ) -> crate::error::ImGuiResult<()> {
-        use crate::error::SafeStringConversion;
+    ) -> Result<(), ContextError> {
         let _guard = CTX_MUTEX.lock();
 
-        self.platform_name = match name {
-            Some(n) => Some(n.into().to_cstring_safe()?),
-            None => None,
-        };
+        let name = name
+            .map(|name| CString::new(Into::<String>::into(name)))
+            .transpose()?
+            .map(RawCString::new);
 
+        let io = self.io_ptr("Context::set_platform_name()");
         unsafe {
-            let io = self.io_ptr("Context::set_platform_name()");
-            let ptr = self
-                .platform_name
-                .as_ref()
-                .map(|s| s.as_ptr())
-                .unwrap_or(ptr::null());
-            (*io).BackendPlatformName = ptr;
-        }
+            replace_io_string(
+                &mut self.platform_name,
+                &raw mut (*io).BackendPlatformName,
+                name,
+            )
+        };
         Ok(())
     }
-
-    // removed legacy set_platform_name_or_panic (use set_platform_name())
 
     /// Sets the renderer name
     ///
@@ -185,36 +156,38 @@ impl Context {
     pub fn set_renderer_name<S: Into<String>>(
         &mut self,
         name: Option<S>,
-    ) -> crate::error::ImGuiResult<()> {
-        use crate::error::SafeStringConversion;
+    ) -> Result<(), ContextError> {
         let _guard = CTX_MUTEX.lock();
 
-        self.renderer_name = match name {
-            Some(n) => Some(n.into().to_cstring_safe()?),
-            None => None,
-        };
+        let name = name
+            .map(|name| CString::new(Into::<String>::into(name)))
+            .transpose()?
+            .map(RawCString::new);
 
+        let io = self.io_ptr("Context::set_renderer_name()");
         unsafe {
-            let io = self.io_ptr("Context::set_renderer_name()");
-            let ptr = self
-                .renderer_name
-                .as_ref()
-                .map(|s| s.as_ptr())
-                .unwrap_or(ptr::null());
-            (*io).BackendRendererName = ptr;
-        }
+            replace_io_string(
+                &mut self.renderer_name,
+                &raw mut (*io).BackendRendererName,
+                name,
+            )
+        };
         Ok(())
     }
-
-    // removed legacy set_renderer_name_or_panic (use set_renderer_name())
 
     /// Loads settings from a string slice containing settings in .Ini file format
     #[doc(alias = "LoadIniSettingsFromMemory")]
     pub fn load_ini_settings(&mut self, data: &str) {
         let _guard = CTX_MUTEX.lock();
+        // Dear ImGui treats a zero length as a request to measure a C string.
+        let ptr = if data.is_empty() {
+            c"".as_ptr()
+        } else {
+            data.as_ptr().cast()
+        };
         unsafe {
             with_bound_context(self.raw, || {
-                sys::igLoadIniSettingsFromMemory(data.as_ptr() as *const _, data.len());
+                sys::igLoadIniSettingsFromMemory(ptr, data.len());
             });
         }
     }
@@ -250,10 +223,9 @@ impl Context {
     pub fn load_ini_settings_from_disk<P: Into<PathBuf>>(
         &mut self,
         filename: P,
-    ) -> crate::error::ImGuiResult<()> {
-        use crate::error::SafeStringConversion;
+    ) -> Result<(), ContextError> {
         let _guard = CTX_MUTEX.lock();
-        let cstr = filename.into().to_string_lossy().to_cstring_safe()?;
+        let cstr = path_cstring(filename)?;
         unsafe {
             with_bound_context(self.raw, || {
                 sys::igLoadIniSettingsFromDisk(cstr.as_ptr());
@@ -272,10 +244,9 @@ impl Context {
     pub fn save_ini_settings_to_disk<P: Into<PathBuf>>(
         &mut self,
         filename: P,
-    ) -> crate::error::ImGuiResult<()> {
-        use crate::error::SafeStringConversion;
+    ) -> Result<(), ContextError> {
         let _guard = CTX_MUTEX.lock();
-        let cstr = filename.into().to_string_lossy().to_cstring_safe()?;
+        let cstr = path_cstring(filename)?;
         unsafe {
             with_bound_context(self.raw, || {
                 sys::igSaveIniSettingsToDisk(cstr.as_ptr());
@@ -283,6 +254,22 @@ impl Context {
         }
         Ok(())
     }
+}
+
+fn path_cstring(path: impl Into<PathBuf>) -> Result<CString, ContextError> {
+    Ok(CString::new(path.into().to_string_lossy().as_bytes())?)
+}
+
+// The caller must hold the Context lock. `field` must point to the writable native slot
+// backed by `storage` in the same Context.
+unsafe fn replace_io_string(
+    storage: &mut Option<RawCString>,
+    field: *mut *const c_char,
+    value: Option<RawCString>,
+) {
+    // Publish the replacement before releasing the old string.
+    unsafe { field.write(value.as_ref().map_or(ptr::null(), RawCString::as_ptr)) };
+    *storage = value;
 }
 
 #[cfg(test)]
@@ -314,8 +301,8 @@ mod retention_tests {
         assert_eq!(earliest.max_auto_discard_months(), 0);
         assert_eq!(latest.max_auto_discard_months(), 1_523);
         assert_eq!(
-            IniSessionDate::try_from(20_240_229),
-            Ok(IniSessionDate::new(2024, 2, 29).unwrap())
+            IniSessionDate::try_from(20_240_229).unwrap(),
+            IniSessionDate::new(2024, 2, 29).unwrap()
         );
 
         for invalid in [
@@ -363,7 +350,7 @@ mod retention_tests {
             .expect_err("discard must not underflow the packed year");
         assert!(matches!(
             too_old,
-            IniSettingsRetentionError::RetentionUnderflowsSessionDate {
+            ContextError::RetentionUnderflowsSessionDate {
                 months,
                 max_months: 0,
                 session_date,
@@ -443,7 +430,7 @@ mod retention_tests {
                 session_date: date,
                 months: two_months,
             }),
-            Err(IniSettingsRetentionError::RetentionUnderflowsSessionDate { max_months: 1, .. })
+            Err(ContextError::RetentionUnderflowsSessionDate { max_months: 1, .. })
         ));
         assert_eq!(raw_retention(&context), (20_010_228, true, 1));
     }
@@ -466,7 +453,7 @@ mod retention_tests {
         assert!(matches!(
             context
                 .set_ini_settings_retention(IniSettingsRetention::Disabled { session_date: None }),
-            Err(IniSettingsRetentionError::LockedAfterFirstFrame)
+            Err(ContextError::LockedAfterFirstFrame)
         ));
         assert_eq!(raw_retention(&context), before);
     }
@@ -481,9 +468,22 @@ mod retention_tests {
         assert!(matches!(
             context
                 .set_ini_settings_retention(IniSettingsRetention::Disabled { session_date: None }),
-            Err(IniSettingsRetentionError::LockedAfterSettingsLoad)
+            Err(ContextError::LockedAfterSettingsLoad)
         ));
         assert_eq!(raw_retention(&context), before);
+    }
+
+    #[test]
+    fn empty_ini_settings_still_mark_settings_loaded() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let text = String::from("abc");
+        for data in ["", &text[..0]] {
+            let mut context = Context::create();
+            assert!(!unsafe { (*context.raw).SettingsLoaded });
+            context.load_ini_settings(data);
+            assert!(unsafe { (*context.raw).SettingsLoaded });
+            assert_eq!(unsafe { (*context.raw).SettingsIniData.Buf.Size }, 1);
+        }
     }
 
     #[test]
@@ -502,7 +502,10 @@ mod retention_tests {
         }
         assert!(matches!(
             context.ini_settings_retention(),
-            Err(IniSettingsRetentionError::InvalidNativeSessionDate { raw: 21_280_101 })
+            Err(ContextError::InvalidNativeSessionDate {
+                raw: 21_280_101,
+                ..
+            })
         ));
 
         unsafe {
@@ -511,7 +514,7 @@ mod retention_tests {
         }
         assert!(matches!(
             context.ini_settings_retention(),
-            Err(IniSettingsRetentionError::InvalidNativeAutoDiscardMonths { raw: -1 })
+            Err(ContextError::InvalidNativeAutoDiscardMonths { raw: -1, .. })
         ));
 
         unsafe {
@@ -520,7 +523,7 @@ mod retention_tests {
         }
         assert!(matches!(
             context.ini_settings_retention(),
-            Err(IniSettingsRetentionError::InvalidNativeState { .. })
+            Err(ContextError::InvalidNativeState { .. })
         ));
 
         unsafe {
@@ -529,7 +532,7 @@ mod retention_tests {
         }
         assert!(matches!(
             context.ini_settings_retention(),
-            Err(IniSettingsRetentionError::InvalidNativeState { .. })
+            Err(ContextError::InvalidNativeState { .. })
         ));
     }
 

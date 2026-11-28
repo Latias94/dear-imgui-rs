@@ -1,25 +1,50 @@
 use super::*;
 
 fn empty_draw_data(total_idx_count: i32, total_vtx_count: i32) -> DrawData {
-    let mut raw = sys::ImDrawData::default();
-    raw.TotalIdxCount = total_idx_count;
-    raw.TotalVtxCount = total_vtx_count;
-    raw.FramebufferScale = sys::ImVec2 { x: 1.0, y: 1.0 };
-    DrawData(raw)
+    DrawData(sys::ImDrawData {
+        TotalIdxCount: total_idx_count,
+        TotalVtxCount: total_vtx_count,
+        FramebufferScale: sys::ImVec2 { x: 1.0, y: 1.0 },
+        ..Default::default()
+    })
 }
 
 #[test]
 fn draw_list_count_comes_from_the_vector_not_the_frame_counter() {
-    let mut lists = [std::ptr::null_mut(), std::ptr::null_mut()];
-    let mut raw = sys::ImDrawData::default();
-    raw.FrameCount = 97;
-    raw.CmdLists.Size = 2;
-    raw.CmdLists.Capacity = 2;
-    raw.CmdLists.Data = lists.as_mut_ptr();
-    let draw_data = DrawData(raw);
+    let mut first = sys::ImDrawList::default();
+    let mut second = sys::ImDrawList::default();
+    let mut lists = [&raw mut first, &raw mut second];
+    let draw_data = DrawData(sys::ImDrawData {
+        FrameCount: 97,
+        CmdLists: sys::ImVector_ImDrawListPtr {
+            Size: 2,
+            Capacity: 2,
+            Data: lists.as_mut_ptr(),
+        },
+        ..Default::default()
+    });
 
     assert_eq!(draw_data.frame_count(), 97);
     assert_eq!(draw_data.draw_lists_count(), 2);
+    let mut iter = draw_data.draw_lists();
+    assert_eq!(iter.size_hint(), (2, Some(2)));
+    assert_eq!(iter.len(), 2);
+    assert!(iter.next().is_some());
+    assert_eq!(iter.len(), 1);
+    assert!(iter.next().is_some());
+    assert_eq!(iter.size_hint(), (0, Some(0)));
+    assert!(iter.next().is_none());
+}
+
+#[test]
+#[should_panic(expected = "native draw list pointer must not be null")]
+fn draw_list_iterator_does_not_treat_a_null_pointer_as_the_end() {
+    let mut lists = [std::ptr::null_mut()];
+    let mut raw = sys::ImDrawData::default();
+    raw.CmdLists.Size = 1;
+    raw.CmdLists.Capacity = 1;
+    raw.CmdLists.Data = lists.as_mut_ptr();
+    let _ = DrawData(raw).draw_lists().next();
 }
 
 #[test]
@@ -47,10 +72,11 @@ fn draw_data_counts_are_checked_usize_counts() {
 fn draw_data_textures_empty_is_safe() {
     let mut textures_vec = sys::ImVector_ImTextureDataPtr::default();
 
-    let mut raw = sys::ImDrawData::default();
-    raw.FramebufferScale = sys::ImVec2 { x: 1.0, y: 1.0 };
-    raw.Textures = &mut textures_vec;
-    let draw_data = DrawData(raw);
+    let draw_data = DrawData(sys::ImDrawData {
+        FramebufferScale: sys::ImVec2 { x: 1.0, y: 1.0 },
+        Textures: &mut textures_vec,
+        ..Default::default()
+    });
 
     assert_eq!(draw_data.textures().count(), 0);
 
@@ -59,10 +85,11 @@ fn draw_data_textures_empty_is_safe() {
         Data: std::ptr::null_mut(),
         ..sys::ImVector_ImTextureDataPtr::default()
     };
-    let mut raw = sys::ImDrawData::default();
-    raw.FramebufferScale = sys::ImVec2 { x: 1.0, y: 1.0 };
-    raw.Textures = &mut textures_vec;
-    let draw_data = DrawData(raw);
+    let draw_data = DrawData(sys::ImDrawData {
+        FramebufferScale: sys::ImVec2 { x: 1.0, y: 1.0 },
+        Textures: &mut textures_vec,
+        ..Default::default()
+    });
     assert_eq!(draw_data.textures().count(), 0);
 }
 
@@ -120,7 +147,7 @@ fn rendered_draw_commands_keep_their_owner_callbacks_after_backend_teardown() {
             .set_draw_callback_set_sampler_linear_raw(Some(nearest))
     };
     let other_binding = other.binding();
-    let _other = other.suspend_or_panic();
+    let _other = other;
 
     let mut ctx = crate::Context::create();
     ctx.prepare_frame(

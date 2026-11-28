@@ -16,7 +16,6 @@ readme = "README.md"
 dear-imgui-rs.workspace = true
 dear-imgui-sys.workspace = true
 dear-imguizmo-quat-sys.workspace = true
-thiserror.workspace = true
 bitflags = { workspace = true }
 glam = { workspace = true, optional = true }
 mint = { workspace = true, optional = true }
@@ -26,6 +25,6 @@ default = ["glam"]
 prebuilt = ["dear-imgui-rs/prebuilt", "dear-imguizmo-quat-sys/prebuilt"]
 build-from-source = ["dear-imgui-rs/build-from-source", "dear-imguizmo-quat-sys/build-from-source"]
 freetype = ["dear-imgui-rs/freetype", "dear-imguizmo-quat-sys/freetype"]
-glam = ["dep:glam"]
+glam = ["dep:glam", "dear-imgui-rs/glam"]
 mint = ["dep:mint"]
 wasm = ["dear-imgui-rs/wasm", "dear-imguizmo-quat-sys/wasm"]

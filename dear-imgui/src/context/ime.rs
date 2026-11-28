@@ -1,4 +1,4 @@
-use super::binding::CTX_MUTEX;
+use crate::error::context::ContextError;
 use crate::{Context, Id, sys};
 
 /// Transient IME text owned by the active text widget, separate from its buffer.
@@ -19,14 +19,6 @@ impl ImePreedit {
     pub fn cursor_range(&self) -> Option<(usize, usize)> {
         self.cursor_range
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum ImePreeditError {
-    #[error("IME cursor offsets must be UTF-8 boundaries within the preedit text")]
-    InvalidCursorRange,
-    #[error("IME preedit text must not contain NUL")]
-    InteriorNul,
 }
 
 #[derive(Debug, Default)]
@@ -144,14 +136,14 @@ impl crate::Ui {
             let owner = unsafe { sys::igGetID_Str(label) };
             let (font, size, density) = unsafe {
                 let font = (*self.ctx).Font;
-                (font, (*self.ctx).FontSize, (*font).CurrentRasterizerDensity)
+                let density = font.as_ref().map(|font| font.CurrentRasterizerDensity);
+                (font, (*self.ctx).FontSize, density)
             };
-            // InputTextEx renders the label and hint after user callbacks have returned. Keep
-            // their allocation here so a callback using Ui scratch strings gets a separate buffer.
-            let result = self.with_scratch_buffer(|_| f());
+            let result = f();
             unsafe {
                 let raw = &*self.ctx;
-                if raw.ActiveId == owner
+                if let Some(density) = density
+                    && raw.ActiveId == owner
                     && raw.InputTextState.ID == owner
                     && raw.LastItemData.ID == owner
                 {
@@ -188,16 +180,14 @@ impl Context {
         &mut self,
         text: &str,
         cursor_range: Option<(usize, usize)>,
-    ) -> Result<(), ImePreeditError> {
-        let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::set_ime_preedit()");
+    ) -> Result<(), ContextError> {
         if let Some((start, end)) = cursor_range
             && (!text.is_char_boundary(start) || !text.is_char_boundary(end))
         {
-            return Err(ImePreeditError::InvalidCursorRange);
+            return Err(ContextError::InvalidImeCursorRange);
         }
         if text.contains('\0') {
-            return Err(ImePreeditError::InteriorNul);
+            return Err(ContextError::ImePreeditContainsNul);
         }
         let raw = unsafe { &*self.as_raw() };
         let owner = ImeOwner::current(raw);
@@ -270,8 +260,6 @@ impl Context {
     /// rejects the commit. Without preedit, native/custom editors requesting text
     /// input can still receive direct commits through the regular IO queue.
     pub fn commit_ime_text(&mut self, text: &str) -> bool {
-        let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::commit_ime_text()");
         let raw = unsafe { &*self.as_raw() };
         {
             let mut ime = self.state.ime.borrow_mut();
@@ -308,8 +296,6 @@ impl Context {
 
     /// Viewport currently requesting text input, for native-window event routing.
     pub fn text_input_viewport(&self) -> Option<Id> {
-        let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::text_input_viewport()");
         let raw = unsafe { &*self.as_raw() };
         (raw.PlatformImeData.WantVisible || raw.PlatformImeData.WantTextInput)
             .then(|| Id::from(raw.PlatformImeData.ViewportId))

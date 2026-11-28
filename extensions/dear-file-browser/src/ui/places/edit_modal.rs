@@ -171,11 +171,15 @@ pub(in crate::ui) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState
 
             if ok {
                 state.ui.operations.places.edit.error = None;
-                let path_s = state.ui.operations.places.edit.place_path.trim();
-                if path_s.is_empty() {
+                let edit = &state.ui.operations.places.edit;
+                let path_s = edit.place_path.trim();
+                let original = edit.place_path_original.as_ref().filter(|path| {
+                    crate::fs::display_path(path).as_ref() == edit.place_path.as_str()
+                });
+                if path_s.is_empty() && original.is_none() {
                     state.ui.operations.places.edit.error = Some("Path is empty".into());
                 } else {
-                    let raw = PathBuf::from(path_s);
+                    let raw = original.cloned().unwrap_or_else(|| PathBuf::from(path_s));
                     let (p, is_dir) = {
                         let fs = state.filesystem.as_file_system();
                         let p = fs.canonicalize(&raw).unwrap_or(raw);
@@ -200,7 +204,7 @@ pub(in crate::ui) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState
                                 .and_then(|s| s.to_str())
                                 .filter(|s| !s.is_empty())
                                 .map(|s| s.to_string())
-                                .unwrap_or_else(|| p.display().to_string());
+                                .unwrap_or_else(|| crate::fs::display_path(&p).into_owned());
                         }
 
                         let group_places = state
@@ -214,10 +218,10 @@ pub(in crate::ui) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState
 
                         let from_path = state.ui.operations.places.edit.place_from_path.clone();
                         let is_duplicate = group_places.iter().any(|x| {
-                            if let Some(from) = &from_path {
-                                if x.path == *from {
-                                    return false;
-                                }
+                            if let Some(from) = &from_path
+                                && x.path == *from
+                            {
+                                return false;
                             }
                             x.path == p
                         });

@@ -64,9 +64,12 @@ impl AppWindow {
     }
 
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
+        let descriptor = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
+            event_loop.owned_display_handle(),
+        ));
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
+            ..descriptor
         });
 
         let window = {
@@ -225,7 +228,7 @@ impl AppWindow {
         self.imgui.total_frame_time += delta_secs;
 
         // Log frame statistics every 60 frames
-        if self.imgui.frame_count % 60 == 0 {
+        if self.imgui.frame_count.is_multiple_of(60) {
             let avg_frame_time = self.imgui.total_frame_time / 60.0;
             debug!(
                 frame_time_ms = avg_frame_time * 1000.0,
@@ -364,7 +367,7 @@ impl AppWindow {
             ui.show_demo_window(&mut self.imgui.demo_open);
         }
 
-        self.imgui.platform.prepare_render(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(ui, &self.window)?;
 
         let view = frame
             .texture

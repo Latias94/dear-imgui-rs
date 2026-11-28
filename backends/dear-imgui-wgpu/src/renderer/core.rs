@@ -1,12 +1,14 @@
 use crate::{RendererError, RendererResult};
 use dear_imgui_rs::{
-    BackendFlags, Context, ContextBinding,
+    BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
+    ContextBinding, ContextError, ContextTeardown,
     render::{PendingFrame, ReconciledFrame, SynchronousRendererConsumer},
     sys,
 };
 use std::{
     cell::Cell,
     ffi::{c_char, c_void},
+    rc::Rc,
 };
 
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -18,21 +20,18 @@ struct RendererBackendToken {
     _marker: u8,
 }
 
-/// Pointer-identity publication data shared with the Context-owned deferred-drop attachment.
-///
-/// The boxed token remains owned by [`RendererContextState`], while this copy is sufficient to
-/// clear only exact raw publications during Context teardown. It never dereferences `token_ptr`.
-#[derive(Clone, Debug)]
-pub(super) struct RendererPublication {
+/// The Context retains this publication so it can clear its own native slots during shutdown.
+#[derive(Debug)]
+struct RendererPublication {
     context: ContextBinding,
-    token_ptr: *mut c_void,
+    token: RendererBackendToken,
     renderer_name_ptr: *const c_char,
     renderer_flags_added: BackendFlags,
 }
 
 impl RendererPublication {
-    pub(super) fn context(&self) -> ContextBinding {
-        self.context.clone()
+    fn token_ptr(&self) -> *mut c_void {
+        std::ptr::from_ref(&self.token).cast_mut().cast()
     }
 
     /// Clears only raw fields that still carry this renderer's exact identity.
@@ -47,7 +46,7 @@ impl RendererPublication {
         let io = unsafe { &mut *io };
         let owned_name =
             !self.renderer_name_ptr.is_null() && io.BackendRendererName == self.renderer_name_ptr;
-        let owned_token = io.BackendRendererUserData == self.token_ptr;
+        let owned_token = io.BackendRendererUserData == self.token_ptr();
 
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         let owns_draw_callback = if platform_io.is_null() {
@@ -93,7 +92,7 @@ impl RendererPublication {
         // SAFETY: the caller has bound this state owner's live Context.
         let io = unsafe { &*io };
         if (!self.renderer_name_ptr.is_null() && io.BackendRendererName == self.renderer_name_ptr)
-            || io.BackendRendererUserData == self.token_ptr
+            || io.BackendRendererUserData == self.token_ptr()
         {
             return true;
         }
@@ -107,15 +106,21 @@ impl RendererPublication {
     }
 }
 
+impl ContextAttachment for RendererPublication {
+    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
+        context.with_bound_context(|| unsafe { self.clear_owned_raw_state_bound() });
+        Ok(())
+    }
+}
+
 /// Exclusive ownership of renderer fields published into one Dear ImGui Context.
 ///
-/// This value is intentionally not cloneable. Its boxed token and Context-owned renderer name
-/// retain stable addresses when `WgpuRenderer` moves, while one owner remains responsible for
-/// clearing the raw pointers before the token is released.
+/// The shared publication gives the token a stable address and allows the Context to clear its
+/// native fields if Context teardown starts while the renderer is alive.
 #[derive(Debug)]
 pub(super) struct RendererContextState {
-    publication: RendererPublication,
-    token: Box<RendererBackendToken>,
+    publication: Rc<RendererPublication>,
+    _attachment: ContextAttachmentLease,
     fault: Cell<Option<&'static str>>,
 }
 
@@ -137,26 +142,27 @@ impl RendererContextState {
             return Err(RendererError::ContextAlreadyHasRenderer);
         }
 
-        let token = Box::new(RendererBackendToken { _marker: 0 });
-        let publication = RendererPublication {
+        let publication = Rc::new(RendererPublication {
             context: context.binding(),
-            token_ptr: std::ptr::from_ref(token.as_ref()).cast_mut().cast(),
+            token: RendererBackendToken { _marker: 0 },
             renderer_name_ptr,
             renderer_flags_added,
-        };
-        let state = Self {
-            publication,
-            token,
-            fault: Cell::new(None),
-        };
-        // SAFETY: the boxed token has a stable address and remains alive until this state clears
-        // the raw pointer or until the native Context has already been destroyed.
+        });
+        let attachment = context.register_attachment::<RendererPublication>(
+            ContextAttachmentRole::Extension,
+            Rc::clone(&publication) as Rc<dyn ContextAttachment>,
+        )?;
+        // SAFETY: the token remains alive through raw publication and through Context teardown.
         unsafe {
             context
                 .io_mut()
-                .set_backend_renderer_user_data(state.publication.token_ptr);
+                .set_backend_renderer_user_data(publication.token_ptr());
         }
-        Ok(state)
+        Ok(Self {
+            publication,
+            _attachment: attachment,
+            fault: Cell::new(None),
+        })
     }
 
     fn ensure_alive(&self) -> RendererResult<()> {
@@ -206,17 +212,13 @@ impl RendererContextState {
     }
 
     pub(super) fn context(&self) -> ContextBinding {
-        self.publication.context()
-    }
-
-    pub(super) fn publication(&self) -> RendererPublication {
-        debug_assert_eq!(self.publication.token_ptr, self.token_ptr());
-        self.publication.clone()
+        self.publication.context.clone()
     }
 
     pub(super) fn clear_with_context(&self, context: &mut Context) {
-        // SAFETY: callers have already verified the matching live Context.
-        let owned_name = unsafe { self.publication.clear_owned_raw_state_bound() };
+        let owned_name = context
+            .binding()
+            .with_bound_context(|| unsafe { self.publication.clear_owned_raw_state_bound() });
         if owned_name {
             context
                 .set_renderer_name::<String>(None)
@@ -245,7 +247,7 @@ impl RendererContextState {
         }
         // SAFETY: the caller has bound the renderer's Context for the whole check.
         let io = unsafe { &*io };
-        if io.BackendRendererUserData != self.publication.token_ptr {
+        if io.BackendRendererUserData != self.publication.token_ptr() {
             return Some("BackendRendererUserData");
         }
         if io.BackendRendererName != self.publication.renderer_name_ptr {
@@ -289,15 +291,12 @@ impl RendererContextState {
         }
         None
     }
-
-    fn token_ptr(&self) -> *mut c_void {
-        std::ptr::from_ref(self.token.as_ref()).cast_mut().cast()
-    }
 }
 
 impl Drop for RendererContextState {
     fn drop(&mut self) {
-        // Drop runs before `token`, so a live Context cannot retain a pointer to freed storage.
+        // An alive Context can clear the pointer now. A dropping Context retains the publication
+        // through its quiesce phase.
         let _ = self.publication.context.try_with_bound_context(|| unsafe {
             self.clear_owned_raw_state_bound();
         });
@@ -309,12 +308,10 @@ impl Drop for RendererContextState {
 /// This corresponds to the main renderer functionality in imgui_impl_wgpu.cpp
 ///
 /// An initialized renderer owns the renderer state of exactly one [`Context`]. Create a separate
-/// renderer for every Dear ImGui context. Call [`Self::shutdown`](WgpuRenderer::shutdown) with
-/// the matching context when GPU resources must be released before Context teardown or before
-/// that live Context can accept a replacement renderer. Dropping a bound renderer without that
-/// call is safe but defers its renderer resources and consumer to Context teardown, so it does
-/// not make the Context available for reuse. The retained context binding makes this renderer
-/// UI-thread-bound.
+/// renderer for every Dear ImGui context. Dropping a renderer releases its WGPU handles and
+/// lets the Context reset its managed textures before attaching a replacement. Call
+/// [`Self::shutdown`](WgpuRenderer::shutdown) to perform the reset immediately and receive errors.
+/// The renderer stays on the UI thread.
 pub struct WgpuRenderer {
     /// Dear ImGui context whose renderer state this instance owns.
     pub(super) context_state: Option<RendererContextState>,
@@ -324,8 +321,8 @@ pub struct WgpuRenderer {
     pub(super) viewport_clear_color: Color,
     /// Sole managed-texture consumer generation owned by this renderer.
     pub(super) renderer_consumer: Option<SynchronousRendererConsumer>,
-    /// Context-owned fallback for a renderer wrapper dropped without explicit shutdown.
-    pub(super) drop_deferral: Option<super::lifecycle::RendererDropDeferral>,
+    #[cfg(any(feature = "mv-log", feature = "tracing"))]
+    pub(super) last_framebuffer_mismatch: Cell<Option<super::render::FramebufferMismatch>>,
 }
 
 impl WgpuRenderer {
@@ -339,17 +336,10 @@ impl WgpuRenderer {
                 "renderer is already bound to a Dear ImGui context".to_owned(),
             ));
         }
-        let drop_deferral = super::lifecycle::RendererDropDeferral::register(context)?;
-        let state = match RendererContextState::publish(context, renderer_flags_added) {
-            Ok(state) => state,
-            Err(error) => {
-                drop(drop_deferral);
-                return Err(error);
-            }
-        };
-        drop_deferral.set_publication(state.publication());
-        self.context_state = Some(state);
-        self.drop_deferral = Some(drop_deferral);
+        self.context_state = Some(RendererContextState::publish(
+            context,
+            renderer_flags_added,
+        )?);
         Ok(())
     }
 
@@ -394,7 +384,6 @@ impl WgpuRenderer {
 
     pub(super) fn clear_context_state(&mut self) {
         self.context_state = None;
-        self.drop_deferral = None;
     }
 
     /// Returns the synchronous consumer capability owned by this renderer.

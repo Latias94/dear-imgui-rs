@@ -9,12 +9,10 @@
 //! This teaching entry point contains only the normal interactive lifecycle. Private Vulkan
 //! validation probes use a separate feature-gated adapter over the same backend runtime.
 
-#[path = "../support/ash_multi_viewport.rs"]
-mod ash_multi_viewport;
-
-use ash_multi_viewport::{AshFrameUi, AshViewportScenario, ExampleResult, VulkanAdapterInfo};
-use dear_imgui_rs::Condition;
-use dear_imgui_rs::Context;
+use dear_imgui_examples::ash_multi_viewport::{
+    self, AshFrameUi, AshViewportScenario, ExampleResult, VulkanAdapterInfo,
+};
+use dear_imgui_rs::{Condition, Context};
 
 struct InteractiveScenario;
 

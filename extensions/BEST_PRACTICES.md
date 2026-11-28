@@ -166,7 +166,7 @@ Naming convention for static libs:
 - Cargo `links`: `dear_<ext>`; native static library name follows the same
 - Env vars: `<EXT>_SYS_BUILD_MODE`, `<EXT>_SYS_LIB_DIR`, `<EXT>_SYS_PREBUILT_URL`, `<EXT>_SYS_PACKAGE_DIR`, `<EXT>_SYS_SKIP_CC`, optional `<EXT>_SYS_USE_PREBUILT`, `<EXT>_SYS_FORCE_BUILD`
 - Features: `prebuilt`, `build-from-source` (opt-in toggles) and passthroughs like `freetype` to `dear-imgui-sys`
-- Optional: `package-bin` gates the internal `bin/package` helper for producing release archives consistent with `tools/build-support`; it is a maintainer tool, not an application dependency feature.
+- Maintainers produce native release archives with `cargo run -p xtask -- package <sys-crate>`.
 
 ## High-Level API Design
 

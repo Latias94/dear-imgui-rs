@@ -86,7 +86,15 @@ pub enum InitError {
 
     /// The Context could not register this renderer's sole consumer capability.
     #[error(transparent)]
-    RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
+    Frame(#[from] dear_imgui_rs::FrameError),
+
+    /// The Context could not register the renderer publication's teardown hook.
+    #[error(transparent)]
+    RendererAttachment(#[from] dear_imgui_rs::ContextError),
+
+    /// The native context owner could not make the renderer's OpenGL context current.
+    #[error("failed to make the renderer's OpenGL context current: {0}")]
+    ActivateGlContext(String),
 
     /// A renderer-owned Context state slot was already occupied.
     #[error("Glow renderer state slot `{field}` is already occupied")]
@@ -183,6 +191,14 @@ pub enum RenderError {
     )]
     MissingGlContext,
 
+    /// The supplied table differs from the one bound to this renderer's context owner.
+    #[error("the supplied Glow function table does not match the renderer's owned context")]
+    GlContextMismatch,
+
+    /// The native context owner could not make the renderer's OpenGL context current.
+    #[error("failed to make the renderer's OpenGL context current: {0}")]
+    ActivateGlContext(String),
+
     /// Renderer device object initialization failed.
     #[error("Device object initialization failed: {0}")]
     DeviceObjectInit(#[source] InitError),
@@ -215,13 +231,9 @@ pub enum RenderError {
     #[error("Glow requires a reconciled managed-texture frame")]
     ManagedFrameRequired,
 
-    /// Finalizing the Dear ImGui frame failed before Glow could reconcile it.
-    #[error("failed to finalize the Dear ImGui frame: {0}")]
-    FrameCapture(#[from] dear_imgui_rs::render::SnapshotError),
-
     /// Context-owned renderer epoch validation failed.
     #[error(transparent)]
-    RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
+    Frame(#[from] dear_imgui_rs::FrameError),
 
     /// A Context-owned renderer state slot changed after Glow published it.
     #[error("Glow renderer state slot `{field}` drifted while attached")]
@@ -241,11 +253,11 @@ pub enum RenderError {
 
     /// The originating Context can no longer be entered for state validation.
     #[error(transparent)]
-    ContextBinding(#[from] dear_imgui_rs::ContextBindingError),
+    ContextBinding(#[from] dear_imgui_rs::ContextError),
 
     /// Texture feedback was constructed for the wrong request kind.
     #[error(transparent)]
-    TextureFeedback(#[from] dear_imgui_rs::render::TextureFeedbackError),
+    TextureFeedback(#[from] dear_imgui_rs::TextureError),
 
     /// Generic rendering error
     #[error("Rendering error: {0}")]

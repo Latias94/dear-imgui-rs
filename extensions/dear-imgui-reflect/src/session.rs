@@ -10,7 +10,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::{ReflectEvent, ReflectResponse, ReflectSettings, imgui};
+use crate::{ImGuiValue, MemberSettings, ReflectEvent, ReflectResponse, ReflectSettings, imgui};
 
 /// Extension methods for starting a reflection pass from a Dear ImGui [`imgui::Ui`].
 ///
@@ -45,7 +45,8 @@ impl ImGuiReflectExt for imgui::Ui {
 pub struct ReflectSession {
     settings: ReflectSettings,
     map_drafts: RefCell<HashMap<MapDraftIdentity, StoredMapDraft>>,
-    bound_context: Cell<Option<usize>>,
+    map_key_focus: Cell<MapKeyFocus>,
+    bound_context: Cell<Option<imgui::ContextId>>,
 }
 
 impl ReflectSession {
@@ -72,8 +73,7 @@ impl ReflectSession {
     /// The returned inspector owns the response and path state for this pass.
     /// Persistent settings and map drafts remain owned by this session. A
     /// session is normally owned beside one Dear ImGui context. Reusing it
-    /// with a different live context clears old popup drafts automatically;
-    /// when a context is destroyed and rebuilt, rebuild its session too.
+    /// with a different context clears old popup drafts automatically.
     ///
     /// [`ImGuiReflectExt::inspector`] is the canonical per-frame entry point;
     /// this method is its equivalent session-oriented form.
@@ -81,13 +81,10 @@ impl ReflectSession {
         &'session self,
         ui: &'ui imgui::Ui,
     ) -> Inspector<'ui, 'session> {
-        let context = ui.with_bound_context(|| unsafe {
-            // SAFETY: `with_bound_context` makes this Ui's owning context
-            // current for the duration of the raw Dear ImGui query.
-            imgui::sys::igGetCurrentContext() as usize
-        });
+        let context = ui.context_id();
         if self.bound_context.get() != Some(context) {
             self.map_drafts.borrow_mut().clear();
+            self.map_key_focus.set(MapKeyFocus::default());
             self.bound_context.set(Some(context));
         }
 
@@ -96,7 +93,7 @@ impl ReflectSession {
             session: self,
             context,
             response: ReflectResponse::default(),
-            path: Rc::new(RefCell::new(Vec::new())),
+            scope: Rc::new(InspectorScope::default()),
         }
     }
 
@@ -114,9 +111,15 @@ impl ReflectSession {
 pub struct Inspector<'ui, 'session> {
     ui: &'ui imgui::Ui,
     session: &'session ReflectSession,
-    context: usize,
+    context: imgui::ContextId,
     response: ReflectResponse,
-    path: Rc<RefCell<Vec<Cow<'static, str>>>>,
+    scope: Rc<InspectorScope>,
+}
+
+#[derive(Default)]
+struct InspectorScope {
+    path: RefCell<Vec<Cow<'static, str>>>,
+    read_only: Cell<bool>,
 }
 
 impl<'ui, 'session> Inspector<'ui, 'session> {
@@ -152,7 +155,7 @@ impl<'ui, 'session> Inspector<'ui, 'session> {
 
     /// Returns the current logical field path, if nested rendering has entered one.
     pub fn current_path(&self) -> Option<String> {
-        let path = self.path.borrow();
+        let path = self.scope.path.borrow();
         if path.is_empty() {
             return None;
         }
@@ -172,7 +175,58 @@ impl<'ui, 'session> Inspector<'ui, 'session> {
     }
 
     pub(crate) fn is_path_active(&self) -> bool {
-        !self.path.borrow().is_empty()
+        !self.scope.path.borrow().is_empty()
+    }
+
+    pub(crate) fn tracks_nested_paths(&self) -> bool {
+        self.is_path_active() || self.settings().has_path_overrides()
+    }
+
+    pub(crate) fn is_read_only(&self) -> bool {
+        self.scope.read_only.get()
+    }
+
+    /// Resolves the current path override and applies the member's disabled scope.
+    #[doc(hidden)]
+    pub fn with_member(
+        &mut self,
+        typed: Option<&MemberSettings>,
+        read_only: bool,
+        render: impl FnOnce(&mut Self, Option<&MemberSettings>) -> bool,
+    ) -> bool {
+        let settings = self.settings();
+        let path_override = if settings.has_path_overrides() {
+            self.current_path()
+                .and_then(|path| settings.member_at_path(&path))
+        } else {
+            None
+        };
+        let member = path_override.or(typed);
+        if (read_only || member.is_some_and(|member| member.read_only)) && !self.is_read_only() {
+            self.scope.read_only.set(true);
+            let _read_only = ReadOnlyGuard(Rc::clone(&self.scope));
+            let _disabled = self.ui.begin_disabled();
+            render(self, member)
+        } else {
+            render(self, member)
+        }
+    }
+
+    pub(crate) fn render_value<T: ImGuiValue>(&mut self, label: &str, value: &mut T) -> bool {
+        self.with_member(None, false, |inspector, member| {
+            T::imgui_value_with_member(inspector, label, value, member)
+        })
+    }
+
+    pub(crate) fn render_draft_value<T: ImGuiValue>(&self, label: &str, value: &mut T) {
+        let mut draft = Self {
+            ui: self.ui,
+            session: self.session,
+            context: self.context,
+            response: ReflectResponse::default(),
+            scope: Rc::clone(&self.scope),
+        };
+        T::imgui_value(&mut draft, label, value);
     }
 
     /// Enters a dynamic path segment until the returned guard is dropped.
@@ -196,13 +250,13 @@ impl<'ui, 'session> Inspector<'ui, 'session> {
 
     fn push_path_inner(&self, segment: Cow<'static, str>) -> InspectorPathGuard {
         let depth = {
-            let mut path = self.path.borrow_mut();
+            let mut path = self.scope.path.borrow_mut();
             let depth = path.len();
             path.push(segment);
             depth
         };
         InspectorPathGuard {
-            path: Rc::clone(&self.path),
+            scope: Rc::clone(&self.scope),
             depth,
         }
     }
@@ -258,6 +312,30 @@ impl<'ui, 'session> Inspector<'ui, 'session> {
             value_type: TypeId::of::<V>(),
         }
     }
+
+    /// Remembers the two most recently active keys so deferred text writeback
+    /// can distinguish a focus change from a key editor skipped for a frame.
+    pub(crate) fn track_map_key_focus(&self, id: imgui::Id, active: bool) -> bool {
+        let frame = self.ui.frame_count();
+        let mut focus = self.session.map_key_focus.get();
+        let was_editing = [focus.current, focus.previous]
+            .into_iter()
+            .flatten()
+            .any(|(key_id, last_frame)| key_id == id && frame.saturating_sub(last_frame) <= 1);
+
+        if active {
+            if focus
+                .current
+                .is_some_and(|(previous_id, _)| previous_id != id)
+            {
+                focus.previous = focus.current;
+            }
+            focus.current = Some((id, frame));
+            self.session.map_key_focus.set(focus);
+        }
+
+        was_editing
+    }
 }
 
 /// A scoped path entry returned by [`Inspector::push_path`].
@@ -266,13 +344,13 @@ impl<'ui, 'session> Inspector<'ui, 'session> {
 #[doc(hidden)]
 #[must_use = "dropping the guard immediately restores the inspector path"]
 pub struct InspectorPathGuard {
-    path: Rc<RefCell<Vec<Cow<'static, str>>>>,
+    scope: Rc<InspectorScope>,
     depth: usize,
 }
 
 impl Drop for InspectorPathGuard {
     fn drop(&mut self) {
-        let mut path = self.path.borrow_mut();
+        let mut path = self.scope.path.borrow_mut();
         debug_assert!(
             path.len() > self.depth,
             "path guards must drop in LIFO order"
@@ -281,9 +359,17 @@ impl Drop for InspectorPathGuard {
     }
 }
 
+struct ReadOnlyGuard(Rc<InspectorScope>);
+
+impl Drop for ReadOnlyGuard {
+    fn drop(&mut self) {
+        self.0.read_only.set(false);
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct MapDraftIdentity {
-    imgui_context: usize,
+    imgui_context: imgui::ContextId,
     popup_id: imgui::sys::ImGuiID,
     value_type: TypeId,
 }
@@ -291,6 +377,12 @@ pub(crate) struct MapDraftIdentity {
 struct StoredMapDraft {
     key: String,
     value: Box<dyn Any>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct MapKeyFocus {
+    current: Option<(imgui::Id, usize)>,
+    previous: Option<(imgui::Id, usize)>,
 }
 
 struct MapDraft<V> {
@@ -322,7 +414,7 @@ impl<V: 'static> Drop for MapDraftRestore<'_, V> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imgui::{Context, SuspendedContext};
+    use crate::imgui::Context;
     use crate::test_guard;
 
     fn test_ui_context() -> Context {
@@ -444,6 +536,96 @@ mod tests {
     }
 
     #[test]
+    fn editing_or_cancelling_map_popup_drafts_does_not_report_outer_changes() {
+        #[derive(Clone, Default)]
+        struct DraftValue {
+            edits: usize,
+            cancel: bool,
+        }
+
+        impl ImGuiValue for DraftValue {
+            fn imgui_value(
+                inspector: &mut Inspector<'_, '_>,
+                label: &str,
+                value: &mut Self,
+            ) -> bool {
+                assert_eq!(label, "Value##new_value");
+                value.edits += 1;
+                inspector.record_event(ReflectEvent::VecInserted {
+                    path: inspector.current_path(),
+                    index: 0,
+                });
+                if value.cancel {
+                    inspector.ui().close_current_popup();
+                }
+                true
+            }
+        }
+
+        let _guard = test_guard();
+        for ordered in [false, true] {
+            let mut context = test_ui_context();
+            let session = ReflectSession::new();
+            let settings = crate::MapSettings {
+                dropdown: false,
+                ..crate::MapSettings::editable()
+            };
+            let mut ordered_map = std::collections::BTreeMap::<String, DraftValue>::new();
+            let mut hash_map = HashMap::<String, DraftValue>::new();
+            let popup = "add_map_item_popup";
+
+            for opening in [true, false] {
+                let ui = context.frame();
+                ui.window("draft test")
+                    .size([400.0, 300.0], imgui::Condition::Always)
+                    .build(|| {
+                        let mut inspector = session.inspector(ui);
+                        let identity = {
+                            let _map_id = ui.push_id("Map");
+                            if opening {
+                                ui.open_popup(popup);
+                            }
+                            inspector.map_draft_identity::<DraftValue>(popup)
+                        };
+                        let changed = if ordered {
+                            crate::imgui_btree_map_with_settings(
+                                &mut inspector,
+                                "Map",
+                                &mut ordered_map,
+                                &settings,
+                            )
+                        } else {
+                            crate::imgui_hash_map_with_settings(
+                                &mut inspector,
+                                "Map",
+                                &mut hash_map,
+                                &settings,
+                            )
+                        };
+                        assert!(!changed);
+                        assert!(inspector.response().is_empty());
+                        assert!(ordered_map.is_empty() && hash_map.is_empty());
+                        let _map_id = ui.push_id("Map");
+                        assert_eq!(ui.is_popup_open(popup), opening);
+                        if opening {
+                            inspector.with_map_draft::<DraftValue, _>(
+                                identity,
+                                String::new,
+                                |_, _, draft| {
+                                    assert_eq!(draft.edits, 1);
+                                    draft.cancel = true;
+                                },
+                            );
+                        }
+                    })
+                    .unwrap();
+                drop(context.render_legacy());
+            }
+            assert!(session.map_drafts.borrow().is_empty());
+        }
+    }
+
+    #[test]
     fn switching_real_imgui_contexts_clears_old_drafts() {
         let _guard = test_guard();
         let session = ReflectSession::new();
@@ -462,7 +644,6 @@ mod tests {
             );
         }
         drop(first.render_legacy());
-        let first: SuspendedContext = first.suspend_or_panic();
 
         let mut second = test_ui_context();
         {

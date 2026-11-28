@@ -35,20 +35,10 @@ impl super::gpu::GpuState {
             })?;
 
         // Create pipeline layout
-        #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Dear ImGui Pipeline Layout"),
             bind_group_layouts: &[Some(common_layout), Some(image_layout)],
             immediate_size: 0,
-        });
-        #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
-        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("Dear ImGui Pipeline Layout"),
-            bind_group_layouts: &[common_layout, image_layout],
-            #[cfg(feature = "wgpu-28")]
-            immediate_size: 0,
-            #[cfg(feature = "wgpu-27")]
-            push_constant_ranges: &[],
         });
 
         // Get shader module
@@ -56,10 +46,7 @@ impl super::gpu::GpuState {
 
         // Create vertex buffer layout
         let vertex_buffer_layout = crate::shaders::create_vertex_buffer_layout();
-        #[cfg(feature = "wgpu-30")]
         let vertex_buffer_layouts = [Some(vertex_buffer_layout)];
-        #[cfg(not(feature = "wgpu-30"))]
-        let vertex_buffer_layouts = [vertex_buffer_layout];
 
         // Create vertex state
         let vertex_state =
@@ -89,8 +76,7 @@ impl super::gpu::GpuState {
 
         // Create depth stencil state if needed (matches imgui_impl_wgpu.cpp depth-stencil setup)
         let depth_stencil = backend_data.depth_stencil_format.map(|format| {
-            #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
-            let state = DepthStencilState {
+            DepthStencilState {
                 format,
                 depth_write_enabled: Some(false), // matches WGPUOptionalBool_False in C++
                 depth_compare: Some(CompareFunction::Always), // matches WGPUCompareFunction_Always
@@ -111,31 +97,7 @@ impl super::gpu::GpuState {
                     write_mask: 0xff, // default value
                 },
                 bias: DepthBiasState::default(),
-            };
-            #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
-            let state = DepthStencilState {
-                format,
-                depth_write_enabled: false, // matches WGPUOptionalBool_False in C++
-                depth_compare: CompareFunction::Always, // matches WGPUCompareFunction_Always
-                stencil: StencilState {
-                    front: StencilFaceState {
-                        compare: CompareFunction::Always, // matches WGPUCompareFunction_Always
-                        fail_op: StencilOperation::Keep,  // matches WGPUStencilOperation_Keep
-                        depth_fail_op: StencilOperation::Keep, // matches WGPUStencilOperation_Keep
-                        pass_op: StencilOperation::Keep,  // matches WGPUStencilOperation_Keep
-                    },
-                    back: StencilFaceState {
-                        compare: CompareFunction::Always, // matches WGPUCompareFunction_Always
-                        fail_op: StencilOperation::Keep,  // matches WGPUStencilOperation_Keep
-                        depth_fail_op: StencilOperation::Keep, // matches WGPUStencilOperation_Keep
-                        pass_op: StencilOperation::Keep,  // matches WGPUStencilOperation_Keep
-                    },
-                    read_mask: 0xff,  // default value
-                    write_mask: 0xff, // default value
-                },
-                bias: DepthBiasState::default(),
-            };
-            state
+            }
         });
 
         // Create render pipeline
@@ -155,10 +117,7 @@ impl super::gpu::GpuState {
             depth_stencil,
             multisample: backend_data.init_info.pipeline_multisample_state,
             fragment: Some(fragment_state),
-            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
             multiview_mask: None,
-            #[cfg(feature = "wgpu-27")]
-            multiview: None,
             cache: None,
         });
 

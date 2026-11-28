@@ -7,17 +7,13 @@ use std::sync::{Mutex, OnceLock};
 
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextTeardown, FrameLifecycleState, FramePrepareOptions,
-    TextureFormat, sys,
+    ContextError, ContextTeardown, FrameLifecycleState, FramePrepareOptions, TextureFormat, sys,
 };
 
 use super::callbacks::renderer_render_window_sys;
 use super::runtime::RuntimeState;
 use super::{GlowViewportError, GlowViewportRouteFault, GlowViewportRuntime};
-use crate::renderer::callbacks::{
-    draw_callback_reset_render_state, draw_callback_set_sampler_linear,
-    draw_callback_set_sampler_nearest,
-};
+use crate::renderer::init::RendererPublication;
 use crate::shaders::test_support::{
     FakeFailure, TEST_LOCK as DEVICE_TEST_LOCK, fake_gl as device_fake_gl,
     reset as reset_device_gl, snapshot as device_gl_snapshot,
@@ -31,10 +27,7 @@ struct TestPlatformMarker;
 struct TestPlatformAttachment;
 
 impl ContextAttachment for TestPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        _context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, _context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         Ok(())
     }
 }
@@ -46,10 +39,7 @@ struct OrderingPlatformAttachment {
 }
 
 impl ContextAttachment for OrderingPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        _context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, _context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         self.renderer_deletes_seen
             .set(DELETED_TEXTURES.load(Ordering::SeqCst));
         Ok(())
@@ -177,6 +167,7 @@ fn test_renderer(
             program: None,
             attrib_location_tex: None,
             attrib_location_proj_mtx: None,
+            attrib_location_decode_vertex_srgb: None,
             attrib_location_color_gamma: None,
             attrib_location_vtx_pos: 0,
             attrib_location_vtx_uv: 0,
@@ -194,16 +185,15 @@ fn test_renderer(
         clip_origin: crate::GlowClipOrigin::default(),
         has_separate_polygon_modes: false,
         has_sampler_object_support: true,
+        bind_program_pipeline: None,
         gl_context: gl,
+        context_owner: None,
         context_binding: None,
-        backend_user_data: Box::default(),
-        renderer_name_ptr: std::ptr::null(),
-        renderer_texture_max: [0, 0],
+        publication: None,
         renderer_state_fault: None,
         synthetic_test_renderer: true,
         texture_registry,
-        managed_textures: std::collections::HashMap::new(),
-        destroyed_managed_textures: std::collections::HashMap::new(),
+        managed_textures: Default::default(),
         renderer_consumer: Some(renderer_consumer),
         framebuffer_srgb: false,
         color_gamma_override: None,
@@ -214,25 +204,9 @@ fn test_renderer(
 fn publish_test_renderer_core(context: &mut Context, renderer: &mut GlowRenderer) {
     renderer.synthetic_test_renderer = false;
     renderer.context_binding = Some(context.binding());
-    context
-        .set_renderer_name(Some("dear-imgui-glow test".to_owned()))
-        .unwrap();
-    renderer.renderer_name_ptr = context.io().backend_renderer_name().unwrap().as_ptr();
-    unsafe {
-        context
-            .io_mut()
-            .set_backend_renderer_user_data(renderer.backend_user_data_ptr());
-        let platform_io = context.platform_io_mut();
-        platform_io
-            .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
-        platform_io
-            .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
-        platform_io
-            .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
-        platform_io.set_draw_callback_set_sampler_from_texture_raw(Some(
-            crate::renderer::callbacks::draw_callback_set_sampler_from_texture,
-        ));
-    }
+    let publication = RendererPublication::register(context, [0, 0]).unwrap();
+    publication.publish(context, renderer.gl_version).unwrap();
+    renderer.publication = Some(publication);
 }
 
 fn destroy_returned_renderer(
@@ -248,7 +222,7 @@ fn render_empty_runtime_frame(context: &mut Context, runtime: &GlowViewportRunti
     let frame = context.begin_frame();
     let prepared = runtime.prepare_frame(frame).unwrap();
     let rendered = runtime
-        .render_main(prepared, || Ok::<(), ()>(()), || Vec::<()>::new())
+        .render_main(prepared, || Ok::<(), ()>(()), Vec::<()>::new)
         .unwrap();
     assert!(rendered.secondary_report().rendered_viewports().is_empty());
 }
@@ -264,7 +238,7 @@ fn attach_requires_a_registered_platform_role_and_returns_the_renderer() {
     let failure = unsafe { GlowViewportRuntime::attach(&mut context, renderer) }.unwrap_err();
     assert!(matches!(
         failure.error(),
-        GlowViewportError::Attachment(dear_imgui_rs::ContextAttachmentError::MissingPlatform)
+        GlowViewportError::Context(dear_imgui_rs::ContextError::MissingPlatformAttachment)
     ));
     let (_error, mut renderer) = failure.into_parts();
     assert!(renderer.renderer_consumer.is_some());
@@ -1238,9 +1212,8 @@ fn dropping_wrapper_defers_resource_release_to_context_teardown() {
 #[test]
 fn foreign_frame_is_rejected_before_target_faults_or_renderer_state_are_observed() {
     let _guard = test_guard();
-    let context_a = Context::create();
+    let mut context_a = Context::create();
     let context_a_id = context_a.id();
-    let suspended_a = context_a.suspend_or_panic();
 
     let mut context_b = Context::create();
     let platform_b = attach_test_platform(&mut context_b);
@@ -1250,9 +1223,7 @@ fn foreign_frame_is_rejected_before_target_faults_or_renderer_state_are_observed
     let context_b_id = context_b.id();
     let control_b = runtime_b.control_for_test();
     control_b.record_fault(GlowViewportError::InvalidViewport);
-    let suspended_b = context_b.suspend_or_panic();
 
-    let mut context_a = suspended_a.activate().unwrap();
     context_a
         .font_atlas()
         .try_claim_legacy_renderer()
@@ -1281,8 +1252,6 @@ fn foreign_frame_is_rejected_before_target_faults_or_renderer_state_are_observed
     );
     assert_eq!(unsafe { (*raw_a).FrameCountRendered }, rendered_before);
 
-    let suspended_a = context_a.suspend_or_panic();
-    let mut context_b = suspended_b.activate().unwrap();
     assert!(matches!(
         runtime_b.poll_fault(),
         Err(GlowViewportError::InvalidViewport)
@@ -1290,7 +1259,7 @@ fn foreign_frame_is_rejected_before_target_faults_or_renderer_state_are_observed
     runtime_b.shutdown(&mut context_b).unwrap();
     drop(platform_b);
     drop(context_b);
-    drop(suspended_a);
+    drop(context_a);
 }
 
 #[test]
@@ -1302,7 +1271,6 @@ fn prepared_frame_cannot_cross_runtime_owners() {
     let renderer_a = test_renderer(&mut context_a, Some(Rc::clone(&gl_a)), false);
     let mut runtime_a = unsafe { GlowViewportRuntime::attach(&mut context_a, renderer_a) }.unwrap();
     let context_a_id = context_a.id();
-    let context_a = context_a.suspend_or_panic();
 
     let mut context_b = Context::create();
     let _platform_b = attach_test_platform(&mut context_b);
@@ -1346,7 +1314,6 @@ fn prepared_frame_cannot_cross_runtime_owners() {
 
     runtime_b.shutdown(&mut context_b).unwrap();
     drop(context_b);
-    let mut context_a = context_a.activate().unwrap();
     runtime_a.shutdown(&mut context_a).unwrap();
 }
 

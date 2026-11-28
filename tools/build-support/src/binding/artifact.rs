@@ -247,11 +247,11 @@ pub fn core_source_contract_hash() -> String {
     // by the WebAssembly provider transform inventory.
     hash.field(
         "native_stack_layout_transform",
-        "imgui-core-stack-layout-v1",
+        "imgui-core-stack-layout-v2",
     );
     hash.field(
         "native_platform_io_contract",
-        "aggregate-hooks-v3+live-viewport-address-v1+aggregate-identity-getters-v1+checked-framebuffer-scale-v1+exact-slot-release-v1",
+        "aggregate-hooks-v3+live-viewport-address-v1+aggregate-identity-getters-v1+checked-framebuffer-scale-v1+exact-slot-release-v1+current-context-slot-v1",
     );
     hash.finish()
 }

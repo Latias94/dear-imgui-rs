@@ -2,15 +2,13 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::rc::Rc;
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 use std::sync::Arc;
 
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 use ash::vk;
 
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextBinding, ContextTeardown, FrameLifecycleState, Id, sys,
+    ContextBinding, ContextError, ContextTeardown, FrameLifecycleState, Id, sys,
 };
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 
@@ -23,10 +21,8 @@ use super::runtime::{
     AshPreparedViewportFrame, AshViewportError, AshViewportFrameCompletion, AshViewportRouteFault,
     OwningViewportRuntime, RuntimeControl, RuntimeState, preflight_attachment_with,
 };
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 use super::{SurfaceAdapter, SurfaceCreateError, ViewportSwapchainPolicy, VulkanViewportConfig};
 use crate::RendererError;
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 use crate::renderer::lifecycle::renderer_for_test;
 
 assert_impl_all!(AshViewportFrameCompletion: Send, Sync);
@@ -34,10 +30,8 @@ assert_not_impl_any!(AshPreparedViewportFrame<'static>: Send, Sync);
 
 struct TestPlatformMarker;
 
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 struct InertSurfaceAdapter;
 
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 impl SurfaceAdapter for InertSurfaceAdapter {
     unsafe fn create_surface(
         &self,
@@ -52,10 +46,7 @@ impl SurfaceAdapter for InertSurfaceAdapter {
 struct TestPlatformAttachment;
 
 impl ContextAttachment for TestPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         context.with_bound_context(clear_test_main_handle_raw);
         Ok(())
     }
@@ -82,10 +73,7 @@ struct OrderingPlatformAttachment {
 }
 
 impl ContextAttachment for OrderingPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         self.renderer_released_first.set(
             self.control
                 .borrow()
@@ -147,7 +135,6 @@ fn attach_test_platform(context: &mut Context) -> TestPlatformLease {
     }
 }
 
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 fn inert_vulkan_config() -> VulkanViewportConfig {
     let entry = ash::Entry::from_parts_1_1(
         ash::StaticFn::load(|_| std::ptr::null()),
@@ -178,13 +165,12 @@ fn attach_requires_registered_platform_role_without_claiming_callbacks() {
 
     assert!(matches!(
         error,
-        AshViewportError::Attachment(dear_imgui_rs::ContextAttachmentError::MissingPlatform)
+        AshViewportError::Context(dear_imgui_rs::ContextError::MissingPlatformAttachment)
     ));
     assert!(context.platform_io().renderer_callbacks_are_empty());
     clear_test_main_handle_raw();
 }
 
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 #[test]
 fn failed_real_attach_returns_the_renderer_and_preserves_shutdown_ownership() {
     let _guard = super::test_context_guard();
@@ -708,7 +694,6 @@ fn public_drift_check_clears_only_the_runtime_context_capability() {
             .platform_io_mut()
             .set_renderer_destroy_window_raw(Some(foreign_renderer_unary));
     }
-    let suspended_context = context.suspend_or_panic();
     let mut other_context = Context::create();
     let io = other_context.io_mut();
     io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_VIEWPORTS);
@@ -727,10 +712,6 @@ fn public_drift_check_clears_only_the_runtime_context_capability() {
         "drift cleanup must not mutate the Context restored after validation"
     );
 
-    let suspended_other = other_context.suspend_or_panic();
-    let mut context = suspended_context
-        .activate()
-        .expect("the other Context was suspended");
     assert!(
         !context
             .io()
@@ -744,7 +725,7 @@ fn public_drift_check_clears_only_the_runtime_context_capability() {
     }
 
     runtime.shutdown(&mut context).unwrap();
-    drop(suspended_other);
+    drop(other_context);
 }
 
 #[test]
@@ -1196,7 +1177,6 @@ fn public_route_rejects_foreign_frame_before_platform_or_renderer_side_effects()
             callback: "queued renderer fault",
         });
 
-    let suspended_target = target.suspend_or_panic();
     let mut source = Context::create();
     source
         .font_atlas()
@@ -1247,7 +1227,7 @@ fn public_route_rejects_foreign_frame_before_platform_or_renderer_side_effects()
     drop(source);
     drop(target_runtime);
     drop(target_platform);
-    drop(suspended_target);
+    drop(target);
 }
 
 #[test]
@@ -1263,7 +1243,6 @@ fn owning_runtime_rejects_foreign_frame_before_target_fault_or_renderer_entry() 
             callback: "queued before owning prepare",
         });
 
-    let suspended_target = target.suspend_or_panic();
     let mut source = Context::create();
     source
         .font_atlas()
@@ -1296,7 +1275,7 @@ fn owning_runtime_rejects_foreign_frame_before_target_fault_or_renderer_entry() 
     drop(source);
     drop(target_runtime);
     drop(target_platform);
-    drop(suspended_target);
+    drop(target);
 }
 
 #[test]
@@ -1312,7 +1291,6 @@ fn frame_runtime_identity_mismatch_is_rejected_before_target_faults_are_consumed
             callback: "queued before runtime validation",
         });
 
-    let suspended_a = context_a.suspend_or_panic();
     let mut context_b = Context::create();
     let platform_b = attach_test_platform(&mut context_b);
     let runtime_b = OwningViewportRuntime::attach_for_test(&mut context_b).unwrap();
@@ -1347,7 +1325,7 @@ fn frame_runtime_identity_mismatch_is_rejected_before_target_faults_are_consumed
     drop(context_b);
     drop(runtime_a);
     drop(platform_a);
-    drop(suspended_a);
+    drop(context_a);
 }
 
 #[test]

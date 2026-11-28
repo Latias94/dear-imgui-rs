@@ -106,8 +106,9 @@ compile_error!("feature `test-engine` is native source-only and cannot be combin
 #[cfg(all(feature = "prebuilt", dear_imgui_rs_wasm_import_target))]
 compile_error!("feature `prebuilt` is native-only and cannot be combined with WASM");
 
-// Bindings are generated into OUT_DIR and included via a submodule so that
-// possible inner attributes in the generated file are accepted at module root.
+// The build script prepares one bindings.rs in OUT_DIR. Target cfg selects
+// the Windows padding fields in the shared native binding. Browser builds use
+// the separate WASM import binding.
 mod ffi;
 pub use ffi::*;
 
@@ -160,6 +161,30 @@ const _: [(); 4] = [(); std::mem::size_of::<ImWchar>()];
 
 /// Whether this build linked the repository-owned PlatformIO aggregate ABI hook shim.
 pub const HAS_PLATFORM_IO_AGGREGATE_HOOKS: bool = cfg!(dear_imgui_rs_platform_io_hooks);
+
+#[cfg(dear_imgui_rs_platform_io_hooks)]
+unsafe extern "C" {
+    fn dear_imgui_rs_current_context_slot() -> *const *mut ImGuiContext;
+}
+
+/// Returns the native current-context storage when using the workspace's native artifact.
+///
+/// # Safety
+///
+/// The caller must own the Dear ImGui thread lease while obtaining or reading the slot.
+/// The slot is read-only and must never be passed to a different thread.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn current_context_slot() -> *const *mut ImGuiContext {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    {
+        unsafe { dear_imgui_rs_current_context_slot() }
+    }
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        std::ptr::null()
+    }
+}
 
 #[cfg(feature = "stack-layout")]
 mod stack_layout {

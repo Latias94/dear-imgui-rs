@@ -8,9 +8,8 @@ use dear_imgui_rs::render::ReconciledFrame;
 #[cfg(test)]
 use dear_imgui_rs::render::SynchronousRendererConsumer;
 use dear_imgui_rs::{
-    Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
-    ContextAttachmentRole, ContextBinding, ContextBindingError, ContextId, ContextLifecycle,
-    FrameToken, TextureData, TextureId,
+    Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole, ContextBinding,
+    ContextError, ContextId, ContextLifecycle, FrameToken, TextureData, TextureId,
 };
 use thiserror::Error;
 
@@ -35,12 +34,9 @@ struct AshRendererAttachmentMarker;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum AshViewportError {
-    /// The Dear ImGui Context rejected the renderer attachment.
+    /// The Context rejected attachment or could not be entered.
     #[error(transparent)]
-    Attachment(#[from] ContextAttachmentError),
-    /// The originating Context can no longer be entered normally.
-    #[error(transparent)]
-    Context(#[from] ContextBindingError),
+    Context(#[from] ContextError),
     /// The underlying Ash renderer operation failed.
     #[error(transparent)]
     Renderer(#[from] RendererError),
@@ -800,7 +796,7 @@ impl OwningViewportRuntime {
         let (frame, retirement) = self.control.with_renderer_mut("prepare", |renderer| {
             let frame = frame
                 .try_render(renderer.renderer_consumer()?)
-                .map_err(RendererError::from)?;
+                .map_err(|(_frame, error)| RendererError::from(error))?;
             renderer.prepare_frame(frame).map_err(Into::into)
         })?;
         self.prepare_reconciled(frame, retirement)

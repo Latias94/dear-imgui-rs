@@ -2,7 +2,7 @@
 name = "dear-imgui-bevy"
 version.workspace = true
 edition.workspace = true
-rust-version = "1.97.1"
+rust-version.workspace = true
 description = "Bevy-native backend for dear-imgui-rs on Bevy 0.20.1"
 license.workspace = true
 repository.workspace = true
@@ -12,6 +12,7 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
+dear-imgui-backend-support = { workspace = true, optional = true }
 dear-imgui-rs.workspace = true
 dear-imgui-winit = { workspace = true, optional = true }
 
@@ -27,6 +28,7 @@ bevy_camera = { version = "=0.20.1", default-features = false, optional = true }
 bevy_color = { version = "=0.20.1", default-features = false, optional = true }
 bevy_core_pipeline = { version = "=0.20.1", default-features = false, optional = true }
 bevy_derive = "=0.20.1"
+# bevy_ecs_macros allows later patches of its macro implementation without a workspace lockfile.
 bevy_ecs_macro_logic = "=0.20.1"
 bevy_ecs_macros = "=0.20.1"
 bevy_image = { version = "=0.20.1", default-features = false, optional = true }
@@ -79,6 +81,7 @@ render = [
     "dep:bevy_render",
     "dep:bevy_shader",
     "dep:bytemuck",
+    "dep:dear-imgui-backend-support",
 ]
 # Orders Dear ImGui explicitly against Bevy UI on cameras that render both layers.
 bevy-ui = ["render", "dep:bevy_ui_render"]

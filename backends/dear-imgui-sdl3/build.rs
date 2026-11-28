@@ -117,6 +117,10 @@ fn main() {
         println!("cargo:rustc-cfg=sdl3_native_self_test");
     }
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    if target_env == "msvc" {
+        // The C ABI shims catch C++ exceptions and need normal C++ stack unwinding.
+        build.flag("/EHsc");
+    }
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_abi = env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default();
     build_support::configure_cpp_runtime_linkage(&mut build, &target_os, &target_env, &target_abi);

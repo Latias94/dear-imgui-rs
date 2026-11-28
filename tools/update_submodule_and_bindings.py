@@ -56,10 +56,6 @@ from pathlib import Path
 import source_metadata
 
 
-# Keep in sync with CANONICAL_BINDING_RUSTC_VERSION in binding/spec.rs.
-CANONICAL_BINDING_TOOLCHAIN = "1.95.0"
-
-
 def run(cmd, cwd=None, env=None, dry=False):
     print("$", " ".join(cmd))
     if dry:
@@ -75,7 +71,6 @@ def run(cmd, cwd=None, env=None, dry=False):
 def binding_command():
     return [
         "cargo",
-        f"+{CANONICAL_BINDING_TOOLCHAIN}",
         "run",
         "-p",
         "xtask",
@@ -227,9 +222,7 @@ def main() -> int:
             print(f"{crate} binding source metadata already matches its submodule")
 
     print("Generating and validating all maintained binding profiles via xtask...")
-    binding_env = os.environ.copy()
-    binding_env["RUSTUP_TOOLCHAIN"] = CANONICAL_BINDING_TOOLCHAIN
-    rc = run(binding_command(), cwd=str(repo_root), env=binding_env, dry=args.dry_run)
+    rc = run(binding_command(), cwd=str(repo_root), dry=args.dry_run)
     if rc != 0:
         return rc
 

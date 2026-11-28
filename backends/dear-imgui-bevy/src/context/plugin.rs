@@ -111,7 +111,7 @@ pub enum ImguiPluginInstallError {
     /// The Context registry and pass registry came from different Apps.
     ForeignPassRegistry,
     /// Core Context construction failed before App mutation began.
-    ContextCreation(dear_imgui_rs::ImGuiError),
+    ContextCreation(dear_imgui_rs::ContextError),
     /// Existing Contexts cannot admit this backend configuration.
     ContextPreflight(super::ImguiContextError),
 }
@@ -170,7 +170,7 @@ impl std::error::Error for ImguiPluginInstallError {
 }
 
 struct PreparedImguiInstallation {
-    primary: Option<dear_imgui_rs::SuspendedContext>,
+    primary: Option<dear_imgui_rs::Context>,
     driver_schedule: schedule::ValidatedImguiDriverSchedulePlacement,
 }
 
@@ -267,7 +267,7 @@ impl ImguiPlugin {
                 return Err(ImguiPluginInstallError::ContextRegistryMissing);
             }
             Some(
-                dear_imgui_rs::SuspendedContext::try_create()
+                dear_imgui_rs::Context::try_create()
                     .map_err(ImguiPluginInstallError::ContextCreation)?,
             )
         };

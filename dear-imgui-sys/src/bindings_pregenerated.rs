@@ -4700,6 +4700,8 @@ pub struct ImGuiBoxSelectState {
     pub IsStartedFromVoid: bool,
     pub IsStartedSetNavIdOnce: bool,
     pub RequestClear: bool,
+    #[cfg(windows)]
+    pub __bindgen_padding_0: [u8; 3usize],
     pub _bitfield_1: __BindgenBitfieldUnit<[u8; 2usize]>,
     pub StartPosRel: ImVec2_c,
     pub EndPosRel: ImVec2_c,
@@ -6354,6 +6356,8 @@ pub struct ImGuiWindow {
     pub HiddenFramesCannotSkipItems: ImS8,
     pub HiddenFramesForRenderOnly: ImS8,
     pub DisableInputsFrames: ImS8,
+    #[cfg(windows)]
+    pub __bindgen_padding_0: u8,
     pub _bitfield_1: __BindgenBitfieldUnit<[u8; 5usize]>,
     pub SetWindowPosVal: ImVec2_c,
     pub SetWindowPosPivot: ImVec2_c,

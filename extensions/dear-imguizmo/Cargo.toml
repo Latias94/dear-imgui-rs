@@ -16,7 +16,6 @@ readme = "README.md"
 dear-imgui-rs.workspace = true
 dear-imgui-sys.workspace = true
 dear-imguizmo-sys.workspace = true
-thiserror.workspace = true
 bitflags = { workspace = true }
 glam = { workspace = true, optional = true }
 mint = { workspace = true, optional = true }
@@ -29,7 +28,7 @@ build-from-source = ["dear-imgui-rs/build-from-source", "dear-imguizmo-sys/build
 # Enable multi-viewport support (commented out while WIP)
 # multi-viewport = ["dear-imgui-rs/multi-viewport", "dear-imguizmo-sys/multi-viewport"]
 freetype = ["dear-imgui-rs/freetype", "dear-imguizmo-sys/freetype"]
-glam = ["dep:glam"]
+glam = ["dep:glam", "dear-imgui-rs/glam"]
 mint = ["dep:mint"]
 wasm = ["dear-imgui-rs/wasm", "dear-imguizmo-sys/wasm"]
 

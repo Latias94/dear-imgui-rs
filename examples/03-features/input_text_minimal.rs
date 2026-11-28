@@ -1,9 +1,8 @@
-//! String and `ImString` input, hints, capacity, callbacks, and multiline editing.
+//! Text input, hints, capacity, callbacks, and multiline editing.
 
 use dear_app::{AppConfig, RunError, run_ui};
 use dear_imgui_rs::{
-    Condition, HistoryDirection, ImString, InputTextCallback, InputTextCallbackHandler,
-    TextCallbackData,
+    Condition, HistoryDirection, InputTextCallback, InputTextCallbackHandler, TextCallbackData,
 };
 
 #[derive(Default)]
@@ -33,8 +32,8 @@ fn main() -> Result<(), RunError> {
         ..Default::default()
     };
     let mut title = String::with_capacity(64);
-    let mut name = ImString::new("");
-    let mut notes = ImString::new("");
+    let mut name = String::new();
+    let mut notes = String::new();
     let mut callback_notes = String::new();
 
     run_ui(config, move |ui| {
@@ -49,11 +48,8 @@ fn main() -> Result<(), RunError> {
                     .build();
 
                 ui.separator();
-                ui.text("ImString");
-                ui.input_text_imstr("Name", &mut name)
-                    .hint("Your name")
-                    .build();
-                ui.input_text_multiline_imstr("Notes", &mut notes, [500.0, 160.0])
+                ui.input_text("Name", &mut name).hint("Your name").build();
+                ui.input_text_multiline("Notes", &mut notes, [500.0, 160.0])
                     .build();
 
                 ui.separator();
@@ -69,8 +65,8 @@ fn main() -> Result<(), RunError> {
                 ui.text(format!(
                     "Title={} bytes, name={} bytes, notes={} bytes",
                     title.len(),
-                    name.to_str().len(),
-                    notes.to_str().len()
+                    name.len(),
+                    notes.len()
                 ));
             });
     })

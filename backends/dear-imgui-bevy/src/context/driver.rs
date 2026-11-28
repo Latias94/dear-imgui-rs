@@ -11,7 +11,7 @@ use dear_imgui_rs as imgui;
 #[cfg(feature = "render")]
 use super::ImguiFrameMailbox;
 use super::platform;
-use super::{ImguiActiveRendererContextError, ImguiContextError, ImguiContexts};
+use super::{ImguiContextError, ImguiContexts, ImguiRendererContextError};
 #[cfg(feature = "render")]
 use crate::input::{ImguiFrameInputSlot, ImguiInputFrameMetrics};
 
@@ -51,7 +51,7 @@ enum PendingFrameOutput {
     Rendered,
 }
 
-/// Serially activate, frame, run, render, and suspend every registered Context.
+/// Serially bind each registered Context for its frame and restore the prior binding.
 pub(crate) fn drive_imgui_contexts(world: &mut World) {
     #[cfg(feature = "render")]
     drain_snapshot_commit_errors(world);
@@ -240,7 +240,7 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         #[cfg(feature = "render")]
         let snapshot_mailbox = world.resource::<ImguiFrameMailbox>().clone();
         let result = panic::catch_unwind(AssertUnwindSafe(|| {
-            owner.try_with_active_renderer_context_checked(
+            owner.try_with_current_renderer_context_checked(
                 config.multi_viewport(),
                 |context, renderer_consumer| {
                     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -420,20 +420,20 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                     Err(payload) => (None, None, Some(payload)),
                 }
             }
-            Ok(Err(ImguiActiveRendererContextError::Operation(error))) => {
+            Ok(Err(ImguiRendererContextError::Operation(error))) => {
                 clear_context_output(world, context_id);
                 (None, Some(error), None)
             }
-            Ok(Err(ImguiActiveRendererContextError::ContextScope(source))) => {
+            Ok(Err(ImguiRendererContextError::ContextScope(source))) => {
                 clear_context_output(world, context_id);
                 (
                     None,
-                    Some(ImguiContextError::ScopedActivation { context_id, source }),
+                    Some(ImguiContextError::ContextScope { context_id, source }),
                     None,
                 )
             }
             #[cfg(feature = "render")]
-            Ok(Err(ImguiActiveRendererContextError::RendererOwnership(source))) => {
+            Ok(Err(ImguiRendererContextError::RendererOwnership(source))) => {
                 clear_context_output(world, context_id);
                 (
                     None,
@@ -442,7 +442,7 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                 )
             }
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-            Ok(Err(ImguiActiveRendererContextError::ViewportBridge(source))) => {
+            Ok(Err(ImguiRendererContextError::ViewportBridge(source))) => {
                 clear_context_output(world, context_id);
                 (
                     None,

@@ -16,6 +16,12 @@ pub const IMGUI_FRAGMENT_ENTRY_POINT: &str = "fs_main";
 /// BEVY-090 keeps this shader local to the Bevy backend instead of reusing
 /// `dear-imgui-wgpu`, because Bevy owns render schedules, target formats, and pipeline
 /// specialization.
+///
+/// Vertex colors stay in sRGB across rasterization for perceptual gradient interpolation and are
+/// decoded to linear light in `fs_main` before texture modulation, while alpha stays linear.
+/// The GPU readbacks use `dear_imgui_backend_support::srgb_vertex_color_to_linear` as a reference.
+/// Output RGB is then encoded to the camera stack's resolved compositing space (`Linear` by default
+/// on `Camera3d` / HDR views, or `Srgb` / `Oklab` on `Camera2d` views that request it).
 pub const IMGUI_SHADER_SOURCE: &str = r#"
 import bevy_render::color_operations::{srgb_to_linear, linear_to_srgb, linear_rgb_to_oklab};
 
@@ -50,14 +56,17 @@ var imgui_sampler: sampler;
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.position = uniforms.mvp * vec4<f32>(in.position, 0.0, 1.0);
-    out.color = vec4<f32>(srgb_to_linear(in.color.rgb), in.color.a);
+    // Keep vertex colors in sRGB space so rasterization interpolates perceptually.
+    out.color = in.color;
     out.uv = in.uv;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let color = in.color * textureSample(imgui_texture, imgui_sampler, in.uv);
+    // Decode interpolated sRGB vertex colors to linear light before texture modulation.
+    let vertex_color = vec4<f32>(srgb_to_linear(max(in.color.rgb, vec3<f32>(0.0))), in.color.a);
+    let color = vertex_color * textureSample(imgui_texture, imgui_sampler, in.uv);
     if uniforms.compositing_space == 1u {
         return vec4<f32>(linear_to_srgb(color.rgb), color.a);
     }

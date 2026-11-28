@@ -6,28 +6,32 @@ use dear_imgui_rs::{
     HistoryDirection, InputTextCallback, InputTextCallbackHandler, TextCallbackData,
 };
 
-use crate::dialog_core::CoreEvent;
+use crate::dialog_core::{CoreEvent, DirEntry, ProjectedEntries};
 use crate::dialog_state::{FileDialogState, PathBarStyle};
+use crate::fs::display_path;
 
-struct PathBarCallback {
-    cwd: PathBuf,
-    completion_dirs: Vec<String>,
-    recent_paths: Vec<String>,
-    history_index: *mut Option<usize>,
-    history_saved_buffer: *mut Option<String>,
-    programmatic_edit: *mut bool,
+struct PathBarCallback<'a> {
+    cwd: &'a Path,
+    entries: ProjectedEntries<'a>,
+    recent_paths: &'a [PathBuf],
+    history_index: &'a mut Option<usize>,
+    history_saved_buffer: &'a mut Option<(String, Option<PathBuf>)>,
+    buffer_path: &'a mut Option<PathBuf>,
+    programmatic_edit: &'a mut bool,
 }
 
-impl PathBarCallback {
+impl PathBarCallback<'_> {
     fn set_text(&mut self, mut data: TextCallbackData, text: &str) {
-        let old = data.str();
+        let Ok(old) = data.str() else {
+            return;
+        };
+        *self.programmatic_edit = true;
         if old == text {
             return;
         }
         data.remove_chars(0, old.len());
         data.insert_chars(0, text);
         data.set_cursor_pos(text.len());
-        unsafe { *self.programmatic_edit = true };
     }
 
     fn common_prefix_len(a: &str, b: &str) -> usize {
@@ -69,60 +73,51 @@ impl PathBarCallback {
         }
     }
 
-    fn last_sep_pos(s: &str) -> Option<(usize, char)> {
-        s.char_indices().rfind(|(_, c)| *c == '/' || *c == '\\')
-    }
-
-    fn try_complete_path(&mut self, data: TextCallbackData) {
-        let input = data.str().trim();
-        if input.is_empty() {
-            return;
-        }
-
-        let (dir_prefix, frag, sep) = match Self::last_sep_pos(input) {
+    fn complete_path<'a>(
+        input: &str,
+        cwd: &Path,
+        entries: impl Iterator<Item = &'a DirEntry>,
+    ) -> Option<(String, Option<PathBuf>)> {
+        let input = input.trim();
+        let last_sep = input
+            .char_indices()
+            .rfind(|(_, separator)| std::path::is_separator(*separator));
+        let (dir_prefix, frag, sep) = match last_sep {
             Some((i, c)) => (&input[..=i], &input[i + 1..], c),
             None => ("", input, std::path::MAIN_SEPARATOR),
         };
 
         if frag.is_empty() {
-            return;
+            return None;
         }
 
-        let base_dir = if dir_prefix.is_empty() {
-            self.cwd.clone()
-        } else {
-            let raw = PathBuf::from(dir_prefix);
-            if raw.is_absolute() {
-                raw
-            } else {
-                self.cwd.join(raw)
+        if !dir_prefix.is_empty() {
+            let base_dir = cwd.join(dir_prefix);
+            if base_dir != cwd
+                && Path::new(display_path(&base_dir).as_ref())
+                    != Path::new(display_path(cwd).as_ref())
+            {
+                return None;
             }
-        };
-
-        if base_dir != self.cwd {
-            return;
         }
 
-        let mut matches = self
-            .completion_dirs
-            .iter()
-            .filter(|name| Self::starts_with_case_insensitive(name, frag))
-            .cloned()
+        let mut matches = entries
+            .filter(|entry| entry.is_dir && Self::starts_with_case_insensitive(&entry.name, frag))
             .collect::<Vec<_>>();
         if matches.is_empty() {
-            return;
+            return None;
         }
-        matches.sort();
+        matches.sort_unstable_by(|left, right| left.name.cmp(&right.name));
 
         let completed = if matches.len() == 1 {
-            let mut s = matches[0].clone();
+            let mut s = matches[0].name.clone();
             s.push(sep);
             s
         } else {
-            let first = matches[0].as_str();
+            let first = matches[0].name.as_str();
             let mut prefix_len = first.len();
             for other in matches.iter().skip(1) {
-                prefix_len = prefix_len.min(Self::common_prefix_len(first, other));
+                prefix_len = prefix_len.min(Self::common_prefix_len(first, &other.name));
             }
             first[..prefix_len].to_string()
         };
@@ -132,9 +127,21 @@ impl PathBarCallback {
         } else {
             format!("{dir_prefix}{completed}")
         };
+        let path = (matches.len() == 1).then(|| matches[0].path.clone());
+        Some((new_text, path))
+    }
 
-        unsafe { *self.history_index = None };
-        unsafe { *self.history_saved_buffer = None };
+    fn try_complete_path(&mut self, data: TextCallbackData) {
+        let Ok(input) = data.str() else {
+            return;
+        };
+        let Some((new_text, path)) = Self::complete_path(input, self.cwd, self.entries.iter())
+        else {
+            return;
+        };
+        *self.history_index = None;
+        *self.history_saved_buffer = None;
+        *self.buffer_path = path;
         self.set_text(data, &new_text);
     }
 
@@ -142,50 +149,34 @@ impl PathBarCallback {
         if self.recent_paths.is_empty() {
             return;
         }
+        let Ok(input) = data.str() else {
+            return;
+        };
 
-        let idx = unsafe { &mut *self.history_index };
-        let saved = unsafe { &mut *self.history_saved_buffer };
-
-        match (direction, *idx) {
+        let index = match (direction, *self.history_index) {
             (HistoryDirection::Up, None) => {
-                *saved = Some(data.str().to_string());
-                *idx = Some(0);
-                let p = self.recent_paths[0].clone();
-                self.set_text(data, &p);
+                *self.history_saved_buffer = Some((input.to_owned(), self.buffer_path.clone()));
+                0
+            }
+            (HistoryDirection::Up, Some(index)) if index + 1 < self.recent_paths.len() => index + 1,
+            (HistoryDirection::Down, Some(0)) => {
+                let (text, path) = self.history_saved_buffer.take().unwrap_or_default();
+                *self.history_index = None;
+                *self.buffer_path = path;
+                self.set_text(data, &text);
                 return;
             }
-            (HistoryDirection::Down, None) => return,
-            (_, Some(_)) => {}
-        }
-
-        let Some(mut i) = *idx else { return };
-        match direction {
-            HistoryDirection::Up => {
-                if i + 1 < self.recent_paths.len() {
-                    i += 1;
-                    *idx = Some(i);
-                    let p = self.recent_paths[i].clone();
-                    self.set_text(data, &p);
-                }
-            }
-            HistoryDirection::Down => {
-                if i == 0 {
-                    let restore = saved.clone().unwrap_or_else(String::new);
-                    *idx = None;
-                    *saved = None;
-                    self.set_text(data, &restore);
-                } else {
-                    i -= 1;
-                    *idx = Some(i);
-                    let p = self.recent_paths[i].clone();
-                    self.set_text(data, &p);
-                }
-            }
-        }
+            (HistoryDirection::Down, Some(index)) => index - 1,
+            _ => return,
+        };
+        let path = &self.recent_paths[index];
+        *self.history_index = Some(index);
+        *self.buffer_path = Some(path.clone());
+        self.set_text(data, &display_path(path));
     }
 }
 
-impl InputTextCallbackHandler for PathBarCallback {
+impl InputTextCallbackHandler for PathBarCallback<'_> {
     fn on_completion(&mut self, data: TextCallbackData) {
         self.try_complete_path(data);
     }
@@ -210,29 +201,18 @@ pub(super) fn draw_path_input_text(
         state.ui.runtime.path.focus_next = false;
     }
 
-    let callback_recent_paths = recent_paths
-        .iter()
-        .map(|p| p.display().to_string())
-        .collect::<Vec<_>>();
-    let history_index_ptr: *mut Option<usize> = &mut state.ui.runtime.path.history_index;
-    let history_saved_ptr: *mut Option<String> = &mut state.ui.runtime.path.history_saved_buffer;
-    let programmatic_edit_ptr: *mut bool = &mut state.ui.runtime.path.programmatic_edit;
+    let path = &mut state.ui.runtime.path;
     let callback = PathBarCallback {
-        cwd: state.core.cwd.clone(),
-        completion_dirs: state
-            .core
-            .entries()
-            .iter()
-            .filter(|entry| entry.is_dir)
-            .map(|entry| entry.name.clone())
-            .collect(),
-        recent_paths: callback_recent_paths,
-        history_index: history_index_ptr,
-        history_saved_buffer: history_saved_ptr,
-        programmatic_edit: programmatic_edit_ptr,
+        cwd: &state.core.cwd,
+        entries: state.core.entries(),
+        recent_paths,
+        history_index: &mut path.history_index,
+        history_saved_buffer: &mut path.history_saved_buffer,
+        buffer_path: &mut path.buffer_path,
+        programmatic_edit: &mut path.programmatic_edit,
     };
     let submitted = ui
-        .input_text("##path_bar", &mut state.ui.runtime.path.buffer)
+        .input_text("##path_bar", &mut path.buffer)
         .callback(callback)
         .callback_flags(InputTextCallback::COMPLETION | InputTextCallback::HISTORY)
         .auto_select_all(select_all)
@@ -247,6 +227,7 @@ pub(super) fn draw_path_input_text(
     {
         state.ui.runtime.path.history_index = None;
         state.ui.runtime.path.history_saved_buffer = None;
+        state.ui.runtime.path.buffer_path = None;
     }
     state.ui.runtime.path.programmatic_edit = false;
 
@@ -262,17 +243,25 @@ pub(super) fn draw_path_input_text(
 
 fn submit_path_edit(state: &mut FileDialogState) {
     let input = state.ui.runtime.path.buffer.trim();
-    if input.is_empty() {
+    if input.is_empty() && state.ui.runtime.path.buffer_path.is_none() {
         state.ui.runtime.error = Some("Path is empty".into());
         return;
     }
 
-    let raw_p = std::path::PathBuf::from(input);
-    let raw_p = if raw_p.is_absolute() {
-        raw_p
-    } else {
-        state.core.cwd.join(&raw_p)
-    };
+    let raw_p = state
+        .ui
+        .runtime
+        .path
+        .buffer_path
+        .clone()
+        .unwrap_or_else(|| {
+            let typed = Path::new(input);
+            if typed.is_absolute() {
+                typed.to_owned()
+            } else {
+                state.core.cwd.join(typed)
+            }
+        });
     let (p, metadata) = {
         let fs = state.filesystem.as_file_system();
         let p = fs.canonicalize(&raw_p).unwrap_or(raw_p.clone());
@@ -284,8 +273,8 @@ fn submit_path_edit(state: &mut FileDialogState) {
             if md.is_dir {
                 let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
                 state.ui.runtime.path.edit = false;
-                state.ui.runtime.path.last_cwd = state.core.cwd.display().to_string();
-                state.ui.runtime.path.buffer = state.ui.runtime.path.last_cwd.clone();
+                state.ui.runtime.path.last_cwd.clone_from(&state.core.cwd);
+                state.ui.runtime.path.set_buffer_path(&state.core.cwd);
                 state.ui.runtime.error = None;
             } else {
                 state.ui.runtime.error = Some("Path exists but is not a directory".into());
@@ -338,7 +327,7 @@ pub(super) fn estimate_breadcrumbs_total_width(
         match comp {
             Component::Prefix(p) => {
                 saw_prefix = true;
-                crumbs.push(p.as_os_str().to_string_lossy().to_string());
+                crumbs.push(display_path(Path::new(p.as_os_str())).into_owned());
             }
             Component::RootDir => {
                 // Match IGFD: on Windows, the root separator after a drive/UNC prefix is not a
@@ -417,7 +406,10 @@ pub(super) fn draw_breadcrumbs(
         match comp {
             Component::Prefix(p) => {
                 acc.push(p.as_os_str());
-                crumbs.push((p.as_os_str().to_string_lossy().to_string(), acc.clone()));
+                crumbs.push((
+                    display_path(Path::new(p.as_os_str())).into_owned(),
+                    acc.clone(),
+                ));
                 last_is_prefix = true;
             }
             Component::RootDir => {
@@ -453,14 +445,14 @@ pub(super) fn draw_breadcrumbs(
             }
             if ui.is_item_clicked_with_button(MouseButton::Right) {
                 state.ui.runtime.path.edit = true;
-                state.ui.runtime.path.buffer = path.display().to_string();
+                state.ui.runtime.path.set_buffer_path(path);
                 state.ui.runtime.path.focus_next = true;
                 if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                     state.ui.runtime.path.input_mode = true;
                 }
             }
             if ui.is_item_hovered() {
-                ui.tooltip_text(path.display().to_string());
+                ui.tooltip_text(display_path(path).as_ref());
             }
             if auto_scroll_end && i + 1 == n && state.ui.runtime.breadcrumb.scroll_to_end_next {
                 ui.set_scroll_here_x(1.0);
@@ -479,7 +471,7 @@ pub(super) fn draw_breadcrumbs(
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
                         state.ui.runtime.path.edit = true;
-                        state.ui.runtime.path.buffer = path.display().to_string();
+                        state.ui.runtime.path.set_buffer_path(path);
                         state.ui.runtime.path.focus_next = true;
                         if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                             state.ui.runtime.path.input_mode = true;
@@ -500,14 +492,14 @@ pub(super) fn draw_breadcrumbs(
             }
             if ui.is_item_clicked_with_button(MouseButton::Right) {
                 state.ui.runtime.path.edit = true;
-                state.ui.runtime.path.buffer = path.display().to_string();
+                state.ui.runtime.path.set_buffer_path(path);
                 state.ui.runtime.path.focus_next = true;
                 if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                     state.ui.runtime.path.input_mode = true;
                 }
             }
             if ui.is_item_hovered() {
-                ui.tooltip_text(path.display().to_string());
+                ui.tooltip_text(display_path(path).as_ref());
             }
             ui.same_line();
             if label != sep_label {
@@ -518,7 +510,7 @@ pub(super) fn draw_breadcrumbs(
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
                         state.ui.runtime.path.edit = true;
-                        state.ui.runtime.path.buffer = path.display().to_string();
+                        state.ui.runtime.path.set_buffer_path(path);
                         state.ui.runtime.path.focus_next = true;
                         if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                             state.ui.runtime.path.input_mode = true;
@@ -552,7 +544,7 @@ pub(super) fn draw_breadcrumbs(
                     break;
                 }
                 if ui.is_item_hovered() {
-                    ui.tooltip_text(path.display().to_string());
+                    ui.tooltip_text(display_path(path).as_ref());
                 }
             }
         }
@@ -568,7 +560,7 @@ pub(super) fn draw_breadcrumbs(
                 }
                 if ui.is_item_clicked_with_button(MouseButton::Right) {
                     state.ui.runtime.path.edit = true;
-                    state.ui.runtime.path.buffer = parent.display().to_string();
+                    state.ui.runtime.path.set_buffer_path(parent);
                     state.ui.runtime.path.focus_next = true;
                     if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                         state.ui.runtime.path.input_mode = true;
@@ -592,14 +584,14 @@ pub(super) fn draw_breadcrumbs(
             }
             if ui.is_item_clicked_with_button(MouseButton::Right) {
                 state.ui.runtime.path.edit = true;
-                state.ui.runtime.path.buffer = path.display().to_string();
+                state.ui.runtime.path.set_buffer_path(path);
                 state.ui.runtime.path.focus_next = true;
                 if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                     state.ui.runtime.path.input_mode = true;
                 }
             }
             if ui.is_item_hovered() {
-                ui.tooltip_text(path.display().to_string());
+                ui.tooltip_text(display_path(path).as_ref());
             }
             if auto_scroll_end && i + 1 == n && state.ui.runtime.breadcrumb.scroll_to_end_next {
                 ui.set_scroll_here_x(1.0);
@@ -614,7 +606,7 @@ pub(super) fn draw_breadcrumbs(
                     }
                     if ui.is_item_clicked_with_button(MouseButton::Right) {
                         state.ui.runtime.path.edit = true;
-                        state.ui.runtime.path.buffer = path.display().to_string();
+                        state.ui.runtime.path.set_buffer_path(path);
                         state.ui.runtime.path.focus_next = true;
                         if state.ui.config.path_bar_style == PathBarStyle::Breadcrumbs {
                             state.ui.runtime.path.input_mode = true;
@@ -631,4 +623,58 @@ pub(super) fn draw_breadcrumbs(
         ui.new_line();
     }
     new_cwd
+}
+
+#[cfg(all(test, any(unix, windows)))]
+mod tests {
+    use super::*;
+    use crate::EntryId;
+    use std::ffi::OsStr;
+
+    fn assert_completes_native_child(cwd: &Path, name: &OsStr, fragment: &str) {
+        let path = cwd.join(name);
+        let entry = DirEntry {
+            id: EntryId::from_path(&path),
+            name: name.to_string_lossy().into_owned(),
+            path: path.clone(),
+            is_dir: true,
+            is_symlink: false,
+            size: None,
+            modified: None,
+        };
+        let prefix = display_path(cwd);
+        let sep = std::path::MAIN_SEPARATOR;
+        let input = format!("{prefix}{sep}{fragment}");
+        let expected = format!("{prefix}{sep}{}{sep}", entry.name);
+        assert_eq!(
+            PathBarCallback::complete_path(&input, cwd, std::iter::once(&entry)),
+            Some((expected, Some(path)))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn completes_displayed_verbatim_disk_and_unc_paths() {
+        for path in [r"\\?\C:\folder", r"\\?\UNC\server\share\folder"] {
+            assert_completes_native_child(Path::new(path), OsStr::new("subfolder"), "su");
+        }
+    }
+
+    #[test]
+    fn completes_lossy_display_without_losing_native_names() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let cwd = Path::new(OsStr::from_bytes(b"/folder\xff"));
+            assert_completes_native_child(cwd, OsStr::from_bytes(b"su\\b\xfe"), "su\\");
+        }
+        #[cfg(windows)]
+        {
+            use std::ffi::OsString;
+            use std::os::windows::ffi::OsStringExt;
+            let name = OsString::from_wide(&[b's' as u16, b'u' as u16, 0xD800]);
+            let cwd = Path::new(r"\\?\C:\folder").join(&name);
+            assert_completes_native_child(&cwd, &name, "su");
+        }
+    }
 }

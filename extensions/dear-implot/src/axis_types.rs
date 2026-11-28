@@ -7,10 +7,10 @@ pub(crate) const IMPLOT_AUTO: i32 = -1;
 #[repr(i32)]
 pub enum AxisScale {
     #[default]
-    Linear = sys::ImPlotScale_Linear as i32,
-    Time = sys::ImPlotScale_Time as i32,
-    Log10 = sys::ImPlotScale_Log10 as i32,
-    SymLog = sys::ImPlotScale_SymLog as i32,
+    Linear = sys::ImPlotScale_Linear as _,
+    Time = sys::ImPlotScale_Time as _,
+    Log10 = sys::ImPlotScale_Log10 as _,
+    SymLog = sys::ImPlotScale_SymLog as _,
 }
 
 /// Choice of Y axis for multi-axis plots

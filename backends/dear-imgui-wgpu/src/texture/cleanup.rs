@@ -54,11 +54,12 @@ impl WgpuTextureManager {
                 row_pitch,
                 pixels,
             } => {
-                if self.destroyed_managed_textures.contains_key(&id) {
+                if self.managed_textures.is_destroyed(id) {
                     // A delayed create must not resurrect a resource after its destroy request.
                     return Ok(ManagedRequestOutcome::Superseded);
                 }
-                if let Some(existing) = self.managed_textures.get(&id)
+                let existing = self.managed_textures.get(id);
+                if let Some(existing) = existing
                     && (existing.width != *width || existing.height != *height)
                 {
                     return Err(RendererError::ManagedTextureLayoutMismatch {
@@ -70,13 +71,13 @@ impl WgpuTextureManager {
                 let (resource, rgba_pixels) = Self::create_managed_texture_resource(
                     device, queue, *format, *width, *height, *row_pitch, pixels,
                 )?;
-                let texture_id = if let Some(existing) = self.managed_textures.get_mut(&id) {
-                    existing.resource = resource;
-                    existing.rgba_pixels = rgba_pixels;
-                    existing.texture_id
-                } else {
-                    let texture_id = self.allocate_managed_texture_id()?;
-                    self.managed_textures.insert(
+                let texture_id = match existing {
+                    Some(existing) => existing.texture_id,
+                    None => self.allocate_managed_texture_id()?,
+                };
+                if self
+                    .managed_textures
+                    .insert(
                         id,
                         ManagedWgpuTexture {
                             texture_id,
@@ -85,10 +86,12 @@ impl WgpuTextureManager {
                             resource,
                             rgba_pixels,
                         },
-                    );
-                    self.managed_by_texture_id.insert(texture_id, id);
-                    texture_id
-                };
+                    )
+                    .is_err()
+                {
+                    return Ok(ManagedRequestOutcome::Superseded);
+                }
+                self.managed_by_texture_id.insert(texture_id, id);
                 render_resources.remove_image_bind_group(texture_id);
                 Ok(ManagedRequestOutcome::Uploaded(texture_id))
             }
@@ -98,27 +101,28 @@ impl WgpuTextureManager {
                 height,
                 rects,
             } => {
-                if self.destroyed_managed_textures.contains_key(&id) {
+                if self.managed_textures.is_destroyed(id) {
                     return Ok(ManagedRequestOutcome::Superseded);
                 }
-                self.update_managed_texture(device, queue, id, *format, [*width, *height], rects)?;
-                let texture_id = self
-                    .managed_texture_id(id)
-                    .ok_or(RendererError::ManagedTextureMissing(id))?;
-                render_resources.remove_image_bind_group(texture_id);
+                let (texture_id, replaced) = self.update_managed_texture(
+                    device,
+                    queue,
+                    id,
+                    *format,
+                    [*width, *height],
+                    rects,
+                )?;
+                if replaced {
+                    render_resources.remove_image_bind_group(texture_id);
+                }
                 Ok(ManagedRequestOutcome::Uploaded(texture_id))
             }
             TextureOp::Destroy => {
-                self.destroyed_managed_textures
-                    .entry(id)
-                    .and_modify(|destroy_epoch| {
-                        *destroy_epoch = (*destroy_epoch).max(request_epoch);
-                    })
-                    .or_insert(request_epoch);
-                if let Some(entry) = self.managed_textures.remove(&id) {
+                if let Some(entry) = self.managed_textures.remove(id) {
                     self.managed_by_texture_id.remove(&entry.texture_id);
                     render_resources.remove_image_bind_group(entry.texture_id);
                 }
+                self.managed_textures.acknowledge_destroy(id, request_epoch);
                 // Repeated destroy requests are intentionally acknowledged even after the GPU
                 // resource is gone. The Context may be retrying feedback from an abandoned epoch.
                 Ok(ManagedRequestOutcome::Destroyed)

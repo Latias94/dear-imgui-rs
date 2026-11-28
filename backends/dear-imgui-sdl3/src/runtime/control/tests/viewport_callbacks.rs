@@ -18,8 +18,10 @@ fn framebuffer_scale_callback_rejects_invalid_density_before_native_geometry() {
             Rc::new(Cell::new(0)),
             synthetic_create_window,
         );
-        let mut viewport = sys::ImGuiViewport::default();
-        viewport.FramebufferScale = sys::ImVec2 { x: 2.0, y: 2.0 };
+        let mut viewport = sys::ImGuiViewport {
+            FramebufferScale: sys::ImVec2 { x: 2.0, y: 2.0 },
+            ..Default::default()
+        };
         context
             .binding()
             .with_bound_context(|| unsafe { create_window_callback_for_test(&mut viewport) });
@@ -272,12 +274,14 @@ fn deferred_restore_rejects_a_reused_viewport_address_with_a_new_id() {
         Rc::new(Cell::new(0)),
         synthetic_create_window,
     );
-    let mut viewport = sys::ImGuiViewport::default();
-    viewport.ID = 41;
-    viewport.PlatformUserData = FOREIGN_VIEWPORT_DATA as *mut _;
-    viewport.PlatformHandle = FOREIGN_VIEWPORT_HANDLE as *mut _;
-    viewport.PlatformHandleRaw = FOREIGN_VIEWPORT_HANDLE_RAW as *mut _;
-    viewport.RendererUserData = FOREIGN_BACKEND_DATA as *mut _;
+    let mut viewport = sys::ImGuiViewport {
+        ID: 41,
+        PlatformUserData: FOREIGN_VIEWPORT_DATA as *mut _,
+        PlatformHandle: FOREIGN_VIEWPORT_HANDLE as *mut _,
+        PlatformHandleRaw: FOREIGN_VIEWPORT_HANDLE_RAW as *mut _,
+        RendererUserData: FOREIGN_BACKEND_DATA as *mut _,
+        ..Default::default()
+    };
 
     runtime.control.callback_teardown_active.set(true);
     runtime
@@ -315,10 +319,12 @@ fn owned_platform_lease_accepts_an_in_place_docking_id_change() {
         Rc::new(Cell::new(0)),
         synthetic_create_window,
     );
-    let mut viewport = sys::ImGuiViewport::default();
-    viewport.ID = 41;
-    viewport.PlatformUserData = OWNED_VIEWPORT_DATA as *mut _;
-    viewport.PlatformHandle = OWNED_VIEWPORT_HANDLE as *mut _;
+    let mut viewport = sys::ImGuiViewport {
+        ID: 41,
+        PlatformUserData: OWNED_VIEWPORT_DATA as *mut _,
+        PlatformHandle: OWNED_VIEWPORT_HANDLE as *mut _,
+        ..Default::default()
+    };
     runtime
         .control
         .remember_owned_viewport(&mut viewport, unsafe {
@@ -348,10 +354,12 @@ fn owned_platform_lease_rejects_reused_address_with_foreign_sidecar() {
         Rc::new(Cell::new(0)),
         synthetic_create_window,
     );
-    let mut viewport = sys::ImGuiViewport::default();
-    viewport.ID = 41;
-    viewport.PlatformUserData = OWNED_VIEWPORT_DATA as *mut _;
-    viewport.PlatformHandle = OWNED_VIEWPORT_HANDLE as *mut _;
+    let mut viewport = sys::ImGuiViewport {
+        ID: 41,
+        PlatformUserData: OWNED_VIEWPORT_DATA as *mut _,
+        PlatformHandle: OWNED_VIEWPORT_HANDLE as *mut _,
+        ..Default::default()
+    };
     runtime
         .control
         .remember_owned_viewport(&mut viewport, unsafe {
@@ -829,8 +837,10 @@ fn sdlgpu_create_failure_clears_upstream_sentinel_before_destroy_can_release_it(
             Rc::new(Cell::new(0)),
             synthetic_create_window,
         );
-        let mut viewport = sys::ImGuiViewport::default();
-        viewport.RendererUserData = OWNED_BACKEND_DATA as *mut _;
+        let mut viewport = sys::ImGuiViewport {
+            RendererUserData: OWNED_BACKEND_DATA as *mut _,
+            ..Default::default()
+        };
 
         runtime.control.record_native_faults(fault, fault);
         unsafe { finish_sdlgpu_renderer_create(&runtime.control, &mut viewport, fault) };

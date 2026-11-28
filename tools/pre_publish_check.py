@@ -298,7 +298,7 @@ def release_test_commands(use_nextest: bool) -> list[tuple[str, list[str]]]:
                 "dear-imgui-wgpu",
                 "--no-default-features",
                 "--features",
-                "wgpu-30,tracing",
+                "tracing",
             ],
         ),
     )
@@ -387,10 +387,6 @@ def check_pregenerated_bindings(repo_root: Path) -> Tuple[bool, List[str]]:
 
     for label, relative_path in (
         (
-            "dear-imgui-sys Windows ABI profile",
-            "dear-imgui-sys/src/bindings_pregenerated_windows.rs",
-        ),
-        (
             "dear-imgui-sys WASM import profile",
             "dear-imgui-sys/src/wasm_bindings_pregenerated.rs",
         ),
@@ -433,14 +429,10 @@ def check_core_binding_contract(
 ) -> Tuple[bool, List[str]]:
     """Regenerate every supported core ABI profile and require exact parity."""
     print_check("Core binding specification and ABI profiles")
-    # Keep in sync with CANONICAL_BINDING_RUSTC_VERSION in binding/spec.rs.
-    toolchain = "1.95.0"
-    command = ["cargo", f"+{toolchain}", "run", "-p", "xtask", "--", "verify-bindings"]
+    command = ["cargo", "run", "-p", "xtask", "--", "verify-bindings"]
     if allow_dirty:
         command.append("--allow-dirty")
-    binding_env = os.environ.copy()
-    binding_env["RUSTUP_TOOLCHAIN"] = toolchain
-    code, stdout, stderr = run_command(command, cwd=repo_root, capture=True, env=binding_env)
+    code, stdout, stderr = run_command(command, cwd=repo_root, capture=True)
     if code != 0:
         detail = stderr.strip() or stdout.strip() or "core binding verification failed"
         print_error(detail)

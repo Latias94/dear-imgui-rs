@@ -148,9 +148,12 @@ impl Default for DemoState {
 
 impl AppWindow {
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
+        let descriptor = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
+            event_loop.owned_display_handle(),
+        ));
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
+            ..descriptor
         });
 
         let window = {
@@ -160,7 +163,7 @@ impl AppWindow {
             Arc::new(
                 event_loop.create_window(
                     Window::default_attributes()
-                        .with_title(&format!("Dear ImGui + ImGuizmo Example - {version}"))
+                        .with_title(format!("Dear ImGui + ImGuizmo Example - {version}"))
                         .with_inner_size(size),
                 )?,
             )
@@ -526,7 +529,7 @@ impl AppWindow {
                         ui.checkbox("Minimap", &mut self.state.graph_minimap_enabled);
                         ui.same_line();
                         ui.set_next_item_width(100.0);
-                        let _ = ui.slider("Snap", 0.0, 50.0, &mut self.state.graph_snap);
+                        let _ = ui.slider("Snap", &mut self.state.graph_snap, 0.0, 50.0);
                         ui.same_line();
                         ui.text(format!(
                             "Selected: {} nodes",
@@ -548,57 +551,54 @@ impl AppWindow {
                             self.state.graph_ctx_evt = Some(evt);
                             ui.open_popup("GraphCtx");
                         }
-                        if let Some(_popup) = ui.begin_popup("GraphCtx") {
-                            if let Some(evt) = self.state.graph_ctx_evt {
-                                if let Some(nid) = evt.node {
-                                    if ui.menu_item("Delete Node") {
-                                        self.state.graph_view.selected_nodes.clear();
-                                        self.state.graph_view.selected_nodes.insert(nid);
-                                        dear_imguizmo::graph::delete_selected(
-                                            &mut self.state.graph,
-                                            &mut self.state.graph_view,
-                                        );
-                                        self.state.graph_ctx_evt = None;
-                                    }
-                                } else {
-                                    if ui.menu_item("Add Node Here") {
-                                        // convert screen pos to world
-                                        let [wx, wy] = ui.window_pos();
-                                        let mp = evt.mouse_pos;
-                                        let wpos = [
-                                            (mp[0] - wx - self.state.graph_view.pan[0])
-                                                / self.state.graph_view.zoom,
-                                            (mp[1] - wy - self.state.graph_view.pan[1])
-                                                / self.state.graph_view.zoom,
-                                        ];
-                                        let nid = self.state.graph.alloc_node_id();
-                                        let mut node =
-                                            Node::new(nid, (wpos[0], wpos[1]), "New Node");
-                                        let pin_in = self.state.graph.alloc_pin_id();
-                                        let pin_out = self.state.graph.alloc_pin_id();
-                                        node.inputs.push(Pin::colored(
-                                            pin_in,
-                                            "In",
-                                            PinKind::Input,
-                                            [0.78, 0.39, 0.39, 1.0],
-                                        ));
-                                        node.outputs.push(Pin::colored(
-                                            pin_out,
-                                            "Out",
-                                            PinKind::Output,
-                                            [0.39, 0.78, 0.39, 1.0],
-                                        ));
-                                        self.state.graph.nodes.push(node);
-                                        self.state.graph_ctx_evt = None;
-                                    }
-                                }
-                                if ui.menu_item("Delete Selected") {
+                        if let Some(_popup) = ui.begin_popup("GraphCtx")
+                            && let Some(evt) = self.state.graph_ctx_evt
+                        {
+                            if let Some(nid) = evt.node {
+                                if ui.menu_item("Delete Node") {
+                                    self.state.graph_view.selected_nodes.clear();
+                                    self.state.graph_view.selected_nodes.insert(nid);
                                     dear_imguizmo::graph::delete_selected(
                                         &mut self.state.graph,
                                         &mut self.state.graph_view,
                                     );
                                     self.state.graph_ctx_evt = None;
                                 }
+                            } else if ui.menu_item("Add Node Here") {
+                                // convert screen pos to world
+                                let [wx, wy] = ui.window_pos();
+                                let mp = evt.mouse_pos;
+                                let wpos = [
+                                    (mp[0] - wx - self.state.graph_view.pan[0])
+                                        / self.state.graph_view.zoom,
+                                    (mp[1] - wy - self.state.graph_view.pan[1])
+                                        / self.state.graph_view.zoom,
+                                ];
+                                let nid = self.state.graph.alloc_node_id();
+                                let mut node = Node::new(nid, (wpos[0], wpos[1]), "New Node");
+                                let pin_in = self.state.graph.alloc_pin_id();
+                                let pin_out = self.state.graph.alloc_pin_id();
+                                node.inputs.push(Pin::colored(
+                                    pin_in,
+                                    "In",
+                                    PinKind::Input,
+                                    [0.78, 0.39, 0.39, 1.0],
+                                ));
+                                node.outputs.push(Pin::colored(
+                                    pin_out,
+                                    "Out",
+                                    PinKind::Output,
+                                    [0.39, 0.78, 0.39, 1.0],
+                                ));
+                                self.state.graph.nodes.push(node);
+                                self.state.graph_ctx_evt = None;
+                            }
+                            if ui.menu_item("Delete Selected") {
+                                dear_imguizmo::graph::delete_selected(
+                                    &mut self.state.graph,
+                                    &mut self.state.graph_view,
+                                );
+                                self.state.graph_ctx_evt = None;
                             }
                         }
                     });
@@ -641,10 +641,11 @@ impl AppWindow {
                             100.0,
                         );
                         let count = self.state.gizmo_count.clamp(1, 4) as usize;
+                        let matrices = self.state.objects.map(|model| model.to_cols_array());
                         giz.draw_cubes(
                             &self.state.camera_view,
                             &self.state.camera_proj,
-                            &self.state.objects[0..count],
+                            &matrices[..count],
                         );
 
                         // Manipulate each cube (window drawlist already set)
@@ -694,10 +695,11 @@ impl AppWindow {
                     100.0,
                 );
                 let count = self.state.gizmo_count.clamp(1, 4) as usize;
+                let matrices = self.state.objects.map(|model| model.to_cols_array());
                 giz.draw_cubes(
                     &self.state.camera_view,
                     &self.state.camera_proj,
-                    &self.state.objects[0..count],
+                    &matrices[..count],
                 );
                 // Manipulate (foreground drawlist already set)
                 for i in 0..count {

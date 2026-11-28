@@ -31,6 +31,7 @@ fn slider_vector_helpers_no_panic() {
     let mut i4 = [0i32, 1, 2, 3];
 
     let _ = ui.window("Sliders").build(|| {
+        let _ = ui.slider("scalar", &mut f2[0], 0.0, 10.0);
         let _ = ui.slider_float2("f2", &mut f2, 0.0, 10.0);
         let _ = ui.slider_float3("f3", &mut f3, 0.0, 10.0);
         let _ = ui.slider_float4("f4", &mut f4, 0.0, 10.0);
@@ -78,7 +79,7 @@ fn scalar_array_widgets_reject_invalid_component_counts() {
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = imgui::Drag::<f32, _>::new("empty_drag").build_array(ui, &mut empty);
+                let _ = ui.drag_float_config("empty_drag").build_array(&mut empty);
             }))
             .is_err()
         );
@@ -93,9 +94,10 @@ fn scalar_array_widgets_reject_invalid_component_counts() {
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = imgui::Drag::<f32, _>::new("marker_drag")
+                let _ = ui
+                    .drag_float_config("marker_drag")
                     .flags(imgui::DragFlags::COLOR_MARKERS)
-                    .build_array(ui, &mut five);
+                    .build_array(&mut five);
             }))
             .is_err()
         );
@@ -170,13 +172,21 @@ fn slider_widgets_reject_unsupported_flags_and_ranges() {
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = imgui::VerticalSlider::new(
-                    "vertical_range_slider",
-                    [20.0, 100.0],
-                    i32::MIN,
-                    i32::MAX,
-                )
-                .build(ui, &mut i32_value);
+                let _ = ui
+                    .v_slider_config("vertical_range_slider", [20.0, 100.0], i32::MIN, i32::MAX)
+                    .build(&mut i32_value);
+            }))
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = ui.v_slider_f32(
+                    "vertical_nan_size",
+                    [f32::NAN, 100.0],
+                    &mut f32_value,
+                    0.0,
+                    1.0,
+                );
             }))
             .is_err()
         );
@@ -190,17 +200,19 @@ fn slider_widgets_reject_unsupported_flags_and_ranges() {
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = imgui::AngleSlider::new("angle_wrap_slider")
+                let _ = ui
+                    .slider_angle_config("angle_wrap_slider")
                     .flags(wrap_around)
-                    .build(ui, &mut angle);
+                    .build(&mut angle);
             }))
             .is_err()
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = imgui::AngleSlider::new("angle_nan_slider")
+                let _ = ui
+                    .slider_angle_config("angle_nan_slider")
                     .range_degrees(f32::NAN, 360.0)
-                    .build(ui, &mut angle);
+                    .build(&mut angle);
             }))
             .is_err()
         );
@@ -265,17 +277,19 @@ fn drag_widgets_reject_unsupported_flags() {
     let _ = ui.window("Invalid drags").build(|| {
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = imgui::Drag::<f32, _>::new("unsupported_drag")
+                let _ = ui
+                    .drag_float_config("unsupported_drag")
                     .flags(unsupported)
-                    .build(ui, &mut value);
+                    .build(&mut value);
             }))
             .is_err()
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = imgui::Drag::<f32, _>::new("unsupported_drag_array")
+                let _ = ui
+                    .drag_float_config("unsupported_drag_array")
                     .flags(unsupported)
-                    .build_array(ui, &mut values);
+                    .build_array(&mut values);
             }))
             .is_err()
         );
@@ -284,7 +298,7 @@ fn drag_widgets_reject_unsupported_flags() {
                 let _ = ui
                     .drag_float_range2_config("unsupported_drag_range")
                     .flags(unsupported)
-                    .build(ui, &mut min, &mut max);
+                    .build(&mut min, &mut max);
             }))
             .is_err()
         );

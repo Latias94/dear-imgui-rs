@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::item_style::{Plot3DItemStyle, plot3d_spec_with_style};
-use crate::plots::{Plot3DError, primitive_vertex_count};
+use crate::plots::{Plot3DError, primitive_vertex_count, validate_item_label};
 use crate::{Item3DFlags, Mesh3DFlags, Plot3DDataLayout, Plot3DScope, len_i32, sys};
 
 /// Mesh plot builder
@@ -25,8 +25,10 @@ impl<'ui> Mesh3DBuilder<'ui> {
         let _ = self.try_plot();
     }
 
-    /// Checks the triangle indices and submits the mesh.
+    /// Checks the label and triangle indices and submits the mesh.
     pub fn try_plot(self) -> Result<(), Plot3DError> {
+        let label = self.label.as_ref();
+        validate_item_label(label)?;
         let draw_lines = !self.flags.contains(Mesh3DFlags::NO_LINES);
         let (vtx_count, idx_count) = mesh_counts(self.vertices.len(), self.indices, draw_lines)?;
         self._ui.with_bound_context(|| {
@@ -39,8 +41,6 @@ impl<'ui> Mesh3DBuilder<'ui> {
                 zs.push(z);
             }
 
-            let label = self.label.as_ref();
-            let label = if label.contains('\0') { "mesh" } else { label };
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
                 let spec = plot3d_spec_with_style(
                     &self._ui.next_item,

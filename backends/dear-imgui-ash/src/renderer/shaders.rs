@@ -117,4 +117,17 @@ mod tests {
     fn checked_in_vertex_spirv_parses() {
         vertex_spirv().expect("checked-in vertex SPIR-V must parse");
     }
+
+    #[test]
+    fn fragment_decode_matches_the_shared_srgb_transfer_constants() {
+        use dear_imgui_backend_support::{
+            SRGB_DECODE_THRESHOLD, SRGB_EXPONENT, SRGB_LINEAR_DIVISOR, SRGB_OFFSET, SRGB_SCALE,
+        };
+
+        let source = include_str!("../shaders/shader.frag");
+        assert!(source.contains(&format!("rgb / {SRGB_LINEAR_DIVISOR}")));
+        assert!(source.contains(&format!("(rgb + {SRGB_OFFSET}) / {SRGB_SCALE}")));
+        assert!(source.contains(&format!("vec3({SRGB_EXPONENT})")));
+        assert!(source.contains(&format!("vec3({SRGB_DECODE_THRESHOLD})")));
+    }
 }

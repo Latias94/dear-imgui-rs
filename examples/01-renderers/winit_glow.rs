@@ -308,7 +308,7 @@ impl AppWindow {
                 ui.text("Welcome to Dear ImGui with Glow backend!");
                 ui.separator();
 
-                ui.text(&format!(
+                ui.text(format!(
                     "Application average {:.3} ms/frame ({:.1} FPS)",
                     1000.0 / ui.io().framerate(),
                     ui.io().framerate()
@@ -355,7 +355,7 @@ impl AppWindow {
             gl.disable(glow::FRAMEBUFFER_SRGB);
         }
 
-        self.imgui.platform.prepare_render(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(ui, &self.window)?;
         let pending_frame = self
             .imgui
             .context

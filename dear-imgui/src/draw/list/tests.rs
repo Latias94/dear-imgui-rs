@@ -1,7 +1,5 @@
-use super::super::color::ImColor32;
-use super::super::counts::{DrawFlags, DrawNgonSegmentCount, DrawSegmentCount};
-use super::super::util::draw_list_counts;
 use super::{DrawListMut, DrawListProvenance};
+use crate::draw::{DrawFlags, DrawNgonSegmentCount, DrawSegmentCount, ImColor32, draw_list_counts};
 use crate::sys;
 
 struct TestDrawList {
@@ -371,7 +369,7 @@ fn standard_sampler_commands_are_safe_and_preserve_order() {
         ui.window("standard sampler commands")
             .size([96.0, 96.0], crate::Condition::Always)
             .build(|| {
-                let draw_list = ui.get_window_draw_list();
+                let draw_list = DrawListMut::window(ui);
                 draw_list.set_sampler_nearest();
                 draw_list
                     .add_rect([8.0, 8.0], [24.0, 24.0], ImColor32::WHITE)
@@ -429,7 +427,7 @@ fn standard_sampler_commands_validate_backend_support_before_ffi() {
         .build();
 
     let ui = context.frame();
-    let draw_list = ui.get_window_draw_list();
+    let draw_list = DrawListMut::window(ui);
     let before = draw_list_counts(draw_list.draw_list);
     let commands_before = unsafe { (*draw_list.draw_list).CmdBuffer.Size };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -468,7 +466,7 @@ fn text_and_clip_inputs_validate_before_ffi() {
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = ctx.frame();
-    let draw_list = ui.get_window_draw_list();
+    let draw_list = DrawListMut::window(ui);
     let raw_draw_list = draw_list.draw_list;
     let font = ui.current_font();
     let before = draw_list_counts(raw_draw_list);
@@ -494,6 +492,59 @@ fn text_and_clip_inputs_validate_before_ffi() {
         unsafe { (*raw_draw_list)._ClipRectStack.Size },
         clip_stack_size
     );
+}
+
+#[test]
+fn draw_list_validates_explicit_fonts_against_its_own_context() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let other = crate::Context::create();
+    let foreign_font = other
+        .font_atlas()
+        .add_font(&[crate::fonts::FontSource::default_font()]);
+    let other_binding = other.binding();
+    let _other = other;
+
+    let mut owner = crate::Context::create();
+    owner.prepare_frame(crate::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+    owner
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    let ui = owner.frame();
+    let draw_list = ui.get_background_draw_list();
+    let owner_font = ui.current_font();
+    other_binding.with_bound_context(|| {
+        let current = unsafe { sys::igGetCurrentContext() };
+        // Empty text isolates the font ownership check from native glyph rendering.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.add_text_with_font(
+                foreign_font,
+                13.0,
+                [0.0, 0.0],
+                ImColor32::WHITE,
+                "",
+                0.0,
+                None,
+            );
+        }));
+        assert!(
+            result.is_err(),
+            "a font from the current but foreign context was accepted"
+        );
+        draw_list.add_text_with_font(
+            owner_font,
+            13.0,
+            [0.0, 0.0],
+            ImColor32::WHITE,
+            "x",
+            0.0,
+            None,
+        );
+        draw_list.add_text([16.0, 0.0], ImColor32::WHITE, "y");
+        assert_eq!(unsafe { sys::igGetCurrentContext() }, current);
+    });
+    assert!(draw_list_counts(draw_list.draw_list).0 > 0);
 }
 
 #[test]
@@ -847,7 +898,7 @@ fn draw_flag_scopes_reject_stale_window_views_before_mutation() {
     let ui: &crate::Ui = context.frame();
     let draw_list = ui
         .window("draw flag stale provenance")
-        .build(|| ui.get_window_draw_list())
+        .build(|| DrawListMut::window(ui))
         .unwrap();
     let raw = draw_list.draw_list;
     let initial_flags = unsafe { (*raw).Flags };
@@ -877,7 +928,7 @@ fn draw_flag_scope_window_order_violations_recover_without_double_panic() {
     let ui = context.frame();
 
     let tooltip = ui.begin_tooltip().unwrap();
-    let draw_list = ui.get_window_draw_list();
+    let draw_list = DrawListMut::window(ui);
     let raw = draw_list.draw_list;
     let initial_flags = unsafe { (*raw).Flags };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -889,7 +940,7 @@ fn draw_flag_scope_window_order_violations_recover_without_double_panic() {
     drop(draw_list);
     ui.text("window end recovered after the flag scope");
 
-    let draw_list = ui.get_window_draw_list();
+    let draw_list = DrawListMut::window(ui);
     let raw = draw_list.draw_list;
     let initial_flags = unsafe { (*raw).Flags };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -934,5 +985,450 @@ fn draw_flag_scopes_bind_the_owner_context_and_restore_the_previous_context() {
     unsafe {
         sys::igSetCurrentContext(owner);
         sys::igDestroyContext(foreign);
+    }
+}
+
+mod scopes {
+    use super::{DrawListMut, DrawListProvenance, sys};
+    use crate::internal::len_i32;
+
+    fn in_frame(test: impl FnOnce(&crate::Ui)) {
+        let _guard = crate::test_support::imgui_context_guard();
+        let mut context = crate::Context::create();
+        context.io_mut().set_display_size([128.0, 128.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        context
+            .set_ini_filename::<std::path::PathBuf>(None)
+            .unwrap();
+        test(context.frame());
+        assert!(context.end_frame());
+    }
+
+    #[test]
+    fn with_clip_rect_pops_after_panic() {
+        let mut ctx = crate::Context::create();
+        {
+            let io = ctx.io_mut();
+            io.set_display_size([128.0, 128.0]);
+            io.set_delta_time(1.0 / 60.0);
+        }
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
+        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+
+        let ui = ctx.frame();
+        let draw_list = DrawListMut::window(ui);
+        let raw_draw_list = draw_list.draw_list;
+        let initial_stack_size = unsafe { (*raw_draw_list)._ClipRectStack.Size };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.with_clip_rect([0.0, 0.0], [8.0, 8.0], || {
+                assert_eq!(
+                    unsafe { (*raw_draw_list)._ClipRectStack.Size },
+                    initial_stack_size + 1
+                );
+                panic!("forced panic while draw-list clip rect is pushed");
+            });
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(
+            unsafe { (*raw_draw_list)._ClipRectStack.Size },
+            initial_stack_size
+        );
+    }
+
+    #[test]
+    fn with_texture_pops_after_panic() {
+        let mut ctx = crate::Context::create();
+        {
+            let io = ctx.io_mut();
+            io.set_display_size([128.0, 128.0]);
+            io.set_delta_time(1.0 / 60.0);
+        }
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
+        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+
+        let ui = ctx.frame();
+        let draw_list = DrawListMut::window(ui);
+        let raw_draw_list = draw_list.draw_list;
+        let initial_stack_size = unsafe { (*raw_draw_list)._TextureStack.Size };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.with_texture(crate::texture::TextureId::new(1), || {
+                assert_eq!(
+                    unsafe { (*raw_draw_list)._TextureStack.Size },
+                    initial_stack_size + 1
+                );
+                panic!("forced panic while draw-list texture is pushed");
+            });
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(
+            unsafe { (*raw_draw_list)._TextureStack.Size },
+            initial_stack_size
+        );
+    }
+
+    #[test]
+    fn draw_list_clip_tokens_reject_out_of_order_drop_and_recover() {
+        let mut ctx = crate::Context::create();
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
+
+        let ui = ctx.frame();
+        let draw_list = DrawListMut::window(ui);
+        let raw = draw_list.draw_list;
+        let initial = unsafe { (*raw)._ClipRectStack.Size };
+        let outer = draw_list.push_clip_rect([0.0, 0.0], [64.0, 64.0], false);
+        let inner = draw_list.push_clip_rect([8.0, 8.0], [32.0, 32.0], true);
+
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(outer)))
+            .expect_err("out-of-order clip token should panic");
+        let message = panic
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("non-string panic payload");
+        assert!(message.contains("native scope order violation"));
+        assert_eq!(unsafe { (*raw)._ClipRectStack.Size }, initial + 2);
+
+        drop(inner);
+        assert_eq!(unsafe { (*raw)._ClipRectStack.Size }, initial);
+        ui.text("draw-list clip stack recovered");
+    }
+
+    #[test]
+    fn draw_list_texture_tokens_reject_out_of_order_drop_and_recover() {
+        let mut ctx = crate::Context::create();
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
+
+        let ui = ctx.frame();
+        let draw_list = DrawListMut::window(ui);
+        let raw = draw_list.draw_list;
+        let initial = unsafe { (*raw)._TextureStack.Size };
+        let outer = draw_list.push_texture(crate::texture::TextureId::new(1));
+        let inner = draw_list.push_texture(crate::texture::TextureId::new(2));
+
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(outer)))
+            .expect_err("out-of-order texture token should panic");
+        let message = panic
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("non-string panic payload");
+        assert!(message.contains("native scope order violation"));
+        assert_eq!(unsafe { (*raw)._TextureStack.Size }, initial + 2);
+
+        drop(inner);
+        assert_eq!(unsafe { (*raw)._TextureStack.Size }, initial);
+        ui.text("draw-list texture stack recovered");
+    }
+
+    #[test]
+    fn window_draw_list_rejects_use_after_its_begin_scope_before_ffi() {
+        let mut ctx = crate::Context::create();
+        {
+            let io = ctx.io_mut();
+            io.set_display_size([128.0, 128.0]);
+            io.set_delta_time(1.0 / 60.0);
+        }
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
+        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+
+        let ui = ctx.frame();
+        let ui_ref: &crate::Ui = ui;
+        let draw_list = ui_ref
+            .window("window draw-list provenance")
+            .build(|| DrawListMut::window(ui_ref))
+            .expect("the source window should submit");
+        let raw = draw_list.draw_list;
+        let initial = unsafe { (*raw)._ClipRectStack.Size };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = draw_list.push_clip_rect([0.0, 0.0], [8.0, 8.0], false);
+        }));
+        assert!(result.is_err());
+        assert_eq!(unsafe { (*raw)._ClipRectStack.Size }, initial);
+    }
+
+    #[test]
+    fn window_draw_list_rejects_command_submission_from_a_nested_window() {
+        let mut context = crate::Context::create();
+        context.prepare_frame(crate::FramePrepareOptions::new([256.0, 256.0], 1.0 / 60.0));
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let ui = context.frame();
+        ui.window("Owner of draw list")
+            .build(|| {
+                ui.with_window_draw_list(|draw_list| {
+                    let commands = || unsafe { (*draw_list.draw_list).CmdBuffer.Size };
+                    let before = commands();
+                    ui.window("Another window")
+                        .build(|| {
+                            let result =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    draw_list.add_draw_cmd();
+                                }));
+                            assert!(result.is_err());
+                            assert_eq!(commands(), before);
+                        })
+                        .expect("nested window should submit");
+                    draw_list.add_draw_cmd();
+                    assert_eq!(commands(), before + 1);
+                })
+            })
+            .expect("owner window should submit");
+    }
+
+    #[test]
+    fn window_draw_list_rejects_a_later_begin_of_the_same_window_before_ffi() {
+        let mut ctx = crate::Context::create();
+        {
+            let io = ctx.io_mut();
+            io.set_display_size([128.0, 128.0]);
+            io.set_delta_time(1.0 / 60.0);
+        }
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
+        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+
+        let ui = ctx.frame();
+        let draw_list = ui
+            .window("reopened window draw-list provenance")
+            .build(|| DrawListMut::window(ui))
+            .expect("the source window should submit");
+        let raw = draw_list.draw_list;
+
+        ui.window("reopened window draw-list provenance").build(|| {
+            let initial = unsafe { (*raw)._ClipRectStack.Size };
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = draw_list.push_clip_rect([0.0, 0.0], [8.0, 8.0], false);
+            }));
+            assert!(result.is_err());
+            assert_eq!(unsafe { (*raw)._ClipRectStack.Size }, initial);
+        });
+    }
+
+    #[test]
+    fn window_draw_list_survives_internal_reentry_of_its_window() {
+        let mut ctx = crate::Context::create();
+        {
+            let io = ctx.io_mut();
+            io.set_display_size([128.0, 128.0]);
+            io.set_delta_time(1.0 / 60.0);
+            io.set_config_flags(io.config_flags() | crate::ConfigFlags::DOCKING_ENABLE);
+        }
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
+        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+
+        let ui = ctx.frame();
+        let host_name = format!("WindowOverViewport_{:08X}", ui.main_viewport().id().raw());
+        ui.window(host_name).build(|| {
+            let draw_list = DrawListMut::window(ui);
+            let raw = draw_list.draw_list;
+            let initial = unsafe { (*raw)._ClipRectStack.Size };
+
+            let _ = ui.dock_space_over_main_viewport_raw(0.into(), crate::DockNodeFlags::NONE);
+
+            drop(draw_list.push_clip_rect([0.0, 0.0], [8.0, 8.0], false));
+            assert_eq!(unsafe { (*raw)._ClipRectStack.Size }, initial);
+        });
+    }
+
+    #[test]
+    fn frame_draw_lists_may_outlive_the_window_that_acquired_the_wrapper() {
+        let mut ctx = crate::Context::create();
+        {
+            let io = ctx.io_mut();
+            io.set_display_size([128.0, 128.0]);
+            io.set_delta_time(1.0 / 60.0);
+        }
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
+        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+
+        let ui = ctx.frame();
+        let ui_ref: &crate::Ui = ui;
+        let draw_list = ui_ref
+            .window("frame draw-list source window")
+            .build(|| ui_ref.get_background_draw_list())
+            .expect("the source window should submit");
+        let raw = draw_list.draw_list;
+        let initial = unsafe { (*raw)._ClipRectStack.Size };
+
+        draw_list.with_clip_rect([0.0, 0.0], [8.0, 8.0], || {
+            assert_eq!(unsafe { (*raw)._ClipRectStack.Size }, initial + 1);
+        });
+        assert_eq!(unsafe { (*raw)._ClipRectStack.Size }, initial);
+    }
+
+    #[test]
+    fn channels_split_rejects_same_draw_list_nesting_before_ffi() {
+        in_frame(|ui| {
+            let draw_list = ui.get_background_draw_list();
+            let raw_draw_list = draw_list.draw_list;
+            draw_list.channels_split(2, |channels| {
+                let before_count = unsafe { (*raw_draw_list)._Splitter._Count };
+                let before_current = unsafe { (*raw_draw_list)._Splitter._Current };
+                let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    draw_list.channels_split(2, |_| {});
+                }))
+                .expect_err("nested split should panic");
+                let message = panic
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("non-string panic payload");
+                assert!(message.contains("does not support nested splits"));
+                assert_eq!(unsafe { (*raw_draw_list)._Splitter._Count }, before_count);
+                assert_eq!(
+                    unsafe { (*raw_draw_list)._Splitter._Current },
+                    before_current
+                );
+                channels.set_current(1);
+            });
+            assert_eq!(unsafe { (*raw_draw_list)._Splitter._Count }, 1);
+            assert_eq!(unsafe { (*raw_draw_list)._Splitter._Current }, 0);
+        });
+    }
+
+    #[test]
+    fn channels_split_allows_independent_draw_lists_to_nest() {
+        in_frame(|ui| {
+            let background = ui.get_background_draw_list();
+            let foreground = ui.get_foreground_draw_list();
+            background.channels_split(2, |background_channels| {
+                background_channels.set_current(1);
+                foreground.channels_split(3, |foreground_channels| {
+                    foreground_channels.set_current(2);
+                });
+                let foreground_splitter = unsafe { &(*foreground.draw_list)._Splitter };
+                let background_splitter = unsafe { &(*background.draw_list)._Splitter };
+                assert_eq!(
+                    (foreground_splitter._Count, foreground_splitter._Current),
+                    (1, 0)
+                );
+                assert_eq!(
+                    (background_splitter._Count, background_splitter._Current),
+                    (2, 1)
+                );
+            });
+        });
+    }
+
+    #[test]
+    fn channels_split_rejects_zero_channels() {
+        let shared = unsafe { sys::ImDrawListSharedData_ImDrawListSharedData() };
+        assert!(!shared.is_null());
+        let raw_draw_list = unsafe { sys::ImDrawList_ImDrawList(shared) };
+        assert!(!raw_draw_list.is_null());
+
+        let draw_list = DrawListMut {
+            draw_list: raw_draw_list,
+            ui: None,
+            provenance: DrawListProvenance::Frame,
+        };
+        let initial_count = unsafe { (*raw_draw_list)._Splitter._Count };
+        let initial_current = unsafe { (*raw_draw_list)._Splitter._Current };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.channels_split(0, |_| {});
+        }));
+
+        assert!(result.is_err());
+        unsafe {
+            assert_eq!((*raw_draw_list)._Splitter._Count, initial_count);
+            assert_eq!((*raw_draw_list)._Splitter._Current, initial_current);
+        }
+
+        unsafe {
+            sys::ImDrawList_destroy(raw_draw_list);
+            sys::ImDrawListSharedData_destroy(shared);
+        }
+    }
+
+    #[test]
+    fn channels_split_rejects_oversized_channel_counts() {
+        let shared = unsafe { sys::ImDrawListSharedData_ImDrawListSharedData() };
+        assert!(!shared.is_null());
+        let raw_draw_list = unsafe { sys::ImDrawList_ImDrawList(shared) };
+        assert!(!raw_draw_list.is_null());
+
+        let draw_list = DrawListMut {
+            draw_list: raw_draw_list,
+            ui: None,
+            provenance: DrawListProvenance::Frame,
+        };
+        let initial_count = unsafe { (*raw_draw_list)._Splitter._Count };
+        let initial_current = unsafe { (*raw_draw_list)._Splitter._Current };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.channels_split(i32::MAX as usize + 1, |_| {});
+        }));
+
+        assert!(result.is_err());
+        unsafe {
+            assert_eq!((*raw_draw_list)._Splitter._Count, initial_count);
+            assert_eq!((*raw_draw_list)._Splitter._Current, initial_current);
+        }
+
+        unsafe {
+            sys::ImDrawList_destroy(raw_draw_list);
+            sys::ImDrawListSharedData_destroy(shared);
+        }
+    }
+
+    #[test]
+    fn draw_list_point_count_helpers_reject_overflow() {
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = len_i32("Polyline::build()", "points", (i32::MAX as usize) + 1);
+            })
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _ = len_i32(
+                    "DrawListMut::add_concave_poly_filled()",
+                    "points",
+                    (i32::MAX as usize) + 1,
+                );
+            })
+            .is_err()
+        );
     }
 }

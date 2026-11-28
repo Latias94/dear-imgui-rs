@@ -8,6 +8,7 @@ use std::rc::{Rc, Weak};
 use dear_imgui_rs::platform_io::Viewport;
 use dear_imgui_rs::{ContextBinding, ContextId, ContextLifecycle};
 
+use super::platform::ViewportPlatform;
 use super::runtime::{RuntimeControl, WgpuViewportError};
 use super::surface::ViewportWgpuData;
 use crate::WgpuViewportSurfaceConfig;
@@ -96,7 +97,7 @@ pub(super) enum ViewportDataDestroy {
 
 #[derive(Clone)]
 pub(super) struct GlobalHandles {
-    pub(super) platform: super::platform_adapter::PlatformOwner,
+    pub(super) platform: ViewportPlatform,
     pub(super) instance: wgpu::Instance,
     pub(super) adapter: wgpu::Adapter,
     pub(super) device: wgpu::Device,
@@ -141,7 +142,7 @@ pub(super) fn current_context() -> *mut dear_imgui_rs::sys::ImGuiContext {
 
 pub(super) fn renderer_globals(
     renderer: &WgpuRenderer,
-    platform: super::platform_adapter::PlatformOwner,
+    platform: ViewportPlatform,
 ) -> Result<GlobalHandles, WgpuViewportError> {
     #[cfg(target_arch = "wasm32")]
     return Err(WgpuViewportError::UnsupportedTarget);

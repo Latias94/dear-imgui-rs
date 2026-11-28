@@ -14,9 +14,10 @@ use crate::thumbnails::{ThumbnailCache, ThumbnailCacheConfig};
 use std::sync::Arc;
 
 /// View mode for the file list region.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum FileListViewMode {
     /// Table-style list view (columns: name/size/modified, optional thumbnail preview column).
+    #[default]
     List,
     /// Table-style list view with thumbnails enabled and preview column shown.
     ///
@@ -64,7 +65,7 @@ impl FileListDataColumn {
 ///
 /// Values are interpreted as ImGui table stretch weights and must be finite and positive.
 /// When an override is `None`, the built-in heuristic weight is used.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct FileListColumnWeightOverrides {
     /// Preview (thumbnail) column weight.
     pub preview: Option<f32>,
@@ -76,18 +77,6 @@ pub struct FileListColumnWeightOverrides {
     pub size: Option<f32>,
     /// Modified column weight.
     pub modified: Option<f32>,
-}
-
-impl Default for FileListColumnWeightOverrides {
-    fn default() -> Self {
-        Self {
-            preview: None,
-            name: None,
-            extension: None,
-            size: None,
-            modified: None,
-        }
-    }
 }
 
 /// Column visibility configuration for list view.
@@ -336,12 +325,6 @@ fn parse_compact_weights(
         size: parse_compact_optional_weight(parts[3])?,
         modified: parse_compact_optional_weight(parts[4])?,
     })
-}
-
-impl Default for FileListViewMode {
-    fn default() -> Self {
-        Self::List
-    }
 }
 
 /// Alignment of the validation button row (Ok/Cancel).
@@ -719,12 +702,22 @@ pub(crate) struct PathUiRuntime {
     pub(crate) edit: bool,
     /// Path input buffer (editable "address bar").
     pub(crate) buffer: String,
-    pub(crate) last_cwd: String,
+    pub(crate) buffer_path: Option<PathBuf>,
+    pub(crate) last_cwd: PathBuf,
     pub(crate) history_index: Option<usize>,
-    pub(crate) history_saved_buffer: Option<String>,
+    pub(crate) history_saved_buffer: Option<(String, Option<PathBuf>)>,
     pub(crate) programmatic_edit: bool,
     /// Focus path edit on next frame.
     pub(crate) focus_next: bool,
+}
+
+impl PathUiRuntime {
+    pub(crate) fn set_buffer_path(&mut self, path: &std::path::Path) {
+        self.buffer = crate::fs::display_path(path).into_owned();
+        self.buffer_path = Some(path.to_owned());
+        self.history_index = None;
+        self.history_saved_buffer = None;
+    }
 }
 
 /// Runtime state for the breadcrumb composer and quick-select popup.
@@ -758,6 +751,10 @@ pub(crate) struct FooterUiRuntime {
 /// prevents one-off operation buffers from becoming caller-facing configuration.
 #[derive(Debug, Default)]
 pub(crate) struct FileDialogOperationState {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) file_task: Option<crate::background::BackgroundTask<crate::ui::ops::FileOperation>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) discard_file_result: bool,
     /// State for the "New Folder" inline editor/modal.
     pub(crate) new_folder: NewFolderOperationState,
     /// State for the rename modal.
@@ -863,6 +860,7 @@ pub(crate) struct PlacesEditOperationState {
     pub(crate) place_label: String,
     /// Place path buffer (add/edit place).
     pub(crate) place_path: String,
+    pub(crate) place_path_original: Option<PathBuf>,
 }
 
 /// Runtime state for inline place-label editing.
@@ -1009,6 +1007,7 @@ impl FileDialogState {
 
     /// Replaces the filesystem with a caller-thread-only implementation.
     pub fn set_blocking_filesystem(&mut self, filesystem: Box<dyn FileSystem>) {
+        crate::ui::ops::cancel_file_operations(self, true);
         self.core.cancel_scan();
         self.filesystem = FileSystemCapability::blocking(filesystem);
         self.core.set_scan_policy(ScanPolicy::Blocking);
@@ -1017,6 +1016,7 @@ impl FileDialogState {
     /// Replaces the filesystem with a native thread-safe implementation.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn set_background_filesystem(&mut self, filesystem: Arc<dyn FileSystem + Send + Sync>) {
+        crate::ui::ops::cancel_file_operations(self, true);
         self.core.cancel_scan();
         self.filesystem = FileSystemCapability::background(filesystem);
     }
@@ -1046,6 +1046,7 @@ impl FileDialogState {
     /// This mirrors IGFD's `Close` call.
     pub fn close(&mut self) {
         self.ui.visible = false;
+        crate::ui::ops::cancel_file_operations(self, false);
         self.core.cancel_scan();
     }
 
@@ -1086,10 +1087,11 @@ impl FileDialogState {
     /// Installs a scan hook on the core listing pipeline.
     ///
     /// The hook runs while the owning thread applies scan batches and can mutate
-    /// or drop entries. It never crosses into the background scan worker.
+    /// or drop entries. It is `Send` so the core can be moved between threads, but
+    /// runs on the thread polling the dialog, not on the scan worker.
     pub fn set_scan_hook<F>(&mut self, hook: F)
     where
-        F: FnMut(&mut crate::FsEntry) -> crate::ScanHookAction + 'static,
+        F: FnMut(&mut crate::FsEntry) -> crate::ScanHookAction + Send + 'static,
     {
         self.core.set_scan_hook(hook);
     }

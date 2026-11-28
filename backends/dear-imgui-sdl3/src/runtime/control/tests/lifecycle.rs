@@ -129,8 +129,8 @@ fn platform_only_shutdown_rejects_an_active_renderer_before_closing_the_frame() 
 
     assert!(matches!(
         runtime.shutdown_platform(&mut context),
-        Err(Sdl3BackendError::PlatformAttachmentRelease(
-            dear_imgui_rs::ContextPlatformAttachmentReleaseError::RendererActive
+        Err(Sdl3BackendError::Context(
+            dear_imgui_rs::ContextError::RendererAttachmentActive
         ))
     ));
     assert_eq!(
@@ -140,7 +140,7 @@ fn platform_only_shutdown_rejects_an_active_renderer_before_closing_the_frame() 
     assert_eq!(runtime.control.state(), RuntimeState::Attached);
     assert_eq!(platform_count.get(), 0);
 
-    assert_eq!(renderer.detach(), Ok(true));
+    assert!(renderer.detach().unwrap());
     runtime.shutdown_platform(&mut context).unwrap();
     assert_eq!(platform_count.get(), 1);
 }
@@ -212,9 +212,11 @@ fn vulkan_provider_validates_callback_and_viewport_immediately_before_invocation
     let provider = runtime
         .acquire_vulkan_surface_provider(&context)
         .expect("Vulkan SDL runtime must issue a provider");
-    let mut viewport = sys::ImGuiViewport::default();
-    viewport.PlatformUserData = OWNED_VIEWPORT_DATA as *mut _;
-    viewport.PlatformHandle = OWNED_VIEWPORT_HANDLE as *mut _;
+    let mut viewport = sys::ImGuiViewport {
+        PlatformUserData: OWNED_VIEWPORT_DATA as *mut _,
+        PlatformHandle: OWNED_VIEWPORT_HANDLE as *mut _,
+        ..Default::default()
+    };
     runtime
         .control
         .remember_owned_viewport(&mut viewport, unsafe {
@@ -258,7 +260,7 @@ fn context_renderer_phase_releases_provider_before_sdl_platform_phase() {
         fn release_renderer_resources(
             &self,
             _context: &ContextTeardown<'_>,
-        ) -> Result<(), ContextAttachmentTeardownError> {
+        ) -> Result<(), ContextError> {
             self.0.borrow_mut().take();
             Ok(())
         }
@@ -287,10 +289,10 @@ fn context_renderer_phase_releases_provider_before_sdl_platform_phase() {
 }
 
 #[test]
-fn platform_session_is_exclusive_and_reusable_across_contexts() {
+fn platform_sessions_are_isolated_and_reusable_across_contexts() {
     let _guard = crate::tests::test_guard();
     let mut context_a = Context::create();
-    let runtime_a = synthetic_claimed_registration(
+    let mut runtime_a = synthetic_claimed_registration(
         &mut context_a,
         Rc::new(Cell::new(0)),
         Rc::new(Cell::new(0)),
@@ -298,36 +300,17 @@ fn platform_session_is_exclusive_and_reusable_across_contexts() {
         synthetic_create_window,
     );
     let id_a = context_a.id();
+    let binding_a = context_a.binding();
     let key_a = runtime_a.control.platform_io_key.get();
     assert_eq!(
-        with_current_runtime(|control| control.binding.id()),
+        binding_a.with_bound_context(|| with_current_runtime(|control| control.binding.id())),
         Some(id_a)
     );
 
-    let suspended_a = context_a.suspend_or_panic();
-    let mut blocked_context = Context::create();
-    let error = RuntimeRegistration::prepare_with_backend(
-        &mut blocked_context,
-        None,
-        None,
-        None,
-        PlatformGraphicsKind::Other,
-        NativeRendererKind::None,
-    )
-    .unwrap_err();
-    assert!(matches!(error, Sdl3BackendError::PlatformSessionOccupied));
-    drop(blocked_context);
-
-    let mut context_a = suspended_a.activate().expect("Context A should reactivate");
-    assert_eq!(
-        with_current_runtime(|control| control.binding.id()),
-        Some(id_a)
-    );
-    let mut runtime_a = runtime_a;
-    runtime_a.shutdown_platform(&mut context_a).unwrap();
-    assert!(!registry_contains(key_a));
-    drop(context_a);
-
+    assert!(matches!(
+        Sdl3PlatformSession::acquire(id_a, None),
+        Err(Sdl3BackendError::PlatformSessionOccupied)
+    ));
     let mut context_b = Context::create();
     let mut runtime_b = synthetic_claimed_registration(
         &mut context_b,
@@ -338,9 +321,25 @@ fn platform_session_is_exclusive_and_reusable_across_contexts() {
     );
     let id_b = context_b.id();
     let key_b = runtime_b.control.platform_io_key.get();
+    assert_ne!(key_a, key_b);
     assert!(registry_contains(key_b));
     assert_eq!(
-        with_current_runtime(|control| control.binding.id()),
+        binding_a.with_bound_context(|| with_current_runtime(|control| control.binding.id())),
+        Some(id_a)
+    );
+    let previous_generation = runtime_a.control.platform_session_generation().unwrap();
+    runtime_a.shutdown_platform(&mut context_a).unwrap();
+    assert!(!registry_contains(key_a));
+    assert_ne!(
+        previous_generation,
+        Sdl3PlatformSession::acquire(id_a, None)
+            .unwrap()
+            .generation()
+    );
+    assert_eq!(
+        context_b
+            .binding()
+            .with_bound_context(|| with_current_runtime(|control| control.binding.id())),
         Some(id_b)
     );
     runtime_b.shutdown_platform(&mut context_b).unwrap();
@@ -404,16 +403,13 @@ impl ContextAttachment for TeardownPhaseObserver {
     fn release_renderer_resources(
         &self,
         _context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         self.renderer_phase_counts
             .set((self.renderer_count.get(), self.platform_count.get()));
         Ok(())
     }
 
-    fn release_platform_windows(
-        &self,
-        _context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, _context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         self.platform_phase_counts
             .set((self.renderer_count.get(), self.platform_count.get()));
         Ok(())

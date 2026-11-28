@@ -351,7 +351,6 @@ fn conditional_aggregate_setter_clear_targets_its_receiver_context() {
         }
         platform_io.as_raw_mut()
     };
-    let first = first.suspend_or_panic();
     let second = crate::Context::create();
     let second_platform_io = second.platform_io().as_raw();
 
@@ -498,7 +497,6 @@ fn callback_registration_and_uninstall_target_the_receiving_context() {
             .platform_io_mut()
             .set_platform_get_window_pos_raw(Some(first_pos))
     };
-    let first = first.suspend_or_panic();
     let mut second = crate::Context::create();
     first_binding.with_bound_context(|| {
         unsafe {
@@ -532,8 +530,10 @@ fn callback_registration_and_uninstall_target_the_receiving_context() {
     });
     assert!(second.platform_io().renderer_callbacks_are_empty());
     drop(second);
-    let mut first = first.activate_or_panic();
-    assert_eq!(query_position(&mut first), [11.0, 12.0]);
+    assert_eq!(
+        first_binding.with_bound_context(|| query_position(&mut first)),
+        [11.0, 12.0]
+    );
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -884,4 +884,227 @@ fn cpp_platform_io_probe_round_trips_all_aggregate_slots() {
         ),
         (11.0, 12.0, 13.0, 14.0)
     );
+}
+
+#[cfg(feature = "abi-probe")]
+mod abi_probe_tests {
+    use crate::sys;
+
+    fn public_aggregate_layout_mismatches(
+        probe: &sys::DearImguiRsPublicAggregateLayoutProbe,
+    ) -> Vec<&'static str> {
+        let mut mismatches = Vec::new();
+        macro_rules! require_match {
+            ($name:literal, $actual:expr, $expected:expr) => {
+                if $actual != $expected {
+                    mismatches.push($name);
+                }
+            };
+        }
+
+        require_match!(
+            "ImDrawData.size",
+            probe.ImDrawDataSize,
+            std::mem::size_of::<sys::ImDrawData>()
+        );
+        require_match!(
+            "ImDrawData.align",
+            probe.ImDrawDataAlign,
+            std::mem::align_of::<sys::ImDrawData>()
+        );
+        require_match!(
+            "ImDrawData.FrameCount",
+            probe.ImDrawDataFrameCountOffset,
+            std::mem::offset_of!(sys::ImDrawData, FrameCount)
+        );
+        require_match!(
+            "ImDrawData.CmdLists",
+            probe.ImDrawDataCmdListsOffset,
+            std::mem::offset_of!(sys::ImDrawData, CmdLists)
+        );
+        require_match!(
+            "ImDrawData.Textures",
+            probe.ImDrawDataTexturesOffset,
+            std::mem::offset_of!(sys::ImDrawData, Textures)
+        );
+        require_match!(
+            "ImTextureData.size",
+            probe.ImTextureDataSize,
+            std::mem::size_of::<sys::ImTextureData>()
+        );
+        require_match!(
+            "ImTextureData.align",
+            probe.ImTextureDataAlign,
+            std::mem::align_of::<sys::ImTextureData>()
+        );
+        require_match!(
+            "ImTextureData.UniqueID",
+            probe.ImTextureDataUniqueIDOffset,
+            std::mem::offset_of!(sys::ImTextureData, UniqueID)
+        );
+        require_match!(
+            "ImTextureData.QueueUserData",
+            probe.ImTextureDataQueueUserDataOffset,
+            std::mem::offset_of!(sys::ImTextureData, QueueUserData)
+        );
+        require_match!(
+            "ImTextureData.TexID",
+            probe.ImTextureDataTexIDOffset,
+            std::mem::offset_of!(sys::ImTextureData, TexID)
+        );
+        require_match!(
+            "ImTextureData.Updates",
+            probe.ImTextureDataUpdatesOffset,
+            std::mem::offset_of!(sys::ImTextureData, Updates)
+        );
+        require_match!(
+            "ImTextureData.WantDestroyNextFrame",
+            probe.ImTextureDataWantDestroyNextFrameOffset,
+            std::mem::offset_of!(sys::ImTextureData, WantDestroyNextFrame)
+        );
+        require_match!(
+            "ImGuiPlatformIO.size",
+            probe.ImGuiPlatformIOSize,
+            std::mem::size_of::<sys::ImGuiPlatformIO>()
+        );
+        require_match!(
+            "ImGuiPlatformIO.align",
+            probe.ImGuiPlatformIOAlign,
+            std::mem::align_of::<sys::ImGuiPlatformIO>()
+        );
+        require_match!(
+            "ImGuiPlatformIO.Platform_SessionDate",
+            probe.ImGuiPlatformIOSessionDateOffset,
+            std::mem::offset_of!(sys::ImGuiPlatformIO, Platform_SessionDate)
+        );
+        require_match!(
+            "ImGuiPlatformIO.Renderer_RenderState",
+            probe.ImGuiPlatformIORenderStateOffset,
+            std::mem::offset_of!(sys::ImGuiPlatformIO, Renderer_RenderState)
+        );
+        require_match!(
+            "ImGuiPlatformIO.Platform_CreateWindow",
+            probe.ImGuiPlatformIOPlatformCreateWindowOffset,
+            std::mem::offset_of!(sys::ImGuiPlatformIO, Platform_CreateWindow)
+        );
+        require_match!(
+            "ImGuiPlatformIO.Renderer_CreateWindow",
+            probe.ImGuiPlatformIORendererCreateWindowOffset,
+            std::mem::offset_of!(sys::ImGuiPlatformIO, Renderer_CreateWindow)
+        );
+        require_match!(
+            "ImGuiPlatformIO.Monitors",
+            probe.ImGuiPlatformIOMonitorsOffset,
+            std::mem::offset_of!(sys::ImGuiPlatformIO, Monitors)
+        );
+        require_match!(
+            "ImGuiPlatformIO.Textures",
+            probe.ImGuiPlatformIOTexturesOffset,
+            std::mem::offset_of!(sys::ImGuiPlatformIO, Textures)
+        );
+        require_match!(
+            "ImGuiPlatformIO.Viewports",
+            probe.ImGuiPlatformIOViewportsOffset,
+            std::mem::offset_of!(sys::ImGuiPlatformIO, Viewports)
+        );
+        require_match!(
+            "ImDrawList.size",
+            probe.ImDrawListSize,
+            std::mem::size_of::<sys::ImDrawList>()
+        );
+        require_match!(
+            "ImDrawList.align",
+            probe.ImDrawListAlign,
+            std::mem::align_of::<sys::ImDrawList>()
+        );
+        require_match!(
+            "ImDrawList._DrawFlagsStack",
+            probe.ImDrawListFlagsStackOffset,
+            std::mem::offset_of!(sys::ImDrawList, _DrawFlagsStack)
+        );
+        require_match!(
+            "ImGuiStyle.AntiAliasedLineEnds",
+            probe.ImGuiStyleLineEndsOffset,
+            std::mem::offset_of!(sys::ImGuiStyle, AntiAliasedLineEnds)
+        );
+        require_match!(
+            "ImGuiStyle.CurveTessellationMaxError",
+            probe.ImGuiStyleCurveErrorOffset,
+            std::mem::offset_of!(sys::ImGuiStyle, CurveTessellationMaxError)
+        );
+        require_match!(
+            "ImGuiPlatformIO.DrawCallback_SetSamplerFromTex",
+            probe.ImGuiPlatformIOTextureSamplerOffset,
+            std::mem::offset_of!(sys::ImGuiPlatformIO, DrawCallback_SetSamplerFromTex)
+        );
+        mismatches
+    }
+
+    #[test]
+    fn cpp_public_aggregate_layout_probe_matches_rust() {
+        let mut probe = sys::DearImguiRsPublicAggregateLayoutProbe::default();
+        assert!(sys::ImGui_ProbePublicAggregateLayouts(&mut probe));
+        assert_eq!(
+            public_aggregate_layout_mismatches(&probe),
+            Vec::<&str>::new()
+        );
+    }
+
+    #[test]
+    fn public_aggregate_layout_probe_rejects_an_abi_mismatch() {
+        let mut probe = sys::DearImguiRsPublicAggregateLayoutProbe::default();
+        assert!(sys::ImGui_ProbePublicAggregateLayouts(&mut probe));
+        probe.ImTextureDataQueueUserDataOffset += 1;
+        assert_eq!(
+            public_aggregate_layout_mismatches(&probe),
+            vec!["ImTextureData.QueueUserData"]
+        );
+    }
+}
+
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn serial_exhaustion_is_sticky_and_never_reuses_an_identity() {
+        let counter = AtomicU64::new(u64::MAX - 1);
+        assert_eq!(allocate_serial(&counter).unwrap().get(), u64::MAX - 1);
+        assert!(matches!(
+            allocate_serial(&counter),
+            Err(ContextError::NativeWindowIdentityExhausted)
+        ));
+        assert!(matches!(
+            allocate_serial(&counter),
+            Err(ContextError::NativeWindowIdentityExhausted)
+        ));
+        assert_eq!(counter.load(Ordering::Relaxed), u64::MAX);
+    }
+
+    #[test]
+    fn registrations_remain_distinct_after_an_owner_restarts() {
+        let context = ContextId::allocate().unwrap();
+        let original = NativeWindowInstanceId::allocate(context).unwrap();
+        let replacement = NativeWindowInstanceId::allocate(context).unwrap();
+        assert_ne!(original, replacement);
+        assert_eq!(original.context_id(), replacement.context_id());
+        assert_ne!(original.get(), replacement.get());
+    }
+
+    #[test]
+    fn targets_are_detached_and_routing_changes_preserve_the_instance() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<NativeWindowTarget>();
+        let context = ContextId::allocate().unwrap();
+        let before = NativeWindowTarget {
+            instance_id: NativeWindowInstanceId::allocate(context).unwrap(),
+            viewport_id: Id::from(7),
+            is_main: false,
+        };
+        let after = NativeWindowTarget {
+            viewport_id: Id::from(9),
+            ..before
+        };
+        assert_eq!(before.instance_id, after.instance_id);
+        assert_ne!(before.viewport_id, after.viewport_id);
+    }
 }

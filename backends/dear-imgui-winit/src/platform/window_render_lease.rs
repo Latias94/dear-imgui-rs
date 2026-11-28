@@ -22,6 +22,7 @@ impl WindowRenderState {
         self.retired.set(true);
     }
 
+    #[cfg(target_os = "windows")]
     pub(crate) fn is_pinned(&self) -> bool {
         self.pins.get() != 0
     }

@@ -15,9 +15,24 @@ mod baked;
 pub mod font;
 pub mod glyph;
 
-pub use atlas::*;
-pub use baked::*;
-pub use glyph::*;
+pub use atlas::{
+    CustomRectData, CustomRectId, CustomRectSnapshot, FontAtlas, FontAtlasFlags, FontAtlasTexture,
+    FontConfig, FontId, FontLoader, FontLoaderFlags, FontSource, LegacyFontAtlas, SharedFontAtlas,
+    StbTrueTypeFontData,
+};
+pub use baked::BakedFont;
+pub use glyph::Glyph;
+
+pub(crate) use atlas::{
+    assert_font_atlas_renderer_mode, assert_no_font_atlas_texture_borrows,
+    claim_validated_font_atlas_managed_renderer, font_atlas_snapshot_identities,
+    font_atlas_texture_identity_is_known, forget_font_atlas_generation,
+    mark_font_atlas_renderer_reset, mark_font_atlas_texture_staged,
+    prune_font_atlas_texture_tombstones, record_font_atlas_texture_reference,
+    register_font_atlas_context, unregister_font_atlas_context,
+    validate_font_atlas_context_registration, validate_font_atlas_managed_renderer,
+    validate_font_id_for_context, validate_font_id_for_current_context,
+};
 
 use crate::Ui;
 

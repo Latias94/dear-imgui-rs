@@ -80,13 +80,14 @@ impl GlVersion {
         self.major >= 3
     }
 
-    /// Returns whether this version supports `glDrawElementsBaseVertex`.
+    /// Returns whether the renderer uses `glDrawElementsBaseVertex` on this version.
     pub fn supports_vertex_offset(self) -> bool {
-        if self.is_es {
-            false // Not supported in OpenGL ES
-        } else {
-            self.major > 3 || (self.major == 3 && self.minor >= 2) // OpenGL 3.2+
-        }
+        !self.is_es && (self.major, self.minor) >= (3, 2)
+    }
+
+    /// Returns whether the renderer can emulate base vertex with attribute pointer offsets.
+    pub(crate) fn supports_vertex_offset_emulation(self) -> bool {
+        self.is_es && self.is_supported()
     }
 
     /// Returns whether this version supports `GL_CLIP_ORIGIN` in core.
@@ -258,13 +259,14 @@ mod tests {
     }
 
     #[test]
-    fn vertex_offset_and_primitive_restart_are_not_claimed_on_es() {
+    fn es_vertex_offsets_use_emulation() {
         let es_32 = GlVersion {
             major: 3,
             minor: 2,
             is_es: true,
         };
         assert!(!es_32.supports_vertex_offset());
+        assert!(es_32.supports_vertex_offset_emulation());
         assert!(!es_32.supports_primitive_restart());
     }
 

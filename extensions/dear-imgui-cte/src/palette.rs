@@ -1,4 +1,5 @@
 use crate::{CteError, CteResult, sys};
+use dear_imgui_rs::ContextThreadLease;
 use std::ptr::NonNull;
 
 /// Semantic color slots used by ImGuiColorTextEdit.
@@ -95,13 +96,21 @@ pub struct Palette {
 
 impl Palette {
     /// Copies the built-in dark palette.
+    ///
+    /// # Panics
+    ///
+    /// Panics if another thread owns the Dear ImGui context lease.
     pub fn dark() -> Self {
-        unsafe { Self::copy_from_raw(sys::TextEditor_GetDarkPalette()) }
+        Self::copy_builtin(sys::TextEditor_GetDarkPalette)
     }
 
     /// Copies the built-in light palette.
+    ///
+    /// # Panics
+    ///
+    /// Panics if another thread owns the Dear ImGui context lease.
     pub fn light() -> Self {
-        unsafe { Self::copy_from_raw(sys::TextEditor_GetLightPalette()) }
+        Self::copy_builtin(sys::TextEditor_GetLightPalette)
     }
 
     pub const fn from_colors(colors: [u32; PaletteColor::COUNT]) -> Self {
@@ -120,6 +129,11 @@ impl Palette {
         self.colors[color as usize] = value;
     }
 
+    fn copy_builtin(get: unsafe extern "C" fn() -> *const sys::Palette) -> Self {
+        let _lease = ContextThreadLease::acquire().expect("failed to acquire CTE palette lease");
+        unsafe { Self::copy_from_raw(get()) }
+    }
+
     pub(crate) unsafe fn copy_from_raw(raw: *const sys::Palette) -> Self {
         assert!(!raw.is_null(), "cimCTE returned a null palette");
         let mut colors = [0; PaletteColor::COUNT];
@@ -130,6 +144,7 @@ impl Palette {
     }
 
     pub(crate) fn with_native<R>(&self, f: impl FnOnce(*const sys::Palette) -> R) -> CteResult<R> {
+        let _lease = ContextThreadLease::acquire()?;
         let raw =
             NonNull::new(unsafe { sys::Palette_Palette() }).ok_or(CteError::CreationFailed {
                 object: "temporary Palette",

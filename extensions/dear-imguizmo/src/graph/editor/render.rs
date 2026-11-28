@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use dear_imgui_rs::{
-    Ui,
+    DrawListMut, Ui,
     input::{Key, MouseButton},
 };
 
@@ -17,15 +17,15 @@ use super::super::render::{draw_grid, draw_link_variant, draw_node};
 use super::super::style::GraphStyle;
 use super::{GraphEditorResponse, Hooks, RightClickEvent};
 
-pub(super) fn draw_core<'ui, 'h>(
+pub(super) fn draw_core<'ui>(
     ui: &'ui Ui,
+    dl: &DrawListMut<'_>,
     graph: &mut Graph,
     view: &mut GraphView,
     style: &GraphStyle,
-    mut hooks: Option<&'h mut Hooks<'ui>>,
+    hooks: &mut Hooks<'ui>,
 ) -> GraphEditorResponse {
     let mut resp = GraphEditorResponse::default();
-    let dl = ui.get_window_draw_list();
     let origin = ui.window_pos();
     let size = ui.window_size();
 
@@ -40,7 +40,7 @@ pub(super) fn draw_core<'ui, 'h>(
 
     // grid
     if style.grid_visible {
-        draw_grid(&dl, origin, size, view, style);
+        draw_grid(dl, origin, size, view, style);
     }
 
     // links first (under nodes)
@@ -63,7 +63,7 @@ pub(super) fn draw_core<'ui, 'h>(
             } else {
                 (style.link_color, style.link_thickness)
             };
-            draw_link_variant(&dl, p0, p1s, color, thick, view.zoom, style);
+            draw_link_variant(dl, p0, p1s, color, thick, view.zoom, style);
         }
     }
 
@@ -135,7 +135,7 @@ pub(super) fn draw_core<'ui, 'h>(
                     // deselect others
                     let prev: Vec<NodeId> = view.selected_nodes.iter().copied().collect();
                     view.selected_nodes.clear();
-                    if let Some(h) = hooks.as_deref_mut().and_then(|h| h.on_select_cb.as_mut()) {
+                    if let Some(h) = hooks.on_select_cb.as_mut() {
                         for id in prev {
                             (h)(id, false);
                         }
@@ -144,20 +144,18 @@ pub(super) fn draw_core<'ui, 'h>(
                 if ctrl {
                     if view.selected_nodes.contains(&nid) {
                         view.selected_nodes.remove(&nid);
-                        if let Some(h) = hooks.as_deref_mut().and_then(|h| h.on_select_cb.as_mut())
-                        {
+                        if let Some(h) = hooks.on_select_cb.as_mut() {
                             (h)(nid, false);
                         }
                     } else {
                         view.selected_nodes.insert(nid);
-                        if let Some(h) = hooks.as_deref_mut().and_then(|h| h.on_select_cb.as_mut())
-                        {
+                        if let Some(h) = hooks.on_select_cb.as_mut() {
                             (h)(nid, true);
                         }
                     }
                 } else {
                     view.selected_nodes.insert(nid);
-                    if let Some(h) = hooks.as_deref_mut().and_then(|h| h.on_select_cb.as_mut()) {
+                    if let Some(h) = hooks.on_select_cb.as_mut() {
                         (h)(nid, true);
                     }
                 }
@@ -200,25 +198,19 @@ pub(super) fn draw_core<'ui, 'h>(
                     if ctrl {
                         if view.selected_nodes.contains(&n.id) {
                             view.selected_nodes.remove(&n.id);
-                            if let Some(h) =
-                                hooks.as_deref_mut().and_then(|h| h.on_select_cb.as_mut())
-                            {
+                            if let Some(h) = hooks.on_select_cb.as_mut() {
                                 (h)(n.id, false);
                             }
                         } else {
                             view.selected_nodes.insert(n.id);
-                            if let Some(h) =
-                                hooks.as_deref_mut().and_then(|h| h.on_select_cb.as_mut())
-                            {
+                            if let Some(h) = hooks.on_select_cb.as_mut() {
                                 (h)(n.id, true);
                             }
                         }
                     } else {
                         if !view.selected_nodes.contains(&n.id) {
                             view.selected_nodes.insert(n.id);
-                            if let Some(h) =
-                                hooks.as_deref_mut().and_then(|h| h.on_select_cb.as_mut())
-                            {
+                            if let Some(h) = hooks.on_select_cb.as_mut() {
                                 (h)(n.id, true);
                             }
                         }
@@ -248,15 +240,14 @@ pub(super) fn draw_core<'ui, 'h>(
                 // Links: keep selection only for those intersecting rect
                 let selected_links: Vec<LinkId> = view.selected_links.iter().copied().collect();
                 for lid in selected_links {
-                    if let Some(ln) = graph.links.iter().find(|l| l.id == lid) {
-                        if let (Some((np1, pk1, idx1)), Some((np2, pk2, idx2))) =
+                    if let Some(ln) = graph.links.iter().find(|l| l.id == lid)
+                        && let (Some((np1, pk1, idx1)), Some((np2, pk2, idx2))) =
                             (find_pin(graph, ln.from), find_pin(graph, ln.to))
-                        {
-                            let p0 = pin_screen_pos(origin, view, np1, pk1, idx1, style);
-                            let p1s = pin_screen_pos(origin, view, np2, pk2, idx2, style);
-                            if !bezier_intersects_rect(p0, p1s, rect) {
-                                view.selected_links.remove(&lid);
-                            }
+                    {
+                        let p0 = pin_screen_pos(origin, view, np1, pk1, idx1, style);
+                        let p1s = pin_screen_pos(origin, view, np2, pk2, idx2, style);
+                        if !bezier_intersects_rect(p0, p1s, rect) {
+                            view.selected_links.remove(&lid);
                         }
                     }
                 }
@@ -282,134 +273,112 @@ pub(super) fn draw_core<'ui, 'h>(
                 }
             }
         }
-        if let Some(h) = hooks.as_deref_mut().and_then(|h| h.on_move_cb.as_mut()) {
+        if let Some(h) = hooks.on_move_cb.as_mut() {
             (h)(delta_world, &move_set);
         }
     }
 
     // pin interaction (create link)
     if left_down {
-        if view.active_pin.is_none() {
-            if let Some((pin_id, _node_id, _kind)) = hit_pin(graph, origin, view, mouse, style) {
-                view.active_pin = Some(pin_id);
-            }
+        if view.active_pin.is_none()
+            && let Some((pin_id, _node_id, _kind)) = hit_pin(graph, origin, view, mouse, style)
+        {
+            view.active_pin = Some(pin_id);
         }
-    } else {
-        if let Some(start_pin) = view.active_pin.take() {
-            if let Some((end_pin, _, _)) = hit_pin(graph, origin, view, mouse, style) {
-                if can_connect(graph, start_pin, end_pin)
-                    && hooks
-                        .as_deref_mut()
-                        .and_then(|h| h.allowed_link_cb.as_mut())
-                        .map(|f| f(graph, start_pin, end_pin))
-                        .unwrap_or(true)
-                {
-                    let id = graph.alloc_link_id();
-                    let (from, to) = normalize_link_direction(graph, start_pin, end_pin);
-                    graph.links.push(Link { id, from, to });
-                    resp.created_links.push(id);
-                    if let Some(h) = hooks.as_deref_mut().and_then(|h| h.on_add_link_cb.as_mut()) {
-                        (h)(id, from, to);
-                    }
-                }
-            }
+    } else if let Some(start_pin) = view.active_pin.take()
+        && let Some((end_pin, _, _)) = hit_pin(graph, origin, view, mouse, style)
+        && can_connect(graph, start_pin, end_pin)
+        && hooks
+            .allowed_link_cb
+            .as_mut()
+            .is_none_or(|f| f(graph, start_pin, end_pin))
+    {
+        let id = graph.alloc_link_id();
+        let (from, to) = normalize_link_direction(graph, start_pin, end_pin);
+        graph.links.push(Link { id, from, to });
+        resp.created_links.push(id);
+        if let Some(h) = hooks.on_add_link_cb.as_mut() {
+            (h)(id, from, to);
         }
     }
 
     // render link being created
-    if let Some(pin_id) = view.active_pin {
-        if let Some((node, kind, idx)) = find_pin(graph, pin_id) {
-            let start = pin_screen_pos(origin, view, node, kind, idx, style);
-            draw_link_variant(
-                &dl,
-                start,
-                mouse,
-                [0.78, 0.78, 0.78, 1.0],
-                style.link_thickness,
-                view.zoom,
-                style,
-            );
-        }
+    if let Some(pin_id) = view.active_pin
+        && let Some((node, kind, idx)) = find_pin(graph, pin_id)
+    {
+        let start = pin_screen_pos(origin, view, node, kind, idx, style);
+        draw_link_variant(
+            dl,
+            start,
+            mouse,
+            [0.78, 0.78, 0.78, 1.0],
+            style.link_thickness,
+            view.zoom,
+            style,
+        );
     }
 
     // Reconnect interactions: click near link endpoint -> drag -> release on pin to reattach
-    if left_clicked && view.reconnecting.is_none() {
-        if let Some(lid) = view.hovered_link {
-            if let Some(end) = near_link_end(graph, origin, view, style, lid, mouse) {
-                view.reconnecting = Some((lid, end));
-            }
-        }
+    if left_clicked
+        && view.reconnecting.is_none()
+        && let Some(lid) = view.hovered_link
+        && let Some(end) = near_link_end(graph, origin, view, style, lid, mouse)
+    {
+        view.reconnecting = Some((lid, end));
     }
-    if left_down {
-        if let Some((lid, end)) = view.reconnecting {
-            if let Some((np1, pk1, idx1, np2, pk2, idx2)) = link_endpoints(graph, lid) {
-                let (fixed, _) = match end {
-                    LinkEnd::From => (
-                        pin_screen_pos(origin, view, np2, pk2, idx2, style),
-                        pin_screen_pos(origin, view, np1, pk1, idx1, style),
-                    ),
-                    LinkEnd::To => (
-                        pin_screen_pos(origin, view, np1, pk1, idx1, style),
-                        pin_screen_pos(origin, view, np2, pk2, idx2, style),
-                    ),
-                };
-                draw_link_variant(
-                    &dl,
-                    fixed,
-                    mouse,
-                    style.selected_outline_color,
-                    style.link_thickness + 1.0,
-                    view.zoom,
-                    style,
-                );
-            }
-        }
+    if left_down
+        && let Some((lid, end)) = view.reconnecting
+        && let Some((np1, pk1, idx1, np2, pk2, idx2)) = link_endpoints(graph, lid)
+    {
+        let fixed = match end {
+            LinkEnd::From => pin_screen_pos(origin, view, np2, pk2, idx2, style),
+            LinkEnd::To => pin_screen_pos(origin, view, np1, pk1, idx1, style),
+        };
+        draw_link_variant(
+            dl,
+            fixed,
+            mouse,
+            style.selected_outline_color,
+            style.link_thickness + 1.0,
+            view.zoom,
+            style,
+        );
     }
-    if left_released {
-        if let Some((lid, end)) = view.reconnecting.take() {
-            if let Some((pin, _nid, _kind)) = view.hovered_pin {
-                // Stage candidate update without holding mutable borrow across can_connect
-                if let Some(idx) = graph.links.iter().position(|l| l.id == lid) {
-                    let (old_from, old_to) = {
-                        let ln = &graph.links[idx];
-                        (ln.from, ln.to)
-                    };
-                    let (cand_from, cand_to) = match end {
-                        LinkEnd::From => (pin, old_to),
-                        LinkEnd::To => (old_from, pin),
-                    };
-                    if can_connect(graph, cand_from, cand_to)
-                        && hooks
-                            .as_deref_mut()
-                            .and_then(|h| h.allowed_link_cb.as_mut())
-                            .map(|f| f(graph, cand_from, cand_to))
-                            .unwrap_or(true)
-                    {
-                        let ln = &mut graph.links[idx];
-                        match end {
-                            LinkEnd::From => ln.from = pin,
-                            LinkEnd::To => ln.to = pin,
-                        }
-                    }
-                }
+    if left_released
+        && let Some((lid, end)) = view.reconnecting.take()
+        && let Some((pin, _nid, _kind)) = view.hovered_pin
+        && let Some(idx) = graph.links.iter().position(|l| l.id == lid)
+    {
+        // Stage candidate update without holding mutable borrow across can_connect.
+        let link = &graph.links[idx];
+        let (cand_from, cand_to) = match end {
+            LinkEnd::From => (pin, link.to),
+            LinkEnd::To => (link.from, pin),
+        };
+        if can_connect(graph, cand_from, cand_to)
+            && hooks
+                .allowed_link_cb
+                .as_mut()
+                .is_none_or(|f| f(graph, cand_from, cand_to))
+        {
+            let link = &mut graph.links[idx];
+            match end {
+                LinkEnd::From => link.from = pin,
+                LinkEnd::To => link.to = pin,
             }
         }
     }
 
     // draw nodes & pins on top
     for node in &graph.nodes {
-        let selected = view.selected_nodes.contains(&node.id);
-        let hovered = view.hovered_node == Some(node.id);
         draw_node(
             ui,
-            hooks.as_deref_mut().and_then(|h| h.custom_draw_cb.as_mut()),
-            &dl,
+            hooks.custom_draw_cb.as_deref_mut(),
+            dl,
             origin,
             view,
             node,
             style,
-            selected,
-            hovered,
         );
     }
 
@@ -426,14 +395,7 @@ pub(super) fn draw_core<'ui, 'h>(
 
     // delete key handling
     if ui.is_key_pressed(Key::Delete) {
-        let mut opt_cb = hooks
-            .as_deref_mut()
-            .and_then(|h| h.on_del_link_cb.as_mut())
-            .map(|f| f as &mut dyn FnMut(LinkId));
-        match opt_cb.as_deref_mut() {
-            Some(cb) => delete_selected_core(graph, view, Some(cb)),
-            None => delete_selected_core(graph, view, None),
-        }
+        delete_selected_core(graph, view, hooks.on_del_link_cb.as_deref_mut());
     }
 
     // right click reporting
@@ -449,11 +411,8 @@ pub(super) fn draw_core<'ui, 'h>(
             mouse_pos: mouse,
         };
         resp.right_click = Some(evt);
-        if let Some(h) = hooks
-            .as_deref_mut()
-            .and_then(|h| h.on_right_click_cb.as_mut())
-        {
-            (h)(resp.right_click.unwrap());
+        if let Some(h) = hooks.on_right_click_cb.as_mut() {
+            (h)(evt);
         }
     }
 
@@ -461,7 +420,7 @@ pub(super) fn draw_core<'ui, 'h>(
     view.last_mouse = mouse;
     // minimap
     if style.minimap_enabled {
-        draw_minimap(ui, &dl, graph, view, style, origin, size);
+        draw_minimap(ui, dl, graph, view, style, origin, size);
     }
 
     resp

@@ -4,8 +4,8 @@ use super::coordinates::{
     validate_viewport_size, viewport_target_dpi_scale,
 };
 use super::native_cursor_hittest::{
-    MouseCaptureTransfer, focus_and_raise_window, raise_window_without_activation,
-    show_window_without_activation, transfer_mouse_capture,
+    focus_and_raise_window, raise_window_without_activation, show_window_without_activation,
+    transfer_mouse_capture,
 };
 use super::registry::{
     clear_failed_viewport, insert_viewport_data, preflight_viewport_ownership,

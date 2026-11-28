@@ -1,6 +1,6 @@
 #[cfg(test)]
 use super::lifecycle::RuntimeState;
-use super::lifecycle::{LifecycleAction, LifecycleMachine, SurfaceEvent};
+use super::lifecycle::{LifecycleAction, LifecycleMachine};
 use crate::{GpuGeneration, RunError};
 
 pub(crate) trait OwnedGpuGeneration {
@@ -67,17 +67,12 @@ impl<G: OwnedGpuGeneration> RuntimeGenerations<G> {
         self.current.as_mut()
     }
 
-    #[cfg(feature = "multi-viewport")]
-    pub(crate) fn render_parts(&mut self) -> Option<(&mut G, &mut LifecycleMachine)> {
-        Some((self.current.as_mut()?, &mut self.lifecycle))
+    pub(crate) fn render_parts(&mut self) -> (Option<&mut G>, &mut LifecycleMachine) {
+        (self.current.as_mut(), &mut self.lifecycle)
     }
 
     pub(crate) fn current_generation(&self) -> Option<GpuGeneration> {
         self.current.as_ref().map(OwnedGpuGeneration::generation)
-    }
-
-    pub(crate) fn surface_event(&mut self, event: SurfaceEvent) -> LifecycleAction {
-        self.lifecycle.surface_event(event)
     }
 
     pub(crate) fn recover<E, F>(
@@ -232,7 +227,9 @@ mod tests {
         GenerationRelease, OwnedGpuGeneration, RecoveryEffects, RecoveryOutcome, RuntimeFactory,
         RuntimeGenerations,
     };
-    use crate::runtime::lifecycle::{LifecycleAction, RuntimeState, SurfaceEvent};
+    use crate::runtime::lifecycle::{
+        LifecycleAction, LifecycleMachine, RuntimeState, SurfaceEvent,
+    };
     use crate::{GpuGeneration, RunError};
 
     #[derive(Default)]
@@ -423,7 +420,7 @@ mod tests {
             SurfaceAcquisition, SurfaceAdmissionBackend, admit_surface_frame,
         };
 
-        struct ValidationAdmission<'a>(&'a mut RuntimeGenerations<ProbeGeneration>);
+        struct ValidationAdmission<'a>(&'a mut LifecycleMachine);
         impl SurfaceAdmissionBackend for ValidationAdmission<'_> {
             type Frame = ();
             fn window_size(&self) -> winit::dpi::PhysicalSize<u32> {
@@ -439,7 +436,8 @@ mod tests {
                 panic!("surface validation must await GPU callback evidence before recovery")
             }
         }
-        admit_surface_frame(&mut ValidationAdmission(generations)).unwrap_err()
+        let (_, lifecycle) = generations.render_parts();
+        admit_surface_frame(&mut ValidationAdmission(lifecycle)).unwrap_err()
     }
 
     #[test]
@@ -460,6 +458,29 @@ mod tests {
         assert_eq!(generations.state(), RuntimeState::Running(GpuGeneration(1)));
         assert!(generations.terminal_error().is_none());
         generations.shutdown(&mut environment).unwrap();
+    }
+
+    #[cfg(feature = "test-engine")]
+    #[test]
+    fn test_engine_main_surface_rejection_checks_device_signals() {
+        use crate::runtime::runner::render_rejection_can_follow_device_loss;
+        use dear_imgui_test_engine::FrameDriverError;
+
+        let (_, mut generations, _, _) = fixture(None, None);
+        let error = RunError::TestEngineFrame {
+            frame: 1,
+            source: Box::new(FrameDriverError::Render(reject_main_surface(
+                &mut generations,
+            ))),
+        };
+        assert!(render_rejection_can_follow_device_loss(&error));
+        let oom = RunError::TestEngineFrame {
+            frame: 1,
+            source: Box::new(FrameDriverError::Render(RunError::GpuOutOfMemory {
+                message: "injected OOM".to_owned(),
+            })),
+        };
+        assert!(!render_rejection_can_follow_device_loss(&oom));
     }
 
     #[test]

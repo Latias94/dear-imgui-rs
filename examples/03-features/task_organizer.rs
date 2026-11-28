@@ -157,7 +157,7 @@ impl Organizer {
                 ui.child_window("collections")
                     .size([190.0, 0.0])
                     .border(true)
-                    .build(ui, || {
+                    .build(|| {
                         ui.text("Collections");
                         ui.separator();
                         for collection in Collection::ALL {
@@ -200,7 +200,7 @@ impl Organizer {
                 ui.child_window("assets")
                     .size([0.0, 0.0])
                     .border(true)
-                    .build(ui, || {
+                    .build(|| {
                         ui.text(self.current_collection.label());
                         ui.separator();
 
@@ -293,6 +293,17 @@ impl Organizer {
     }
 }
 
+fn main() -> Result<(), RunError> {
+    let config = AppConfig {
+        window_title: "Dear ImGui - Asset Organizer".to_owned(),
+        window_size: (1000.0, 680.0),
+        ..Default::default()
+    };
+    let mut organizer = Organizer::default();
+
+    run_ui(config, move |ui| organizer.ui(ui))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,8 +319,10 @@ mod tests {
 
     #[test]
     fn add_asset_selects_it_in_the_current_collection() {
-        let mut organizer = Organizer::default();
-        organizer.current_collection = Collection::Review;
+        let mut organizer = Organizer {
+            current_collection: Collection::Review,
+            ..Default::default()
+        };
 
         organizer.execute(Command::AddAsset);
 
@@ -323,8 +336,10 @@ mod tests {
 
     #[test]
     fn delete_selection_removes_every_selected_asset() {
-        let mut organizer = Organizer::default();
-        organizer.selected = HashSet::from([AssetId(1), AssetId(4)]);
+        let mut organizer = Organizer {
+            selected: HashSet::from([AssetId(1), AssetId(4)]),
+            ..Default::default()
+        };
 
         organizer.execute(Command::DeleteSelection);
 
@@ -340,8 +355,10 @@ mod tests {
 
     #[test]
     fn move_assets_moves_the_existing_selection_as_a_group() {
-        let mut organizer = Organizer::default();
-        organizer.selected = HashSet::from([AssetId(1), AssetId(2)]);
+        let mut organizer = Organizer {
+            selected: HashSet::from([AssetId(1), AssetId(2)]),
+            ..Default::default()
+        };
 
         organizer.execute(Command::MoveAssets {
             dragged: AssetId(1),
@@ -357,8 +374,10 @@ mod tests {
 
     #[test]
     fn dragging_an_unselected_asset_moves_only_that_asset() {
-        let mut organizer = Organizer::default();
-        organizer.selected = HashSet::from([AssetId(1)]);
+        let mut organizer = Organizer {
+            selected: HashSet::from([AssetId(1)]),
+            ..Default::default()
+        };
 
         organizer.execute(Command::MoveAssets {
             dragged: AssetId(2),
@@ -370,15 +389,4 @@ mod tests {
         assert_eq!(organizer.selected, HashSet::from([AssetId(2)]));
         assert_eq!(organizer.current_collection, Collection::Review);
     }
-}
-
-fn main() -> Result<(), RunError> {
-    let config = AppConfig {
-        window_title: "Dear ImGui - Asset Organizer".to_owned(),
-        window_size: (1000.0, 680.0),
-        ..Default::default()
-    };
-    let mut organizer = Organizer::default();
-
-    run_ui(config, move |ui| organizer.ui(ui))
 }

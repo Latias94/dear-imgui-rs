@@ -7,7 +7,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextBinding, ContextTeardown, sys,
+    ContextBinding, ContextError, ContextTeardown, sys,
 };
 use static_assertions::assert_not_impl_any;
 
@@ -17,6 +17,7 @@ use super::callbacks::{
     renderer_destroy_window_sys, renderer_render_window_sys, renderer_set_window_size_sys,
     unary_callback_matches,
 };
+use super::platform::{NativeWindowLease, ViewportPlatform};
 use super::registry::{
     ViewportDataDestroy, ViewportIdentity, destroy_viewport_data, fail_next_viewport_registration,
     preflight_runtime, register_test_viewport_data, register_viewport_data,
@@ -26,12 +27,11 @@ use super::runtime::{
     PreparationAttempt, RuntimeControl, RuntimeState, WgpuViewportRouteError,
     WgpuViewportRouteFault, finish_route_preparation, prepare_route_for_context,
 };
-#[cfg(feature = "wgpu-30")]
-use super::surface::supports_surface_format;
 use super::surface::{
     SurfaceAction, SurfaceEvent, ViewportWgpuData, release_surface_bundle_parts,
     request_close_after_surface_creation_failure, resolve_alpha_mode, resolve_present_mode,
-    should_clear_viewport, surface_action, surface_config_from_capabilities,
+    should_clear_viewport, supports_surface_format, surface_action,
+    surface_config_from_capabilities,
 };
 use super::trace::{FrameTraceState, WgpuViewportFrameReport};
 use super::{
@@ -44,6 +44,10 @@ use crate::{
     WgpuViewportSurfaceConfig, renderer::WgpuRenderer,
 };
 
+assert_not_impl_any!(ViewportPlatform: Send, Sync);
+assert_not_impl_any!(NativeWindowLease: Send, Sync);
+#[cfg(feature = "multi-viewport-sdl3")]
+assert_not_impl_any!(super::platform::ViewportSurface: Send, Sync);
 assert_not_impl_any!(WgpuPreparedViewportFrame<'static>: Send, Sync);
 assert_not_impl_any!(WgpuPreparedMainFrame<'static>: Send, Sync);
 assert_not_impl_any!(WgpuRecordedViewportFrame<'static>: Send, Sync);
@@ -54,10 +58,7 @@ struct TestPlatformMarker;
 struct TestPlatformAttachment;
 
 impl ContextAttachment for TestPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         context.with_bound_context(clear_test_main_handle_raw);
         Ok(())
     }
@@ -85,10 +86,7 @@ struct OrderingPlatformAttachment {
 }
 
 impl ContextAttachment for OrderingPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         self.platform_phase_count
             .set(self.platform_phase_count.get() + 1);
         self.renderer_released_first.set(
@@ -111,10 +109,7 @@ struct RegistryOrderingPlatformAttachment {
 }
 
 impl ContextAttachment for RegistryOrderingPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         self.released_before_platform
             .set(self.drops.get() == 1 && viewport_data_count(self.binding.id()) == 0);
         context.with_bound_context(clear_test_main_handle_raw);
@@ -269,7 +264,6 @@ fn platform_owner_context_mismatch_reports_actual_then_expected() {
     let _guard = lock_context();
     let actual_context = Context::create();
     let actual = actual_context.id();
-    let suspended_actual = actual_context.suspend_or_panic();
     let expected_context = Context::create();
     let expected = expected_context.id();
 
@@ -280,7 +274,7 @@ fn platform_owner_context_mismatch_reports_actual_then_expected() {
         format!("WGPU viewport platform owner belongs to Context {actual:?}, not {expected:?}")
     );
     drop(expected_context);
-    drop(suspended_actual);
+    drop(actual_context);
 }
 
 fn viewport_identity(viewport: &mut sys::ImGuiViewport) -> ViewportIdentity {
@@ -635,7 +629,6 @@ fn capabilities_for_policy(
 ) -> wgpu::SurfaceCapabilities {
     wgpu::SurfaceCapabilities {
         formats: vec![format],
-        #[cfg(feature = "wgpu-30")]
         format_capabilities: vec![wgpu::SurfaceFormatCapabilities {
             format,
             color_spaces: wgpu::SurfaceColorSpaces::SRGB,
@@ -680,7 +673,6 @@ fn surface_config_is_renegotiated_from_current_capabilities() {
     assert_eq!(renegotiated.alpha_mode, wgpu::CompositeAlphaMode::Auto);
     assert_eq!([renegotiated.width, renegotiated.height], [800, 600]);
     assert_eq!(renegotiated.desired_maximum_frame_latency, 3);
-    #[cfg(feature = "wgpu-30")]
     assert_eq!(renegotiated.color_space, wgpu::SurfaceColorSpace::Srgb);
 }
 
@@ -715,7 +707,6 @@ fn zero_sized_secondary_surfaces_are_suspended_instead_of_fabricated() {
     );
 }
 
-#[cfg(feature = "wgpu-30")]
 #[test]
 fn secondary_surfaces_require_renderer_supported_srgb_output() {
     let srgb_format = wgpu::TextureFormat::Bgra8UnormSrgb;
@@ -754,7 +745,7 @@ fn attach_requires_a_registered_platform_role_and_returns_renderer() {
         OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()).unwrap_err();
     assert!(matches!(
         failure.error(),
-        WgpuViewportError::Attachment(dear_imgui_rs::ContextAttachmentError::MissingPlatform)
+        WgpuViewportError::Context(dear_imgui_rs::ContextError::MissingPlatformAttachment)
     ));
     assert!(context.platform_io().renderer_callbacks_are_empty());
     let mut renderer = failure.into_renderer();
@@ -886,7 +877,7 @@ fn renderer_role_rollback_returns_renderer_without_claiming_callbacks() {
         OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()).unwrap_err();
     assert!(matches!(
         failure.error(),
-        WgpuViewportError::Attachment(dear_imgui_rs::ContextAttachmentError::RoleOccupied(
+        WgpuViewportError::Context(dear_imgui_rs::ContextError::AttachmentRoleOccupied(
             ContextAttachmentRole::Renderer
         ))
     ));
@@ -937,12 +928,28 @@ fn prepare_frame_consumes_a_frame_token_without_reborrowing_context() {
     ));
 }
 
+#[cfg(feature = "multi-viewport-winit")]
 #[test]
-fn public_route_context_gate_preserves_renderer_and_platform_fault_queues() {
+fn winit_route_context_gate_preserves_renderer_and_platform_fault_queues() {
+    assert_route_context_gate_preserves_fault_queues(
+        dear_imgui_winit::WinitPlatformError::WindowNotAttached,
+    );
+}
+
+#[cfg(feature = "multi-viewport-sdl3")]
+#[test]
+fn sdl3_route_context_gate_preserves_renderer_and_platform_fault_queues() {
+    assert_route_context_gate_preserves_fault_queues(
+        dear_imgui_sdl3::Sdl3BackendError::PlatformInitFailed {
+            entry_point: "queued route platform fault",
+        },
+    );
+}
+
+fn assert_route_context_gate_preserves_fault_queues<PlatformError>(platform_fault: PlatformError) {
     let _guard = lock_context();
     let context_a = Context::create();
     let expected = context_a.id();
-    let suspended_a = context_a.suspend_or_panic();
     let mut context_b = Context::create();
     prepare_legacy_frame_context(&mut context_b);
     let frame = context_b.begin_frame();
@@ -953,16 +960,7 @@ fn public_route_context_gate_preserves_renderer_and_platform_fault_queues() {
             operation: "queued route renderer fault",
         },
     ]));
-    #[cfg(feature = "multi-viewport-winit")]
-    let platform_faults = RefCell::new(VecDeque::from([
-        dear_imgui_winit::WinitPlatformError::WindowNotAttached,
-    ]));
-    #[cfg(feature = "multi-viewport-sdl3")]
-    let platform_faults = RefCell::new(VecDeque::from([
-        dear_imgui_sdl3::Sdl3BackendError::PlatformInitFailed {
-            entry_point: "queued route platform fault",
-        },
-    ]));
+    let platform_faults = RefCell::new(VecDeque::from([platform_fault]));
 
     let result = prepare_route_for_context(expected, actual, || {
         let renderer = renderer_faults
@@ -996,7 +994,7 @@ fn public_route_context_gate_preserves_renderer_and_platform_fault_queues() {
 
     drop(frame);
     drop(context_b);
-    drop(suspended_a);
+    drop(context_a);
 }
 
 #[test]
@@ -1013,7 +1011,6 @@ fn prepare_frame_rejects_foreign_context_before_renderer_faults_are_consumed() {
             operation: "queued before frame Context validation",
         });
 
-    let suspended_a = context_a.suspend_or_panic();
     let mut context_b = Context::create();
     prepare_legacy_frame_context(&mut context_b);
     let actual = context_b.id();
@@ -1035,7 +1032,7 @@ fn prepare_frame_rejects_foreign_context_before_renderer_faults_are_consumed() {
     drop(context_b);
     drop(runtime_a);
     drop(platform_a);
-    drop(suspended_a);
+    drop(context_a);
 }
 
 #[test]
@@ -1052,7 +1049,6 @@ fn invalidate_device_objects_rejects_foreign_context_before_faults_are_consumed(
             operation: "queued before invalidation Context validation",
         });
 
-    let suspended_a = context_a.suspend_or_panic();
     let mut context_b = Context::create();
     let actual = context_b.id();
 
@@ -1073,7 +1069,7 @@ fn invalidate_device_objects_rejects_foreign_context_before_faults_are_consumed(
     drop(context_b);
     drop(runtime_a);
     drop(platform_a);
-    drop(suspended_a);
+    drop(context_a);
 }
 
 #[test]
@@ -1090,7 +1086,6 @@ fn prepared_runtime_mismatch_is_rejected_before_target_faults_are_consumed() {
             operation: "queued before runtime validation",
         });
 
-    let suspended_a = context_a.suspend_or_panic();
     let mut context_b = Context::create();
     let platform_b = attach_test_platform(&mut context_b);
     let runtime_b =
@@ -1116,7 +1111,7 @@ fn prepared_runtime_mismatch_is_rejected_before_target_faults_are_consumed() {
     drop(context_b);
     drop(runtime_a);
     drop(platform_a);
-    drop(suspended_a);
+    drop(context_a);
 }
 
 #[test]
@@ -2109,7 +2104,6 @@ fn main_record_failure_preserves_successful_secondary_observations() {
         })];
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             color_attachments: &attachments,
-            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
             multiview_mask: None,
             ..Default::default()
         });
@@ -2311,11 +2305,6 @@ fn surface_events_have_explicit_recovery_actions() {
         surface_action(SurfaceEvent::Validation),
         SurfaceAction::Reject
     );
-    assert_eq!(
-        surface_action(SurfaceEvent::OutOfMemory),
-        SurfaceAction::Reject
-    );
-    assert_eq!(surface_action(SurfaceEvent::Other), SurfaceAction::Reject);
     assert!(should_clear_viewport(dear_imgui_rs::ViewportFlags::empty()));
     assert!(!should_clear_viewport(
         dear_imgui_rs::ViewportFlags::NO_RENDERER_CLEAR

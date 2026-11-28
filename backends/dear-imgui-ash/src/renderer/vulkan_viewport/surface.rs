@@ -152,6 +152,41 @@ pub(super) struct ViewportAshData {
     pub(super) mesh_frames: Frames,
 }
 
+impl ViewportAshData {
+    pub(super) fn mark_failed(&mut self) {
+        self.pending_present = None;
+        self.rebuild_after_present = false;
+        self.state = ViewportRuntimeState::Failed;
+    }
+
+    pub(super) fn retire_swapchain_after_device_idle(&mut self, device: &Device) {
+        if let Some(resources) = self.swapchain.take() {
+            resources.destroy(device, &self.swapchain_loader);
+        }
+    }
+
+    pub(super) fn destroy_after_device_idle(
+        mut self,
+        renderer: &mut AshRenderer,
+        surface_loader: &khr_surface::Instance,
+    ) -> RendererResult<()> {
+        self.retire_swapchain_after_device_idle(&renderer.device);
+        let _ = self
+            .mesh_frames
+            .destroy(&renderer.device, &mut renderer.allocator);
+        destroy_frame_syncs(&renderer.device, self.command_pool, self.frames);
+
+        unsafe {
+            renderer
+                .device
+                .destroy_command_pool(self.command_pool, None);
+            surface_loader.destroy_surface(self.surface, None);
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod render_target_tests {
     use super::*;
@@ -255,40 +290,5 @@ mod render_target_tests {
                 .frame_target(render_pass, 0, vk::AttachmentLoadOp::CLEAR)
                 .is_none()
         );
-    }
-}
-
-impl ViewportAshData {
-    pub(super) fn mark_failed(&mut self) {
-        self.pending_present = None;
-        self.rebuild_after_present = false;
-        self.state = ViewportRuntimeState::Failed;
-    }
-
-    pub(super) fn retire_swapchain_after_device_idle(&mut self, device: &Device) {
-        if let Some(resources) = self.swapchain.take() {
-            resources.destroy(device, &self.swapchain_loader);
-        }
-    }
-
-    pub(super) fn destroy_after_device_idle(
-        mut self,
-        renderer: &mut AshRenderer,
-        surface_loader: &khr_surface::Instance,
-    ) -> RendererResult<()> {
-        self.retire_swapchain_after_device_idle(&renderer.device);
-        let _ = self
-            .mesh_frames
-            .destroy(&renderer.device, &mut renderer.allocator);
-        destroy_frame_syncs(&renderer.device, self.command_pool, self.frames);
-
-        unsafe {
-            renderer
-                .device
-                .destroy_command_pool(self.command_pool, None);
-            surface_loader.destroy_surface(self.surface, None);
-        }
-
-        Ok(())
     }
 }

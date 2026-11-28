@@ -12,10 +12,13 @@
 //! - Native (via `rfd`) for desktop OS dialogs; the path-based adapter is desktop-only.
 //! - ImGui (pure-UI) browser, using an application-provided virtual filesystem on WASM.
 //!
-//! On WASM, disable default features and enable `imgui`; do not enable `native-rfd`.
+//! The ImGui backend is enabled by default, including on WASM. Opt into `native-rfd`
+//! for native desktop dialogs.
 //! Browser pickers need `rfd::AsyncFileDialog` directly because their file handles
 //! do not expose host paths that can be stored in this crate's [`Selection`].
 
+#[cfg(all(feature = "imgui", not(target_arch = "wasm32")))]
+mod background;
 mod core;
 #[cfg(feature = "imgui")]
 mod custom_pane;
@@ -31,7 +34,7 @@ mod file_style;
 mod fs;
 #[cfg(feature = "imgui")]
 mod fs_ops;
-#[cfg(feature = "native-rfd")]
+#[cfg(all(feature = "native-rfd", not(target_arch = "wasm32")))]
 mod native;
 #[cfg(feature = "imgui")]
 mod places;
@@ -46,7 +49,7 @@ mod ui;
 
 pub use core::{
     Backend, ClickAction, DialogMode, ExtensionPolicy, FileDialog, FileDialogError, FileFilter,
-    LayoutStyle, SavePolicy, Selection, SortBy, SortMode,
+    IgfdFilterParseError, LayoutStyle, SavePolicy, Selection, SortBy, SortMode,
 };
 #[cfg(feature = "imgui")]
 pub use custom_pane::{CustomPane, CustomPaneCtx};
@@ -80,8 +83,8 @@ pub use places::{
 };
 #[cfg(feature = "imgui")]
 pub use thumbnails::{
-    DecodedRgbaImage, ThumbnailBackend, ThumbnailCache, ThumbnailCacheConfig, ThumbnailFrameIndex,
-    ThumbnailProvider, ThumbnailRenderer, ThumbnailRequest,
+    DecodedRgbaImage, ThumbnailBackend, ThumbnailCache, ThumbnailCacheConfig, ThumbnailDecoder,
+    ThumbnailFrameIndex, ThumbnailProvider, ThumbnailRenderer, ThumbnailRequest, ThumbnailStats,
 };
 #[cfg(feature = "thumbnails-image")]
 pub use thumbnails_image::ImageThumbnailProvider;

@@ -100,8 +100,8 @@ use dear_imgui_rs::{Context, FrameToken};
 
 use super::WgpuRenderer;
 use super::multi_viewport_runtime::{
-    OwningViewportRuntime, PreparationAttempt, PreparedMainFrame, finish_route_preparation,
-    prepare_route_for_context,
+    OwningViewportRuntime, PreparationAttempt, PreparedMainFrame, ViewportPlatform,
+    finish_route_preparation, prepare_route_for_context,
 };
 pub use super::multi_viewport_runtime::{
     WgpuPendingPresentations, WgpuPreparedMainFrame, WgpuPreparedViewportFrame,
@@ -162,8 +162,12 @@ impl Sdl3ViewportRoute {
                 ));
             }
         };
-        OwningViewportRuntime::attach(context, renderer, platform.clone())
-            .map(|inner| Self { inner, platform })
+        let inner = OwningViewportRuntime::attach(
+            context,
+            renderer,
+            ViewportPlatform::Sdl3(platform.clone()),
+        )?;
+        Ok(Self { inner, platform })
     }
 
     /// Reconciles an open UI frame and updates native windows without recording, submitting, or presenting.

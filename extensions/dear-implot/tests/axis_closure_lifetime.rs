@@ -23,7 +23,7 @@ fn prepare_imgui(imgui: &mut Context) {
 
 #[test]
 fn plot_owns_callbacks_and_native_copies_tick_labels() {
-    use dear_implot::YAxis;
+    use dear_implot::{ImPlotPoint, YAxis};
     use dear_implot_sys as sys;
     use std::{cell::Cell, ffi::CStr, rc::Rc};
 
@@ -37,6 +37,10 @@ fn plot_owns_callbacks_and_native_copies_tick_labels() {
     let plot_ui = outer.get_plot_ui(ui);
     let calls = Rc::new(Cell::new(0));
     let owned = calls.clone();
+    let forward_calls = Rc::new(Cell::new(0));
+    let inverse_calls = Rc::new(Cell::new(0));
+    let forward = forward_calls.clone();
+    let inverse = inverse_calls.clone();
     let raw = plot_ui
         .with_plot_setup(
             "outer",
@@ -48,7 +52,17 @@ fn plot_owns_callbacks_and_native_copies_tick_labels() {
                         owned.set(owned.get() + 1);
                         "outer tick".to_owned()
                     });
-                    setup.setup_x_axis_transform_closure(XAxis::X1, |v| v, |v| v);
+                    setup.setup_x_axis_transform_closure(
+                        XAxis::X1,
+                        move |value| {
+                            forward.set(forward.get() + 1);
+                            value * 2.0
+                        },
+                        move |value| {
+                            inverse.set(inverse.get() + 1);
+                            value / 2.0
+                        },
+                    );
                 }
                 setup.setup_x_axis_ticks_positions(XAxis::X1, &[0.0], None, false);
                 let text = String::from("copied label");
@@ -79,6 +93,12 @@ fn plot_owns_callbacks_and_native_copies_tick_labels() {
                     })
                     .unwrap();
                 plot.plot_line("outer series", &[0.0, 1.0], &[0.0, 1.0]);
+                let before = (forward_calls.get(), inverse_calls.get());
+                let point = ImPlotPoint { x: 0.5, y: 0.5 };
+                let pixels = plot.plot_to_pixels(point, None);
+                let recovered = plot.pixels_to_plot(pixels, None);
+                assert!((recovered.x - point.x).abs() < 0.001);
+                assert!(forward_calls.get() > before.0 && inverse_calls.get() > before.1);
                 // The owner is alive and its pool cannot grow until this plot ends.
                 let raw = unsafe { (*outer.raw()).CurrentPlot };
                 for (axis, expected) in [
@@ -95,6 +115,8 @@ fn plot_owns_callbacks_and_native_copies_tick_labels() {
         )
         .unwrap();
     assert_eq!(Rc::strong_count(&calls), 1);
+    assert_eq!(Rc::strong_count(&forward_calls), 1);
+    assert_eq!(Rc::strong_count(&inverse_calls), 1);
     // No subsequent plot has relocated the pool. The finished plot holds no Rust callback.
     let axis = unsafe { &(*raw).Axes[XAxis::X1 as usize] };
     assert!(axis.Formatter.is_none() && axis.FormatterData.is_null());

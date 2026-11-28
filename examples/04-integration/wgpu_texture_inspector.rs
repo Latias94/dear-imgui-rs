@@ -168,9 +168,9 @@ impl Application for Inspector {
                 ui.slider_i32("Mip level", &mut mip, 0, texture_preview::MIPS as i32 - 1);
                 self.selection.layer = layer as u32;
                 self.selection.mip = mip as u32;
-                ui.slider("HDR exposure (stops)", -4.0, 4.0, &mut self.selection.exposure);
-                ui.slider("Depth minimum", 0.0, 0.9, &mut self.selection.depth_min);
-                ui.slider("Depth maximum", self.selection.depth_min + 0.01, 1.0, &mut self.selection.depth_max);
+                ui.slider("HDR exposure (stops)", &mut self.selection.exposure, -4.0, 4.0);
+                ui.slider("Depth minimum", &mut self.selection.depth_min, 0.0, 0.9);
+                ui.slider("Depth maximum", &mut self.selection.depth_max, self.selection.depth_min + 0.01, 1.0);
                 self.selection.depth_max = self.selection.depth_max.max(self.selection.depth_min + 0.01);
                 if ui.button("Resize sources + previews") {
                     self.pending_side = Some(if self.side == 128 { 256 } else { 128 });
@@ -261,14 +261,11 @@ impl Application for Inspector {
                 .external_bindings
                 .iter()
                 .find(|binding| Some(binding.texture.texture_id()) == hdr_id)
+                && observation.stage >= dear_imgui_wgpu::WgpuFrameStage::Submitted
+                && binding.revision.get() >= 2
+                && !hdr_targets.contains(&observation.target.instance_id)
             {
-                if observation.stage >= dear_imgui_wgpu::WgpuFrameStage::Submitted
-                    && binding.revision.get() >= 2
-                {
-                    if !hdr_targets.contains(&observation.target.instance_id) {
-                        hdr_targets.push(observation.target.instance_id);
-                    }
-                }
+                hdr_targets.push(observation.target.instance_id);
             }
             self.observations.push(format!(
                 "instance {:?}; viewport {:?}; main {}; stage {:?}; bindings {:?}; outcome {:?}",

@@ -57,18 +57,18 @@ impl TextEditor {
     editor_command_invalidate!(select_all, sys::TextEditor_SelectAll);
 
     pub fn select_line(&mut self, line: usize) -> CteResult<()> {
-        self.with_context("TextEditor::select_line", |raw| unsafe {
+        self.try_with_context("TextEditor::select_line", |raw| unsafe {
             validate_line(raw, "TextEditor::select_line", line)?;
             sys::TextEditor_SelectLine(raw, line);
             Ok(())
-        })
+        })?
         .map(|_| self.invalidate_layout())
     }
 
     /// Selects an inclusive range of document lines, including the final line's
     /// newline when one is present.
     pub fn select_lines(&mut self, start: usize, end: usize) -> CteResult<()> {
-        self.with_context("TextEditor::select_lines", |raw| unsafe {
+        self.try_with_context("TextEditor::select_lines", |raw| unsafe {
             validate_line(raw, "TextEditor::select_lines", start)?;
             validate_line(raw, "TextEditor::select_lines", end)?;
             if start > end {
@@ -86,16 +86,16 @@ impl TextEditor {
                 sys::TextEditor_SelectRegion(raw, Position::new(start, 0).into_raw(), line_end);
             }
             Ok(())
-        })
+        })?
         .map(|_| self.invalidate_layout())
     }
 
     pub fn select_region(&mut self, selection: Selection) -> CteResult<()> {
-        self.with_context("TextEditor::select_region", |raw| unsafe {
+        self.try_with_context("TextEditor::select_region", |raw| unsafe {
             validate_selection(raw, "TextEditor::select_region", selection)?;
             sys::TextEditor_SelectRegion(raw, selection.start.into_raw(), selection.end.into_raw());
             Ok(())
-        })
+        })?
         .map(|_| self.invalidate_layout())
     }
 
@@ -156,19 +156,19 @@ impl TextEditor {
     }
 
     pub fn cursor_has_selection(&self, cursor: usize) -> CteResult<bool> {
-        self.with_context("TextEditor::cursor_has_selection", |raw| unsafe {
+        self.try_with_context("TextEditor::cursor_has_selection", |raw| unsafe {
             validate_cursor(raw, "TextEditor::cursor_has_selection", cursor)?;
             Ok(sys::TextEditor_CursorHasSelection(raw, cursor))
-        })
+        })?
     }
 
     pub fn cursor_position(&self, cursor: usize) -> CteResult<Position> {
-        self.with_context("TextEditor::cursor_position", |raw| unsafe {
+        self.try_with_context("TextEditor::cursor_position", |raw| unsafe {
             validate_cursor(raw, "TextEditor::cursor_position", cursor)?;
             Ok(Position::from_raw(sys::TextEditor_GetCursorPosition(
                 raw, cursor,
             )))
-        })
+        })?
     }
 
     pub fn main_cursor_position(&self) -> Position {
@@ -184,12 +184,12 @@ impl TextEditor {
     }
 
     pub fn cursor_selection(&self, cursor: usize) -> CteResult<Selection> {
-        self.with_context("TextEditor::cursor_selection", |raw| unsafe {
+        self.try_with_context("TextEditor::cursor_selection", |raw| unsafe {
             validate_cursor(raw, "TextEditor::cursor_selection", cursor)?;
             Ok(Selection::from_raw(sys::TextEditor_GetCursorSelection(
                 raw, cursor,
             )))
-        })
+        })?
     }
 
     pub fn main_cursor_selection(&self) -> Selection {
@@ -205,11 +205,11 @@ impl TextEditor {
     }
 
     pub fn set_cursor(&mut self, position: Position) -> CteResult<()> {
-        self.with_context("TextEditor::set_cursor", |raw| unsafe {
+        self.try_with_context("TextEditor::set_cursor", |raw| unsafe {
             validate_position(raw, "TextEditor::set_cursor", position)?;
             sys::TextEditor_SetCursor(raw, position.into_raw());
             Ok(())
-        })
+        })?
         .map(|_| self.invalidate_layout())
     }
 
@@ -219,14 +219,10 @@ impl TextEditor {
             "mouse_position",
             mouse_position,
         )?;
-        if !self.layout_ready {
-            return Ok(false);
-        }
-        Ok(
-            self.with_context("TextEditor::is_mouse_over_glyph", |raw| unsafe {
-                sys::TextEditor_IsMousePosOverGlyph(raw, mouse_position.into())
-            }),
-        )
+        self.try_with_context("TextEditor::is_mouse_over_glyph", |raw| {
+            self.layout_ready
+                && unsafe { sys::TextEditor_IsMousePosOverGlyph(raw, mouse_position.into()) }
+        })
     }
 
     pub fn is_mouse_over_text_area(&self, mouse_position: [f32; 2]) -> CteResult<bool> {
@@ -235,14 +231,10 @@ impl TextEditor {
             "mouse_position",
             mouse_position,
         )?;
-        if !self.layout_ready {
-            return Ok(false);
-        }
-        Ok(
-            self.with_context("TextEditor::is_mouse_over_text_area", |raw| unsafe {
-                sys::TextEditor_IsMousePosOverTextArea(raw, mouse_position.into())
-            }),
-        )
+        self.try_with_context("TextEditor::is_mouse_over_text_area", |raw| {
+            self.layout_ready
+                && unsafe { sys::TextEditor_IsMousePosOverTextArea(raw, mouse_position.into()) }
+        })
     }
 
     pub fn position_at_mouse(&self, mouse_position: [f32; 2]) -> CteResult<Position> {
@@ -251,17 +243,16 @@ impl TextEditor {
             "mouse_position",
             mouse_position,
         )?;
-        if !self.layout_ready {
-            return Ok(Position::default());
-        }
-        Ok(
-            self.with_context("TextEditor::position_at_mouse", |raw| unsafe {
+        self.try_with_context("TextEditor::position_at_mouse", |raw| unsafe {
+            if self.layout_ready {
                 Position::from_raw(sys::TextEditor_GetDocPosAtMousePos(
                     raw,
                     mouse_position.into(),
                 ))
-            }),
-        )
+            } else {
+                Position::default()
+            }
+        })
     }
 
     pub fn word_at_mouse(&self, mouse_position: [f32; 2]) -> CteResult<String> {
@@ -270,23 +261,23 @@ impl TextEditor {
             "mouse_position",
             mouse_position,
         )?;
-        if !self.layout_ready {
-            return Ok(String::new());
-        }
-        self.with_context("TextEditor::word_at_mouse", |raw| unsafe {
+        self.try_with_context("TextEditor::word_at_mouse", |raw| unsafe {
+            if !self.layout_ready {
+                return Ok(String::new());
+            }
             copy_c_string(
                 "TextEditor::word_at_mouse",
                 sys::TextEditor_GetWordAtMousePos(raw, mouse_position.into()),
             )
-        })
+        })?
     }
 
     pub fn scroll_to_line(&mut self, line: usize, alignment: ScrollAlignment) -> CteResult<()> {
-        self.with_context("TextEditor::scroll_to_line", |raw| unsafe {
+        self.try_with_context("TextEditor::scroll_to_line", |raw| unsafe {
             validate_line(raw, "TextEditor::scroll_to_line", line)?;
             sys::TextEditor_ScrollToLine(raw, line, alignment.into_raw());
             Ok(())
-        })
+        })?
         .map(|_| self.invalidate_layout())
     }
 
@@ -345,16 +336,16 @@ impl TextEditor {
     }
 
     pub fn document_to_visual(&self, position: Position) -> CteResult<VisualPosition> {
-        if !self.layout_ready {
-            return Ok(VisualPosition::default());
-        }
-        self.with_context("TextEditor::document_to_visual", |raw| unsafe {
+        self.try_with_context("TextEditor::document_to_visual", |raw| unsafe {
+            if !self.layout_ready {
+                return Ok(VisualPosition::default());
+            }
             validate_position(raw, "TextEditor::document_to_visual", position)?;
             Ok(VisualPosition::from_raw(sys::TextEditor_DocPos2VisPos(
                 raw,
                 position.into_raw(),
             )))
-        })
+        })?
     }
 
     pub fn visual_to_document(&self, position: VisualPosition) -> Position {
@@ -389,13 +380,13 @@ impl TextEditor {
     }
 
     pub fn is_position_visible(&self, position: Position) -> CteResult<bool> {
-        if !self.layout_ready {
-            return Ok(false);
-        }
-        self.with_context("TextEditor::is_position_visible", |raw| unsafe {
+        self.try_with_context("TextEditor::is_position_visible", |raw| unsafe {
+            if !self.layout_ready {
+                return Ok(false);
+            }
             validate_position(raw, "TextEditor::is_position_visible", position)?;
             Ok(sys::TextEditor_IsDocPosVisible(raw, position.into_raw()))
-        })
+        })?
     }
 
     pub fn is_visual_position_over_glyph(&self, position: VisualPosition) -> bool {
@@ -417,14 +408,14 @@ impl TextEditor {
         position: Position,
         word_only: bool,
     ) -> CteResult<Position> {
-        self.with_context("TextEditor::word_start", |raw| unsafe {
+        self.try_with_context("TextEditor::word_start", |raw| unsafe {
             validate_position(raw, "TextEditor::word_start", position)?;
             Ok(Position::from_raw(sys::TextEditor_FindWordStart(
                 raw,
                 position.into_raw(),
                 word_only,
             )))
-        })
+        })?
     }
 
     pub fn word_end(&self, position: Position) -> CteResult<Position> {
@@ -437,72 +428,72 @@ impl TextEditor {
         position: Position,
         word_only: bool,
     ) -> CteResult<Position> {
-        self.with_context("TextEditor::word_end", |raw| unsafe {
+        self.try_with_context("TextEditor::word_end", |raw| unsafe {
             validate_position(raw, "TextEditor::word_end", position)?;
             Ok(Position::from_raw(sys::TextEditor_FindWordEnd(
                 raw,
                 position.into_raw(),
                 word_only,
             )))
-        })
+        })?
     }
 
     pub fn select_first_occurrence(&mut self, text: &str, options: SearchOptions) -> CteResult<()> {
         let text = c_string("TextEditor::select_first_occurrence", text)?;
-        self.with_context("TextEditor::select_first_occurrence", |raw| unsafe {
+        self.try_with_context("TextEditor::select_first_occurrence", |raw| unsafe {
             sys::TextEditor_SelectFirstOccurrenceOf(
                 raw,
                 text.as_ptr(),
                 options.case_sensitive,
                 options.whole_word,
             )
-        });
+        })?;
         self.invalidate_layout();
         Ok(())
     }
 
     pub fn select_next_occurrence(&mut self, text: &str, options: SearchOptions) -> CteResult<()> {
         let text = c_string("TextEditor::select_next_occurrence", text)?;
-        self.with_context("TextEditor::select_next_occurrence", |raw| unsafe {
+        self.try_with_context("TextEditor::select_next_occurrence", |raw| unsafe {
             sys::TextEditor_SelectNextOccurrenceOf(
                 raw,
                 text.as_ptr(),
                 options.case_sensitive,
                 options.whole_word,
             )
-        });
+        })?;
         self.invalidate_layout();
         Ok(())
     }
 
     pub fn select_every_occurrence(&mut self, text: &str, options: SearchOptions) -> CteResult<()> {
         let text = c_string("TextEditor::select_every_occurrence", text)?;
-        self.with_context("TextEditor::select_every_occurrence", |raw| unsafe {
+        self.try_with_context("TextEditor::select_every_occurrence", |raw| unsafe {
             sys::TextEditor_SelectAllOccurrencesOf(
                 raw,
                 text.as_ptr(),
                 options.case_sensitive,
                 options.whole_word,
             )
-        });
+        })?;
         self.invalidate_layout();
         Ok(())
     }
 
     pub fn replace_current_selection(&mut self, text: &str) -> CteResult<()> {
         let text = c_string("TextEditor::replace_current_selection", text)?;
-        self.with_context("TextEditor::replace_current_selection", |raw| unsafe {
+        self.try_with_context("TextEditor::replace_current_selection", |raw| unsafe {
             sys::TextEditor_ReplaceTextInCurrentCursor(raw, text.as_ptr())
-        });
+        })?;
         self.invalidate_layout();
         Ok(())
     }
 
     pub fn replace_all_selections(&mut self, text: &str) -> CteResult<()> {
         let text = c_string("TextEditor::replace_all_selections", text)?;
-        self.with_context("TextEditor::replace_all_selections", |raw| unsafe {
+        self.try_with_context("TextEditor::replace_all_selections", |raw| unsafe {
             sys::TextEditor_ReplaceTextInAllCursors(raw, text.as_ptr())
-        });
+        })?;
         self.invalidate_layout();
         Ok(())
     }
@@ -555,7 +546,7 @@ impl TextEditor {
     ) -> CteResult<()> {
         let line_number_tooltip = c_string("TextEditor::add_marker", line_number_tooltip)?;
         let text_tooltip = c_string("TextEditor::add_marker", text_tooltip)?;
-        self.with_context("TextEditor::add_marker", |raw| unsafe {
+        self.try_with_context("TextEditor::add_marker", |raw| unsafe {
             validate_line(raw, "TextEditor::add_marker", line)?;
             sys::TextEditor_AddMarker(
                 raw,
@@ -566,7 +557,7 @@ impl TextEditor {
                 text_tooltip.as_ptr(),
             );
             Ok(())
-        })
+        })?
     }
 
     editor_command!(clear_markers, sys::TextEditor_ClearMarkers);
@@ -581,7 +572,7 @@ impl TextEditor {
         style: SquiggleStyle,
     ) -> CteResult<()> {
         let tooltip = c_string("TextEditor::add_squiggle", tooltip)?;
-        self.with_context("TextEditor::add_squiggle", |raw| unsafe {
+        self.try_with_context("TextEditor::add_squiggle", |raw| unsafe {
             validate_selection(raw, "TextEditor::add_squiggle", selection)?;
             sys::TextEditor_AddSquiggle(
                 raw,
@@ -593,11 +584,11 @@ impl TextEditor {
                 style.into_raw(),
             );
             Ok(())
-        })
+        })?
     }
 
     pub fn clear_squiggles_in(&mut self, selection: Selection) -> CteResult<()> {
-        self.with_context("TextEditor::clear_squiggles_in", |raw| unsafe {
+        self.try_with_context("TextEditor::clear_squiggles_in", |raw| unsafe {
             validate_selection(raw, "TextEditor::clear_squiggles_in", selection)?;
             sys::TextEditor_ClearSquiggles_DocPos(
                 raw,
@@ -605,7 +596,7 @@ impl TextEditor {
                 selection.end.into_raw(),
             );
             Ok(())
-        })
+        })?
     }
 
     pub fn clear_squiggles_of_kind(&mut self, kind: SquiggleKind) {
@@ -696,8 +687,7 @@ impl TextEditor {
         setter: unsafe extern "C" fn(*mut sys::TextEditor, *const std::ffi::c_char),
     ) -> CteResult<()> {
         let label = c_string(operation, label)?;
-        self.with_context(operation, |raw| unsafe { setter(raw, label.as_ptr()) });
-        Ok(())
+        self.try_with_context(operation, |raw| unsafe { setter(raw, label.as_ptr()) })
     }
 
     fn line_command(
@@ -706,11 +696,11 @@ impl TextEditor {
         line: usize,
         command: unsafe extern "C" fn(*mut sys::TextEditor, usize),
     ) -> CteResult<()> {
-        self.with_context(operation, |raw| unsafe {
+        self.try_with_context(operation, |raw| unsafe {
             validate_line(raw, operation, line)?;
             command(raw, line);
             Ok(())
-        })
+        })?
         .map(|_| self.invalidate_layout())
     }
 
@@ -720,9 +710,9 @@ impl TextEditor {
         line: usize,
         query: unsafe extern "C" fn(*mut sys::TextEditor, usize) -> bool,
     ) -> CteResult<bool> {
-        self.with_context(operation, |raw| unsafe {
+        self.try_with_context(operation, |raw| unsafe {
             validate_line(raw, operation, line)?;
             Ok(query(raw, line))
-        })
+        })?
     }
 }

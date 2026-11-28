@@ -1375,8 +1375,6 @@ const IMNODES_FUNCTIONS: &[&str] = &[
     "LinkDetachWithModifierClick_.*",
     "MultipleSelectModifier_.*",
     "getIOKeyCtrlPtr",
-    "imnodes_getIOKeyShiftPtr",
-    "imnodes_getIOKeyAltPtr",
 ];
 const IMNODES_TYPES: &[&str] = &["ImNodes.*", "ImWchar32"];
 const IMNODES_VARS: &[&str] = &["ImNodes.*"];
@@ -1396,8 +1394,6 @@ const IMNODES_PROFILE: CrateBindgenProfile = crate_profile(
 );
 const IMNODES_SYMBOLS: &[&str] = &[
     "imnodes_EditorContextGetPanning",
-    "imnodes_getIOKeyShiftPtr",
-    "imnodes_getIOKeyAltPtr",
     "imnodes_EditorContextResetToDefault",
     "imnodes_EditorContextGetCurrent",
     "imnodes_EditorContextResetToDefaultIfCurrent",

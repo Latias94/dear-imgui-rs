@@ -1,7 +1,7 @@
 use super::ui::PlotUi;
 use crate::sys;
 use dear_imgui_rs::{
-    Context as ImGuiContext, ContextBinding, ContextBindingError, ContextThreadLease, Ui,
+    Context as ImGuiContext, ContextBinding, ContextError, ContextThreadLease, Ui,
 };
 use std::cell::RefCell;
 
@@ -40,7 +40,7 @@ impl PlotContext {
     pub(crate) fn try_with_bound_context<R>(
         &self,
         f: impl FnOnce() -> R,
-    ) -> Result<R, ContextBindingError> {
+    ) -> Result<R, ContextError> {
         self.imgui_binding.try_with_bound_context(|| {
             let _guard = PlotContextGuard::bind(self.raw);
             f()
@@ -85,9 +85,10 @@ impl PlotContext {
             raw
         });
         if raw.is_null() {
-            return Err(dear_imgui_rs::ImGuiError::context_creation(
-                "ImPlot_CreateContext returned null",
-            ));
+            return Err(dear_imgui_rs::ContextError::Creation {
+                reason: "ImPlot_CreateContext returned null".into(),
+            }
+            .into());
         }
 
         Ok(Self {

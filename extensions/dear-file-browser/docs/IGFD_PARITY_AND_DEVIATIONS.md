@@ -2,10 +2,6 @@
 
 This document tracks capability parity between `dear-file-browser` (ImGui backend) and ImGuiFileDialog (IGFD), focused on **non-C-API** behavior.
 
-Original parity baseline: 2026-02-12. Later scan-runtime notes describe the
-implemented 0.20 ownership model; this is capability parity, not a guarantee of
-identical APIs or full filesystem enumeration in every auxiliary popup.
-
 ## Scope
 
 - Included: ImGui-hosted dialog behavior, core state machine, styling, filtering, places, file operations, thumbnails, host constraints.
@@ -29,7 +25,7 @@ identical APIs or full filesystem enumeration in every auxiliary popup.
 | Scan-time entry callback | Done | Core/state scan hook (`set_scan_hook` / `clear_scan_hook`). |
 | Thumbnails | Done | Decode/upload/destroy lifecycle + grid/list integration. |
 | Address bar path input | Done | Always-visible Path input + Go + submit-on-Enter; Ctrl+L focuses; history + Tab completion. |
-| Breadcrumb path composer | Done | Optional breadcrumb composer with ellipsis compression, edit toggle, devices/reset actions, and optional quick path selection popups (IGFD-like path table popup sized from content). |
+| Breadcrumb path composer | Done | Optional breadcrumb composer with ellipsis compression, edit toggle, devices/reset actions, and quick selection from recent paths. |
 | Path composer tail visibility | Done | Breadcrumbs in the framed composer are end-aligned so the rightmost segments stay visible for long paths. |
 | Footer file field (Open) | Done | IGFD-like editable footer field; typing a file name/path can confirm Open when no selection exists. |
 | Pick folder selection | Done | PickFolder confirms the selected directory when present; otherwise defaults to current directory. |
@@ -110,18 +106,11 @@ The items below act as a **concrete acceptance checklist** for flipping the abov
 ## Reference implementation
 
 An optional local checkout under `repo-ref/ImGuiFileDialog` serves as the source reference for ImGui-backend UI/behavior parity work; it is not a packaged dependency.
-See `docs/IGFD_SOURCE_REFERENCE_MAP.md` for a practical function map.
+See the [IGFD source reference map](IGFD_SOURCE_REFERENCE_MAP.md) for corresponding functions.
 
-## Post-Parity Backlog (P2)
+## Path Completion and Quick Selection
 
-- Published: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md` (state-owned filesystem capabilities and the native worker lifecycle).
-- Completed: streaming, cancellable `FileSystem::visit_dir` boundary.
-- Completed: native bounded-channel background runtime with latest-request coalescing and owned-worker teardown.
-- Completed: bounded per-frame batch apply + partial selection reconciliation stability.
-- Completed: partial batches use batch-local filtering plus a stable ordered projection
-  index; equal keys retain scan order across batches without accumulated-view merges.
-- Completed: Stage D tracing metrics/events (`scan.requested`, `scan.batch_applied`, `scan.completed`, `scan.dropped_stale_batch`, `projector.rebuild`, `projector.incremental`).
-- Completed: channel/condition-variable regression coverage for non-blocking submit, cancellation, and worker teardown.
-- Completed: truthful `Blocking`/`Background` policy split and tuned background preset.
-- Next: publish migration snippets and extend benchmark matrix (batch size + mixed metadata).
-- Continue UX polish and migration snippets without changing parity guarantees.
+Address bar completion uses directories from the current projection. The
+breadcrumb separator popup lists children known from recent navigation, so it
+can show only a subset of a directory's children. Both controls reuse data the
+dialog already holds. See [filesystem ownership and scan policy](../README.md#filesystem-ownership-and-scan-policy).

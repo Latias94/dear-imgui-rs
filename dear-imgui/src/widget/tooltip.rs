@@ -12,7 +12,7 @@ use crate::input::MouseButton;
 use crate::sys;
 use crate::ui::Ui;
 
-/// # Tooltip Widgets
+/// # Tooltips and Item Queries
 impl Ui {
     /// Construct a tooltip window that can have any kind of content.
     ///
@@ -107,10 +107,7 @@ impl Ui {
             }
         });
     }
-}
 
-/// # Item/Widget Utilities and Query Functions
-impl Ui {
     /// Returns true if the last item is being hovered by mouse (and usable).
     /// This is typically used to show tooltips.
     #[doc(alias = "IsItemHovered")]

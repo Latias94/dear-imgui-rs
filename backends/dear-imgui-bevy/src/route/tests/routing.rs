@@ -25,7 +25,7 @@ use dear_imgui_bevy::{
         ImguiResolvedRoutes,
     },
 };
-use dear_imgui_rs::SuspendedContext;
+use dear_imgui_rs::Context;
 
 struct SecondaryUi;
 
@@ -483,7 +483,7 @@ fn stale_context_camera_and_unsupported_schedule_fail_closed() {
     let _guard = context_guard();
     let mut app = routing_app();
     let stale_context = {
-        let context = SuspendedContext::create();
+        let context = Context::create();
         context.id()
     };
     let window = spawn_window(&mut app, true, UVec2::new(800, 600));

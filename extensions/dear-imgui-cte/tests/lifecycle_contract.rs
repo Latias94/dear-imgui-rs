@@ -7,7 +7,6 @@ use std::{cell::Cell, rc::Rc};
 fn normal_drop_binds_the_owner_and_restores_the_previous_context() {
     let context_a = Context::create();
     let editor = TextEditor::create(&context_a);
-    let suspended_a = context_a.suspend_or_panic();
 
     let context_b = Context::create();
     let raw_b = context_b.as_raw();
@@ -15,15 +14,14 @@ fn normal_drop_binds_the_owner_and_restores_the_previous_context() {
     assert_eq!(unsafe { sys::igGetCurrentContext() }, raw_b);
 
     drop(context_b);
-    drop(suspended_a.activate_or_panic());
+    drop(context_a);
 }
 
 #[test]
 fn dead_owner_drop_preserves_another_current_context() {
     let context_a = Context::create();
     let editor = TextEditor::create(&context_a);
-    let suspended_a = context_a.suspend_or_panic();
-    drop(suspended_a);
+    drop(context_a);
 
     let context_b = Context::create();
     let raw_b = context_b.as_raw();

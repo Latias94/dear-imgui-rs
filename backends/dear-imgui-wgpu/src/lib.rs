@@ -5,17 +5,13 @@
 //!
 //! # Features
 //!
-//! - **WGPU version selection**: choose exactly one of:
-//!   - `wgpu-30` (default)
-//!   - `wgpu-29`
-//!   - `wgpu-28`
-//!   - `wgpu-27` (for ecosystems pinned to wgpu 27.x, e.g. some Bevy version trains)
+//! - **Graphics API**: WGPU 30 on native targets and WebAssembly
 //! - **Diagnostics**: `tracing` emits renderer debug and warning events and is off by default
 //! - **Managed textures**: pointer-free create/update/destroy requests owned by rendered frames
 //! - **External textures**: Register application-owned `wgpu::TextureView` handles for UI display
 //! - **Gamma correction**: Automatic sRGB format detection and gamma correction
-//! - **Epoch-isolated uploads**: Vertex, index, and uniform buffers are never reused across
-//!   render epochs
+//! - **Isolated uploads**: Vertex, index, and uniform buffers are reused only after their
+//!   command buffers finish or are discarded
 //! - **Device object management**: Invalidate and rebuild renderer objects on the same live device;
 //!   actual device loss requires a replacement renderer
 //! - **Multi-viewport support**: Support for multiple windows (feature-gated via `multi-viewport-winit` for winit or `multi-viewport-sdl3` for SDL3 on native targets)
@@ -46,164 +42,7 @@
 //! # }
 //! ```
 
-// Select a single wgpu version via features (default: wgpu-30).
-//
-// We keep the public API surface using `wgpu::*` types, but allow downstream crates to opt into a
-// specific major version to better match their ecosystem (e.g. Bevy).
-#[cfg(all(
-    feature = "wgpu-27",
-    any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30")
-))]
-compile_error!(
-    "Features `wgpu-27`, `wgpu-28`, `wgpu-29`, and `wgpu-30` are mutually exclusive; enable only one."
-);
-#[cfg(all(feature = "wgpu-28", any(feature = "wgpu-29", feature = "wgpu-30")))]
-compile_error!(
-    "Features `wgpu-27`, `wgpu-28`, `wgpu-29`, and `wgpu-30` are mutually exclusive; enable only one."
-);
-#[cfg(all(feature = "wgpu-29", feature = "wgpu-30"))]
-compile_error!(
-    "Features `wgpu-27`, `wgpu-28`, `wgpu-29`, and `wgpu-30` are mutually exclusive; enable only one."
-);
-#[cfg(not(any(
-    feature = "wgpu-27",
-    feature = "wgpu-28",
-    feature = "wgpu-29",
-    feature = "wgpu-30"
-)))]
-compile_error!(
-    "Either feature `wgpu-27`, `wgpu-28`, `wgpu-29`, or `wgpu-30` must be enabled for dear-imgui-wgpu."
-);
-
-#[cfg(all(feature = "wgpu-27", feature = "webgl"))]
-compile_error!(
-    "Feature `webgl` selects the wgpu-30 WebGL route; use `webgl-wgpu27` with `wgpu-27`."
-);
-#[cfg(all(feature = "wgpu-27", feature = "webgpu"))]
-compile_error!(
-    "Feature `webgpu` selects the wgpu-30 WebGPU route; use `webgpu-wgpu27` with `wgpu-27`."
-);
-#[cfg(all(feature = "wgpu-28", feature = "webgl"))]
-compile_error!(
-    "Feature `webgl` selects the wgpu-30 WebGL route; use `webgl-wgpu28` with `wgpu-28`."
-);
-#[cfg(all(feature = "wgpu-28", feature = "webgpu"))]
-compile_error!(
-    "Feature `webgpu` selects the wgpu-30 WebGPU route; use `webgpu-wgpu28` with `wgpu-28`."
-);
-#[cfg(all(feature = "wgpu-29", feature = "webgl"))]
-compile_error!(
-    "Feature `webgl` selects the wgpu-30 WebGL route; use `webgl-wgpu29` with `wgpu-29`."
-);
-#[cfg(all(feature = "wgpu-29", feature = "webgpu"))]
-compile_error!(
-    "Feature `webgpu` selects the wgpu-30 WebGPU route; use `webgpu-wgpu29` with `wgpu-29`."
-);
-#[cfg(all(feature = "wgpu-28", feature = "webgl-wgpu27"))]
-compile_error!(
-    "Feature `webgl-wgpu27` is incompatible with `wgpu-28` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-28", feature = "webgpu-wgpu27"))]
-compile_error!(
-    "Feature `webgpu-wgpu27` is incompatible with `wgpu-28` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-27", feature = "webgl-wgpu28"))]
-compile_error!(
-    "Feature `webgl-wgpu28` is incompatible with `wgpu-27` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-27", feature = "webgpu-wgpu28"))]
-compile_error!(
-    "Feature `webgpu-wgpu28` is incompatible with `wgpu-27` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-29", feature = "webgl-wgpu27"))]
-compile_error!(
-    "Feature `webgl-wgpu27` is incompatible with `wgpu-29` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-29", feature = "webgpu-wgpu27"))]
-compile_error!(
-    "Feature `webgpu-wgpu27` is incompatible with `wgpu-29` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-29", feature = "webgl-wgpu28"))]
-compile_error!(
-    "Feature `webgl-wgpu28` is incompatible with `wgpu-29` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-29", feature = "webgpu-wgpu28"))]
-compile_error!(
-    "Feature `webgpu-wgpu28` is incompatible with `wgpu-29` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-30", feature = "webgl-wgpu27"))]
-compile_error!(
-    "Feature `webgl-wgpu27` is incompatible with `wgpu-30` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-30", feature = "webgpu-wgpu27"))]
-compile_error!(
-    "Feature `webgpu-wgpu27` is incompatible with `wgpu-30` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-30", feature = "webgl-wgpu28"))]
-compile_error!(
-    "Feature `webgl-wgpu28` is incompatible with `wgpu-30` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-30", feature = "webgpu-wgpu28"))]
-compile_error!(
-    "Feature `webgpu-wgpu28` is incompatible with `wgpu-30` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-30", feature = "webgl-wgpu29"))]
-compile_error!(
-    "Feature `webgl-wgpu29` is incompatible with `wgpu-30` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-30", feature = "webgpu-wgpu29"))]
-compile_error!(
-    "Feature `webgpu-wgpu29` is incompatible with `wgpu-30` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-27", feature = "webgl-wgpu29"))]
-compile_error!(
-    "Feature `webgl-wgpu29` is incompatible with `wgpu-27` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-27", feature = "webgpu-wgpu29"))]
-compile_error!(
-    "Feature `webgpu-wgpu29` is incompatible with `wgpu-27` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-28", feature = "webgl-wgpu29"))]
-compile_error!(
-    "Feature `webgl-wgpu29` is incompatible with `wgpu-28` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-28", feature = "webgpu-wgpu29"))]
-compile_error!(
-    "Feature `webgpu-wgpu29` is incompatible with `wgpu-28` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-27", feature = "webgl-wgpu30"))]
-compile_error!(
-    "Feature `webgl-wgpu30` is incompatible with `wgpu-27` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-27", feature = "webgpu-wgpu30"))]
-compile_error!(
-    "Feature `webgpu-wgpu30` is incompatible with `wgpu-27` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-28", feature = "webgl-wgpu30"))]
-compile_error!(
-    "Feature `webgl-wgpu30` is incompatible with `wgpu-28` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-28", feature = "webgpu-wgpu30"))]
-compile_error!(
-    "Feature `webgpu-wgpu30` is incompatible with `wgpu-28` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-29", feature = "webgl-wgpu30"))]
-compile_error!(
-    "Feature `webgl-wgpu30` is incompatible with `wgpu-29` (would pull multiple wgpu majors)."
-);
-#[cfg(all(feature = "wgpu-29", feature = "webgpu-wgpu30"))]
-compile_error!(
-    "Feature `webgpu-wgpu30` is incompatible with `wgpu-29` (would pull multiple wgpu majors)."
-);
-
-#[cfg(feature = "wgpu-27")]
-pub extern crate wgpu27 as wgpu;
-#[cfg(feature = "wgpu-28")]
-pub extern crate wgpu28 as wgpu;
-#[cfg(feature = "wgpu-29")]
-pub extern crate wgpu29 as wgpu;
-#[cfg(feature = "wgpu-30")]
-pub extern crate wgpu30 as wgpu;
+pub extern crate wgpu;
 
 // Module declarations
 mod data;
@@ -306,9 +145,8 @@ mod removed_public_contracts {
     struct PerTextureSamplers;
 }
 
-pub use data::{
-    WgpuInitInfo, WgpuRenderState, WgpuRenderStateAccessError, WgpuViewportSurfaceConfig,
-};
+pub use data::{WgpuInitInfo, WgpuRenderState, WgpuViewportSurfaceConfig};
+pub use dear_imgui_backend_support::BackendError;
 pub use error::{RendererError, RendererResult};
 pub use observation::{
     WgpuDrawRecording, WgpuFrameOutcome, WgpuFrameScope, WgpuFrameSkipReason, WgpuFrameStage,
@@ -337,13 +175,13 @@ pub use renderer::multi_viewport_sdl3;
 /// Gamma correction mode for the WGPU renderer
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GammaMode {
-    /// Automatically pick gamma based on render target format (default)
+    /// Decode vertex RGB for sRGB render targets and pass it through for linear targets.
     Auto,
     /// Force linear output (gamma = 1.0)
     Linear,
-    /// Force gamma 2.2 curve (gamma = 2.2)
+    /// Apply a power of 2.2 to interpolated vertex RGB.
     Gamma22,
-    /// Decode the modulated fragment RGB from sRGB to linear light before blending.
-    /// This mode leaves alpha unchanged and applies regardless of the target format.
+    /// Decode interpolated vertex RGB with the IEC sRGB curve before texture modulation.
+    /// This mode applies to any target format. Texture views determine texture sample decoding.
     Srgb,
 }

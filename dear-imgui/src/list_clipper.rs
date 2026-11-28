@@ -3,15 +3,13 @@
 //! Wrapper around Dear ImGui's list clipper to efficiently display large
 //! lists by only processing visible items.
 //!
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ops::Range;
 
 use crate::Ui;
+use crate::scope::{TableScope, WindowScope};
 use crate::sys;
-
-mod registry;
-
-use registry::ClipperHandle;
-pub(crate) use registry::drain_finished as drain_finished_clippers;
 
 fn items_count_to_i32(items_count: usize, caller: &str) -> i32 {
     i32::try_from(items_count)
@@ -40,10 +38,6 @@ fn final_unknown_count_to_i32(items_count: usize, caller: &str) -> i32 {
 fn display_index_from_i32(index: i32, caller: &str) -> usize {
     assert!(index >= 0, "{caller} returned a negative display index");
     usize::try_from(index).expect("non-negative display index must fit usize")
-}
-
-pub(crate) unsafe fn forget_context_clippers(context: *mut sys::ImGuiContext) -> usize {
-    unsafe { registry::forget_context(context) }
 }
 
 /// Used to render only the visible items when displaying a
@@ -135,13 +129,13 @@ struct ActiveListClipper<'ui> {
 impl<'ui> ActiveListClipper<'ui> {
     fn begin(ui: &'ui Ui, items_count: i32, items_height: f32, caller: &str) -> Self {
         ui.run_with_bound_context(|| unsafe {
-            registry::assert_can_begin(ui, caller);
+            assert_can_begin(ui, caller);
             let ptr = sys::ImGuiListClipper_ImGuiListClipper();
             if ptr.is_null() {
                 panic!("ImGuiListClipper_ImGuiListClipper() returned null");
             }
             sys::ImGuiListClipper_Begin(ptr, items_count, items_height);
-            let handle = registry::register_current(ui, ptr, caller);
+            let handle = register_current(ui, ptr, caller);
             Self {
                 ui,
                 handle,
@@ -155,14 +149,14 @@ impl<'ui> ActiveListClipper<'ui> {
 
     fn include_items_by_index(&mut self, item_begin: i32, item_end: i32, caller: &str) {
         self.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_can_modify(self.ui, self.handle, caller);
+            let ptr = assert_can_modify(self.ui, self.handle, caller);
             sys::ImGuiListClipper_IncludeItemsByIndex(ptr, item_begin, item_end);
         });
     }
 
     fn step(&mut self, caller: &str) -> bool {
         let has_range = self.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_can_seek(self.ui, self.handle, caller);
+            let ptr = assert_can_seek(self.ui, self.handle, caller);
             sys::ImGuiListClipper_Step(ptr)
         });
         self.stepped = true;
@@ -170,7 +164,7 @@ impl<'ui> ActiveListClipper<'ui> {
             self.ended = true;
             if !self.retain_registration_after_exhaustion {
                 self.ui.run_with_bound_context(|| unsafe {
-                    registry::release(self.ui, self.handle);
+                    release(self.ui, self.handle);
                 });
                 self.registered = false;
             }
@@ -181,12 +175,12 @@ impl<'ui> ActiveListClipper<'ui> {
     fn end(&mut self, caller: &str) {
         if !self.ended {
             self.ui.run_with_bound_context(|| unsafe {
-                let ptr = registry::assert_can_seek(self.ui, self.handle, caller);
+                let ptr = assert_can_seek(self.ui, self.handle, caller);
                 sys::ImGuiListClipper_End(ptr);
             });
             self.ended = true;
             self.ui.run_with_bound_context(|| unsafe {
-                registry::release(self.ui, self.handle);
+                release(self.ui, self.handle);
             });
             self.registered = false;
         }
@@ -194,14 +188,14 @@ impl<'ui> ActiveListClipper<'ui> {
 
     fn display_start(&self, caller: &str) -> usize {
         self.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_current(self.ui, self.handle, caller);
+            let ptr = assert_current(self.ui, self.handle, caller);
             display_index_from_i32((*ptr).DisplayStart, caller)
         })
     }
 
     fn display_end(&self, caller: &str) -> usize {
         self.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_current(self.ui, self.handle, caller);
+            let ptr = assert_current(self.ui, self.handle, caller);
             display_index_from_i32((*ptr).DisplayEnd, caller)
         })
     }
@@ -211,7 +205,7 @@ impl Drop for ActiveListClipper<'_> {
     fn drop(&mut self) {
         if self.registered {
             let _ = self.ui.ctx_binding.try_with_bound_context(|| unsafe {
-                registry::release(self.ui, self.handle);
+                release(self.ui, self.handle);
             });
         }
     }
@@ -419,7 +413,7 @@ impl UnknownCountListClipperToken<'_> {
             final_unknown_count_to_i32(final_items_count, "UnknownCountListClipperToken::finish()");
 
         let items_height = self.active.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_current(
+            let ptr = assert_current(
                 self.active.ui,
                 self.active.handle,
                 "UnknownCountListClipperToken::finish()",
@@ -435,7 +429,7 @@ impl UnknownCountListClipperToken<'_> {
             "UnknownCountListClipperToken::finish() could not determine a positive item height"
         );
         self.active.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_can_seek(
+            let ptr = assert_can_seek(
                 self.active.ui,
                 self.active.handle,
                 "UnknownCountListClipperToken::finish()",
@@ -444,6 +438,364 @@ impl UnknownCountListClipperToken<'_> {
         });
         self.active.end("UnknownCountListClipperToken::finish()");
     }
+}
+
+pub struct ListClipperIterator<'ui> {
+    list_clipper: ListClipperToken<'ui>,
+    exhausted: bool,
+    last_value: Option<usize>,
+}
+
+impl<'ui> ListClipperIterator<'ui> {
+    fn new(list_clipper: ListClipperToken<'ui>) -> Self {
+        Self {
+            list_clipper,
+            exhausted: false,
+            last_value: None,
+        }
+    }
+}
+
+impl Iterator for ListClipperIterator<'_> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(value) = self.last_value {
+                let next_value = value + 1;
+
+                if next_value >= self.list_clipper.display_end() {
+                    self.last_value = None;
+                } else {
+                    self.last_value = Some(next_value);
+                }
+
+                return Some(value);
+            }
+
+            if self.exhausted {
+                // If the clipper is exhausted, don't call step again!
+                return None;
+            }
+
+            // Advance the clipper
+            let ret = self.list_clipper.step();
+            if !ret {
+                self.exhausted = true;
+                return None;
+            }
+
+            // Setup iteration for this step's chunk
+            let start = self.list_clipper.display_start();
+            let end = self.list_clipper.display_end();
+
+            if start < end {
+                let next_value = start + 1;
+                if next_value < end {
+                    self.last_value = Some(next_value);
+                }
+
+                return Some(start);
+            } else {
+                self.last_value = None;
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ClipperScope {
+    context: *mut sys::ImGuiContext,
+    window: WindowScope,
+    table: Option<TableScope>,
+}
+
+#[derive(Clone, Copy)]
+struct ClipperEntry {
+    handle: ClipperHandle,
+    ptr: *mut sys::ImGuiListClipper,
+    scope: ClipperScope,
+    abandoned: bool,
+}
+
+#[derive(Clone, Copy)]
+struct ClipperHandle {
+    id: u64,
+    context: *mut sys::ImGuiContext,
+    boundary_depth: usize,
+}
+
+struct ClipperRegistry {
+    next_id: u64,
+    by_context: HashMap<usize, Vec<ClipperEntry>>,
+}
+
+impl Default for ClipperRegistry {
+    fn default() -> Self {
+        Self {
+            next_id: 1,
+            by_context: HashMap::new(),
+        }
+    }
+}
+
+thread_local! {
+    static CLIPPERS: RefCell<ClipperRegistry> = RefCell::new(ClipperRegistry::default());
+}
+
+unsafe fn current_scope(ui: &Ui, caller: &str) -> ClipperScope {
+    let context = ui.context_raw();
+    assert!(
+        !context.is_null(),
+        "{caller} requires a valid ImGui context"
+    );
+    assert_eq!(
+        unsafe { sys::igGetCurrentContext() },
+        context,
+        "{caller} requires the clipper's ImGui context to be current"
+    );
+    let scope = ui.current_native_scope();
+    let window = scope
+        .window()
+        .unwrap_or_else(|| panic!("{caller} requires an active ImGui window"));
+    ClipperScope {
+        context,
+        window,
+        table: scope.table(),
+    }
+}
+
+unsafe fn try_current_scope(ui: &Ui) -> Option<ClipperScope> {
+    if ui.native_scope_recovery_pending() {
+        return None;
+    }
+    let context = ui.context_raw();
+    if context.is_null() || unsafe { sys::igGetCurrentContext() } != context {
+        return None;
+    }
+    let scope = ui.current_native_scope();
+    // End can seek the cursor and close a table row. Release native storage without changing
+    // layout when an outer clipper is dropped from inside an extension using that row.
+    if ui.native_window_scope_holds_table(scope.table()) {
+        return None;
+    }
+    Some(ClipperScope {
+        context,
+        window: scope.window()?,
+        table: scope.table(),
+    })
+}
+
+unsafe fn assert_can_begin(ui: &Ui, caller: &str) {
+    let scope = unsafe { current_scope(ui, caller) };
+    ui.assert_host_table_can_change(scope.table, caller);
+    let context = scope.context;
+    CLIPPERS.with(|registry| {
+        let registry = registry.borrow();
+        let Some(entry) = registry
+            .by_context
+            .get(&(context as usize))
+            .and_then(|stack| stack.last())
+        else {
+            return;
+        };
+        if entry.handle.boundary_depth == ui.native_window_scope_depth() {
+            assert_eq!(
+                entry.scope, scope,
+                "{caller} cannot begin a nested list clipper in a different ImGui window or table scope"
+            );
+        }
+    });
+}
+
+unsafe fn register_current(
+    ui: &Ui,
+    ptr: *mut sys::ImGuiListClipper,
+    caller: &str,
+) -> ClipperHandle {
+    assert!(!ptr.is_null(), "{caller} received a null list clipper");
+    let scope = unsafe { current_scope(ui, caller) };
+    let context = scope.context;
+    CLIPPERS.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let id = registry.next_id;
+        registry.next_id = registry
+            .next_id
+            .checked_add(1)
+            .expect("list clipper token counter overflowed");
+        let handle = ClipperHandle {
+            id,
+            context,
+            boundary_depth: ui.native_window_scope_depth(),
+        };
+        registry
+            .by_context
+            .entry(context as usize)
+            .or_default()
+            .push(ClipperEntry {
+                handle,
+                ptr,
+                scope,
+                abandoned: false,
+            });
+        handle
+    })
+}
+
+unsafe fn assert_current(
+    ui: &Ui,
+    handle: ClipperHandle,
+    caller: &str,
+) -> *mut sys::ImGuiListClipper {
+    assert_eq!(
+        handle.context,
+        ui.context_raw(),
+        "{caller} used a list clipper with a foreign Ui"
+    );
+    let scope = unsafe { current_scope(ui, caller) };
+    CLIPPERS.with(|registry| {
+        let registry = registry.borrow();
+        let stack = registry
+            .by_context
+            .get(&(handle.context as usize))
+            .unwrap_or_else(|| panic!("{caller} used a list clipper that is no longer active"));
+        let entry = stack
+            .last()
+            .unwrap_or_else(|| panic!("{caller} used a list clipper that is no longer active"));
+        assert_eq!(
+            entry.handle.id, handle.id,
+            "{caller} must follow list clipper LIFO order; a nested clipper is still active"
+        );
+        assert!(
+            !entry.abandoned,
+            "{caller} used an abandoned list clipper token"
+        );
+        assert_eq!(
+            entry.scope, scope,
+            "{caller} must run in the exact frame, window Begin, and table instance where the clipper began"
+        );
+        entry.ptr
+    })
+}
+
+unsafe fn assert_can_modify(
+    ui: &Ui,
+    handle: ClipperHandle,
+    caller: &str,
+) -> *mut sys::ImGuiListClipper {
+    assert_eq!(
+        handle.boundary_depth,
+        ui.native_window_scope_depth(),
+        "{caller} cannot modify a list clipper across a native window scope"
+    );
+    unsafe { assert_current(ui, handle, caller) }
+}
+
+unsafe fn assert_can_seek(
+    ui: &Ui,
+    handle: ClipperHandle,
+    caller: &str,
+) -> *mut sys::ImGuiListClipper {
+    let ptr = unsafe { assert_can_modify(ui, handle, caller) };
+    ui.assert_host_table_can_change(ui.current_native_scope().table(), caller);
+    ptr
+}
+
+unsafe fn release(ui: &Ui, handle: ClipperHandle) {
+    let registered = CLIPPERS.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let stack = registry.by_context.get_mut(&(handle.context as usize))?;
+        let entry = stack
+            .iter_mut()
+            .rev()
+            .find(|entry| entry.handle.id == handle.id)?;
+        entry.abandoned = true;
+        Some(())
+    });
+    if registered.is_some() {
+        unsafe { drain_finished_clippers(ui) };
+    }
+}
+
+// Called with the Ui bound, after dropping a token or leaving a native extension boundary.
+pub(crate) unsafe fn drain_finished_clippers(ui: &Ui) {
+    let depth = ui.native_window_scope_depth();
+    let entries_to_destroy = CLIPPERS.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let key = ui.context_raw() as usize;
+        let Some(stack) = registry.by_context.get_mut(&key) else {
+            return Vec::new();
+        };
+        let mut entries = Vec::new();
+        while stack.last().is_some_and(|entry| {
+            entry.handle.boundary_depth > depth
+                || (entry.handle.boundary_depth == depth && entry.abandoned)
+        }) {
+            entries.push(stack.pop().expect("clipper stack was checked as non-empty"));
+        }
+        if stack.is_empty() {
+            registry.by_context.remove(&key);
+        }
+        entries
+    });
+
+    if !entries_to_destroy.is_empty() {
+        let current_scope = unsafe { try_current_scope(ui) };
+        for entry in entries_to_destroy {
+            if entry.handle.boundary_depth == depth && current_scope == Some(entry.scope) {
+                unsafe { destroy_in_original_scope(entry) };
+            } else {
+                // An escaped clipper must not seek a cursor now owned by its enclosing extension.
+                unsafe { destroy_without_layout(entry) };
+            }
+        }
+    }
+}
+
+unsafe fn destroy_in_original_scope(entry: ClipperEntry) {
+    debug_assert_eq!(unsafe { sys::igGetCurrentContext() }, entry.scope.context);
+    debug_assert_eq!(unsafe { (*entry.ptr).Ctx }, entry.scope.context);
+    unsafe { sys::ImGuiListClipper_destroy(entry.ptr) };
+}
+
+unsafe fn destroy_without_layout(entry: ClipperEntry) {
+    let context = entry.scope.context;
+    debug_assert!(!context.is_null());
+    debug_assert_eq!(unsafe { (*entry.ptr).Ctx }, context);
+
+    unsafe {
+        // A negative count suppresses End()'s cursor seek while preserving its
+        // native temporary-stack restoration, including nested back-pointers.
+        (*entry.ptr).ItemsCount = -1;
+        sys::ImGuiListClipper_End(entry.ptr);
+        sys::ImGuiListClipper_destroy(entry.ptr);
+    }
+}
+
+pub(crate) unsafe fn forget_context_clippers(context: *mut sys::ImGuiContext) -> usize {
+    let entries = CLIPPERS.with(|registry| {
+        registry
+            .borrow_mut()
+            .by_context
+            .remove(&(context as usize))
+            .unwrap_or_default()
+    });
+    let abandoned = entries.len();
+    for entry in entries.into_iter().rev() {
+        unsafe { destroy_without_layout(entry) };
+    }
+    abandoned
+}
+
+#[cfg(test)]
+fn active_count(context: *mut sys::ImGuiContext) -> usize {
+    CLIPPERS.with(|registry| {
+        registry
+            .borrow()
+            .by_context
+            .get(&(context as usize))
+            .map_or(0, Vec::len)
+    })
 }
 
 #[cfg(test)]
@@ -708,7 +1060,7 @@ mod tests {
                 .next_range()
                 .expect("measuring the first item should produce the visible range");
             let (start_y, measured_height) = ui.with_bound_context(|| unsafe {
-                let raw = &*registry::assert_current(ui, clipper.active.handle, "measured clipper");
+                let raw = &*assert_current(ui, clipper.active.handle, "measured clipper");
                 (raw.StartPosY + raw.StartSeekOffsetY, raw.ItemsHeight)
             });
             assert!(measured_height.is_finite() && measured_height > 0.0);
@@ -734,13 +1086,13 @@ mod tests {
         ui.window("list_clipper_out_of_order_drop").build(|| {
             let outer = ListClipper::new(4).items_height(10.0).begin(ui);
             let inner = ListClipper::unknown_count().items_height(10.0).begin(ui);
-            assert_eq!(registry::active_count(context), 2);
+            assert_eq!(active_count(context), 2);
 
             drop(outer);
-            assert_eq!(registry::active_count(context), 2);
+            assert_eq!(active_count(context), 2);
 
             drop(inner);
-            assert_eq!(registry::active_count(context), 0);
+            assert_eq!(active_count(context), 0);
 
             let mut next = ListClipper::new(1).items_height(10.0).begin(ui);
             assert!(next.step());
@@ -765,7 +1117,7 @@ mod tests {
             }));
 
             assert!(result.is_err());
-            assert_eq!(registry::active_count(context), 0);
+            assert_eq!(active_count(context), 0);
 
             let mut next = ListClipper::new(1).items_height(10.0).begin(ui);
             assert!(next.step());
@@ -785,7 +1137,7 @@ mod tests {
             ui.window("list_clipper_drop_scope_other").build(|| {
                 drop(clipper.take());
             });
-            assert_eq!(registry::active_count(context), 0);
+            assert_eq!(active_count(context), 0);
 
             let mut next = ListClipper::new(1).items_height(10.0).begin(ui);
             assert!(next.step());
@@ -806,7 +1158,7 @@ mod tests {
         });
         drop(clipper.take());
         drop(clipper);
-        assert_eq!(registry::active_count(context), 0);
+        assert_eq!(active_count(context), 0);
         assert!(ctx.render_legacy().valid());
     }
 
@@ -820,13 +1172,13 @@ mod tests {
             .build(|| ListClipper::new(1).items_height(10.0).begin(ui))
             .expect("test window should be visible");
         std::mem::forget(clipper);
-        assert_eq!(registry::active_count(context), 1);
+        assert_eq!(active_count(context), 1);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _ = ctx.render_legacy();
         }));
         assert!(result.is_err());
-        assert_eq!(registry::active_count(context), 0);
+        assert_eq!(active_count(context), 0);
         assert_eq!(
             ctx.frame_lifecycle_state(),
             crate::FrameLifecycleState::Idle
@@ -851,7 +1203,7 @@ mod tests {
             .window("list_clipper_reopened_scope")
             .build(|| ListClipper::new(1).items_height(10.0).begin(ui))
             .expect("test window should be visible");
-        assert_eq!(registry::active_count(context), 1);
+        assert_eq!(active_count(context), 1);
 
         ui.window("list_clipper_reopened_scope").build(|| {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -859,12 +1211,12 @@ mod tests {
             }));
             assert!(result.is_err());
             drop(escaped);
-            assert_eq!(registry::active_count(context), 0);
+            assert_eq!(active_count(context), 0);
 
             drop(ListClipper::new(0).items_height(10.0).begin(ui));
         });
 
-        assert_eq!(registry::active_count(context), 0);
+        assert_eq!(active_count(context), 0);
         assert!(ctx.render_legacy().valid());
     }
 
@@ -903,7 +1255,7 @@ mod tests {
                 };
                 ListClipper::new(1).items_height(10.0).begin(ui)
             };
-            assert_eq!(registry::active_count(context), 1);
+            assert_eq!(active_count(context), 1);
 
             let Some(_table) = ui.begin_table("list_clipper_reopened_table", 1) else {
                 panic!("test table should be visible");
@@ -913,7 +1265,7 @@ mod tests {
             }));
             assert!(result.is_err());
             drop(escaped);
-            assert_eq!(registry::active_count(context), 0);
+            assert_eq!(active_count(context), 0);
         });
 
         assert!(ctx.render_legacy().valid());
@@ -984,12 +1336,12 @@ mod tests {
             assert!(inner.step());
             ui.dummy([1.0, 10.0]);
             assert!(!inner.step());
-            assert_eq!(registry::active_count(context), 1);
+            assert_eq!(active_count(context), 1);
 
             assert!(outer.step());
             ui.dummy([1.0, 10.0]);
             assert!(!outer.step());
-            assert_eq!(registry::active_count(context), 0);
+            assert_eq!(active_count(context), 0);
 
             drop(inner);
         });
@@ -1008,7 +1360,7 @@ mod tests {
                 clipper
             })
             .expect("test window should be visible");
-        assert_eq!(registry::active_count(context), 0);
+        assert_eq!(active_count(context), 0);
 
         ui.window("list_clipper_after_explicit_end").build(|| {
             let mut next = ListClipper::new(1).items_height(10.0).begin(ui);
@@ -1076,67 +1428,5 @@ mod tests {
                 .is_err()
             );
         });
-    }
-}
-
-pub struct ListClipperIterator<'ui> {
-    list_clipper: ListClipperToken<'ui>,
-    exhausted: bool,
-    last_value: Option<usize>,
-}
-
-impl<'ui> ListClipperIterator<'ui> {
-    fn new(list_clipper: ListClipperToken<'ui>) -> Self {
-        Self {
-            list_clipper,
-            exhausted: false,
-            last_value: None,
-        }
-    }
-}
-
-impl Iterator for ListClipperIterator<'_> {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let Some(value) = self.last_value {
-                let next_value = value + 1;
-
-                if next_value >= self.list_clipper.display_end() {
-                    self.last_value = None;
-                } else {
-                    self.last_value = Some(next_value);
-                }
-
-                return Some(value);
-            }
-
-            if self.exhausted {
-                // If the clipper is exhausted, don't call step again!
-                return None;
-            }
-
-            // Advance the clipper
-            let ret = self.list_clipper.step();
-            if !ret {
-                self.exhausted = true;
-                return None;
-            }
-
-            // Setup iteration for this step's chunk
-            let start = self.list_clipper.display_start();
-            let end = self.list_clipper.display_end();
-
-            if start < end {
-                let next_value = start + 1;
-                if next_value < end {
-                    self.last_value = Some(next_value);
-                }
-                return Some(start);
-            } else {
-                self.last_value = None;
-            }
-        }
     }
 }

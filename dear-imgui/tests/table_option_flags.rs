@@ -147,7 +147,7 @@ fn table_column_options_reject_non_independent_bits_before_ffi() {
 }
 
 #[test]
-fn table_column_flag_getter_preserves_unknown_raw_bits() {
+fn table_column_flag_getter_omits_unknown_raw_bits() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
@@ -190,7 +190,7 @@ fn table_column_flag_getter_preserves_unknown_raw_bits() {
             ui.table_get_column_flags(imgui::TableColumnIndex::ZERO)
                 .bits()
                 & unknown,
-            unknown
+            0
         );
     });
 }

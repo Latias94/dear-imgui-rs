@@ -36,19 +36,19 @@ bitflags::bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct SelectableFlags: i32 {
         /// Clicking this don't close parent popup window
-        const NO_AUTO_CLOSE_POPUPS = sys::ImGuiSelectableFlags_NoAutoClosePopups as i32;
+        const NO_AUTO_CLOSE_POPUPS = sys::ImGuiSelectableFlags_NoAutoClosePopups;
         /// Selectable frame can span all columns (text will still fit in current column)
-        const SPAN_ALL_COLUMNS = sys::ImGuiSelectableFlags_SpanAllColumns as i32;
+        const SPAN_ALL_COLUMNS = sys::ImGuiSelectableFlags_SpanAllColumns;
         /// Generate press events on double clicks too
-        const ALLOW_DOUBLE_CLICK = sys::ImGuiSelectableFlags_AllowDoubleClick as i32;
+        const ALLOW_DOUBLE_CLICK = sys::ImGuiSelectableFlags_AllowDoubleClick;
         /// Cannot be selected, display greyed out text
-        const DISABLED = sys::ImGuiSelectableFlags_Disabled as i32;
+        const DISABLED = sys::ImGuiSelectableFlags_Disabled;
         /// Hit testing to allow subsequent widgets to overlap this one
-        const ALLOW_OVERLAP = sys::ImGuiSelectableFlags_AllowOverlap as i32;
+        const ALLOW_OVERLAP = sys::ImGuiSelectableFlags_AllowOverlap;
         /// Display the selectable as highlighted, as if hovered.
-        const HIGHLIGHT = sys::ImGuiSelectableFlags_Highlight as i32;
+        const HIGHLIGHT = sys::ImGuiSelectableFlags_Highlight;
         /// Auto-select when moved into by navigation, unless Ctrl is held.
-        const SELECT_ON_NAV = sys::ImGuiSelectableFlags_SelectOnNav as i32;
+        const SELECT_ON_NAV = sys::ImGuiSelectableFlags_SelectOnNav;
     }
 }
 
@@ -165,13 +165,8 @@ impl<'ui, T: AsRef<str>> Selectable<'ui, T> {
             x: self.size[0],
             y: self.size[1],
         };
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igSelectable_Bool(
-                self.ui.scratch_txt(self.label),
-                self.selected,
-                self.flags.bits(),
-                size_vec,
-            )
+        self.ui.with_scratch_txt(self.label, |label_ptr| unsafe {
+            sys::igSelectable_Bool(label_ptr, self.selected, self.flags.bits(), size_vec)
         })
     }
 
@@ -183,9 +178,9 @@ impl<'ui, T: AsRef<str>> Selectable<'ui, T> {
             x: self.size[0],
             y: self.size[1],
         };
-        self.ui.run_with_bound_context(|| unsafe {
+        self.ui.with_scratch_txt(self.label, |label_ptr| unsafe {
             sys::igSelectable_BoolPtr(
-                self.ui.scratch_txt(self.label),
+                label_ptr,
                 selected as *mut bool,
                 self.flags.bits(),
                 size_vec,

@@ -100,8 +100,8 @@ registry lookup. Safe code should use the `Language` enum, `Language::from_name`
 or `Language::from_extension`. The built-in set now contains Julia and WGSL.
 `PaletteColor::COUNT` is 33 and includes `CustomColor1` through `CustomColor9`.
 The raw line-number margin functions were replaced by `TextEditor_SetLeftMargin`
-and `TextEditor_GetLeftMargin`. The safe wrapper keeps deprecated forwarding
-methods while callers migrate to `set_left_margin` and `left_margin`.
+and `TextEditor_GetLeftMargin`. Use `set_left_margin` and `left_margin` in safe
+code. These methods also apply when line numbers are hidden.
 
 Autocomplete configuration now supports extra trigger and word characters.
 Callbacks can inspect and change the replacement range and add display labels.

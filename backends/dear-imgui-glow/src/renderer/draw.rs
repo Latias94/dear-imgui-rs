@@ -1,6 +1,8 @@
+use dear_imgui_backend_support::{
+    DrawCallbackDispatcher, ScopedRenderState, StandardDrawCallback, try_compute_scissor_rect,
+};
 use dear_imgui_rs::render::{
     DrawCmd, DrawCmdParams, DrawData, DrawIdx, DrawVert, PendingFrame, ReconciledFrame,
-    RendererRenderStateGuard,
 };
 use dear_imgui_rs::sys;
 use glow::{Context, HasContext};
@@ -14,10 +16,13 @@ use crate::{
     error::{RenderError, RenderResult},
     state::{
         FramebufferSrgbScope, GlStateGuard, GlowRenderStateStorage, GlowSamplerStrategy,
-        map_renderer_render_state_error,
+        map_renderer_render_state_error, supports_program_pipeline,
     },
     texture::TextureRegistry,
 };
+
+const VERTEX_STRIDE: i32 = size_of::<DrawVert>() as i32;
+const VERTEX_COLOR_OFFSET: i32 = std::mem::offset_of!(DrawVert, col) as i32;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SamplerBinding {
@@ -82,14 +87,6 @@ impl FramebufferExtent {
 
         Ok(Some(extent))
     }
-
-    fn width_f32(self) -> f32 {
-        self.width as f32
-    }
-
-    fn height_f32(self) -> f32 {
-        self.height as f32
-    }
 }
 
 fn has_upper_left_clip_origin(gl: &Context, origin: GlowClipOrigin, supported: bool) -> bool {
@@ -109,35 +106,22 @@ fn project_scissor_rect(
     framebuffer_scale: [f32; 2],
     extent: FramebufferExtent,
 ) -> RenderResult<Option<[i32; 4]>> {
-    let transformed = [
-        (clip_rect[0] - display_pos[0]) * framebuffer_scale[0],
-        (clip_rect[1] - display_pos[1]) * framebuffer_scale[1],
-        (clip_rect[2] - display_pos[0]) * framebuffer_scale[0],
-        (clip_rect[3] - display_pos[1]) * framebuffer_scale[1],
-    ];
-    if transformed.iter().any(|value| !value.is_finite()) {
-        return Err(RenderError::NonFiniteClipRect(clip_rect));
-    }
-
-    let clip_min_x = transformed[0].max(0.0);
-    let clip_min_y = transformed[1].max(0.0);
-    let clip_max_x = transformed[2].min(extent.width_f32());
-    let clip_max_y = transformed[3].min(extent.height_f32());
-    if clip_max_x <= clip_min_x || clip_max_y <= clip_min_y {
-        return Ok(None);
-    }
-
-    let width = (clip_max_x - clip_min_x) as i32;
-    let height = (clip_max_y - clip_min_y) as i32;
-    if width == 0 || height == 0 {
-        return Ok(None);
-    }
-    Ok(Some([
-        clip_min_x as i32,
-        extent.height - clip_max_y as i32,
-        width,
-        height,
-    ]))
+    let scissor = try_compute_scissor_rect(
+        clip_rect,
+        display_pos,
+        framebuffer_scale,
+        [extent.width as u32, extent.height as u32],
+    )
+    .map_err(|_| RenderError::NonFiniteClipRect(clip_rect))?;
+    // The shared scissor has an upper-left origin. OpenGL always takes a lower-left scissor.
+    Ok(scissor.map(|[x, y, width, height]| {
+        [
+            x as i32,
+            extent.height - (y + height) as i32,
+            width as i32,
+            height as i32,
+        ]
+    }))
 }
 
 impl SamplerBinding {
@@ -229,8 +213,8 @@ enum DeviceObjectReadiness {
 impl GlowRenderer {
     /// Consume and render one Context-borrowed Dear ImGui frame.
     ///
-    /// The native context for the retained Glow function table, or a compatible share-group
-    /// context, must be current on this thread.
+    /// Glow uses its native context owner if provided. Otherwise make the native context for
+    /// the retained table, or a compatible share-group context, current on this thread.
     pub fn render(&mut self, frame: PendingFrame<'_>) -> RenderResult<()> {
         self.ensure_operational()?;
         self.validate_pending_frame(&frame)?;
@@ -243,8 +227,8 @@ impl GlowRenderer {
 
     /// Reconciles managed textures without reading or drawing the frame's commands.
     ///
-    /// The native context for the retained Glow function table, or a compatible share-group
-    /// context, must be current on this thread.
+    /// Glow uses its native context owner if provided. Otherwise make a compatible native context
+    /// current on this thread.
     pub fn reconcile_frame<'frame>(
         &mut self,
         frame: PendingFrame<'frame>,
@@ -260,18 +244,10 @@ impl GlowRenderer {
 
     /// Consumes and draws one already-reconciled frame.
     ///
-    /// The native context for the retained Glow function table, or a compatible share-group
-    /// context, must be current on this thread.
+    /// Glow uses its native context owner if provided. Otherwise make a compatible native context
+    /// current on this thread.
     pub fn render_reconciled(&mut self, frame: ReconciledFrame<'_>) -> RenderResult<()> {
-        self.render_reconciled_preserving_frame(frame).map(drop)
-    }
-
-    pub(super) fn render_reconciled_preserving_frame<'frame>(
-        &mut self,
-        frame: ReconciledFrame<'frame>,
-    ) -> RenderResult<ReconciledFrame<'frame>> {
-        self.draw_reconciled_frame(&frame)?;
-        Ok(frame)
+        self.draw_reconciled_frame(&frame)
     }
 
     pub(super) fn draw_reconciled_frame(
@@ -284,8 +260,7 @@ impl GlowRenderer {
             .gl_context
             .clone()
             .ok_or(RenderError::MissingGlContext)?;
-        self.ensure_device_objects_preflighted(&gl)?;
-        self.render_draw_data_with_ready_device_objects(&gl, frame.draw_data())
+        self.render_preflighted_reconciled_frame(&gl, frame)
     }
 
     /// Consume and render a frame using an externally managed Glow function table.
@@ -327,8 +302,7 @@ impl GlowRenderer {
     ) -> RenderResult<()> {
         self.ensure_operational()?;
         self.validate_reconciled_frame(&frame)?;
-        self.render_preflighted_reconciled_frame(gl, frame)
-            .map(drop)
+        self.render_preflighted_reconciled_frame(gl, &frame)
     }
 
     fn render_preflighted_pending_frame(
@@ -337,7 +311,7 @@ impl GlowRenderer {
         frame: PendingFrame<'_>,
     ) -> RenderResult<()> {
         let frame = self.reconcile_preflighted_pending_frame(gl, frame)?;
-        self.render_reconciled_frame(gl, frame).map(drop)
+        self.render_draw_data_with_ready_device_objects(gl, frame.draw_data())
     }
 
     fn reconcile_preflighted_pending_frame<'frame>(
@@ -345,17 +319,19 @@ impl GlowRenderer {
         gl: &Context,
         frame: PendingFrame<'frame>,
     ) -> RenderResult<ReconciledFrame<'frame>> {
+        self.activate_gl_context(gl)?;
         self.ensure_device_objects_preflighted(gl)?;
         self.reconcile_pending_frame(gl, frame)
     }
 
-    fn render_preflighted_reconciled_frame<'frame>(
+    fn render_preflighted_reconciled_frame(
         &mut self,
         gl: &Context,
-        frame: ReconciledFrame<'frame>,
-    ) -> RenderResult<ReconciledFrame<'frame>> {
+        frame: &ReconciledFrame<'_>,
+    ) -> RenderResult<()> {
+        self.activate_gl_context(gl)?;
         self.ensure_device_objects_preflighted(gl)?;
-        self.render_reconciled_frame(gl, frame)
+        self.render_draw_data_with_ready_device_objects(gl, frame.draw_data())
     }
 
     fn reconcile_pending_frame<'frame>(
@@ -367,16 +343,10 @@ impl GlowRenderer {
         let feedback =
             self.process_texture_requests(gl, frame.texture_requests(), request_epoch)?;
         let reconciled = frame.reconcile_texture_feedback(feedback)?;
-        self.prune_destroyed_managed_textures(reconciled.completion_progress().watermark());
-        Ok(reconciled)
-    }
-
-    fn render_reconciled_frame<'frame>(
-        &mut self,
-        gl: &Context,
-        reconciled: ReconciledFrame<'frame>,
-    ) -> RenderResult<ReconciledFrame<'frame>> {
-        self.render_draw_data_with_ready_device_objects(gl, reconciled.draw_data())?;
+        self.prune_destroyed_managed_textures(
+            reconciled.context_id(),
+            reconciled.completion_progress().watermark(),
+        );
         Ok(reconciled)
     }
 
@@ -487,10 +457,8 @@ impl GlowRenderer {
 
         let platform_io = drawable.then(platform_io_for_current_context).transpose()?;
         if let Some(platform_io) = platform_io {
-            unsafe {
-                RendererRenderStateGuard::<GlowRenderStateStorage<'_>>::preflight(platform_io)
-            }
-            .map_err(map_renderer_render_state_error)?;
+            unsafe { ScopedRenderState::<GlowRenderStateStorage<'_>>::preflight(platform_io) }
+                .map_err(map_renderer_render_state_error)?;
         }
 
         let _gl_state = GlStateGuard::capture(
@@ -498,6 +466,7 @@ impl GlowRenderer {
             self.gl_version,
             self.has_separate_polygon_modes,
             self.has_sampler_object_support,
+            self.bind_program_pipeline,
         );
         let framebuffer_srgb = self
             .supports_framebuffer_srgb_control()
@@ -521,7 +490,7 @@ impl GlowRenderer {
         };
         let mut callback_state = GlowRenderStateStorage::new(gl, sampler_strategy);
         let render_state = unsafe {
-            RendererRenderStateGuard::install(
+            ScopedRenderState::install(
                 platform_io.expect("drawable data has PlatformIO"),
                 &mut callback_state,
             )
@@ -534,10 +503,8 @@ impl GlowRenderer {
             &vertex_array,
             framebuffer_srgb.as_ref(),
         )?;
-        let texture_registry = &self.texture_registry;
         self.render_draw_lists(
             gl,
-            texture_registry,
             draw_data,
             extent,
             &vertex_array,
@@ -611,6 +578,12 @@ impl GlowRenderer {
                 [(r + l) / (l - r), (t + b) / (b - t), 0.0, 1.0],
             ];
 
+            if let Some(bind) = self
+                .bind_program_pipeline
+                .filter(|_| supports_program_pipeline(gl))
+            {
+                bind(0);
+            }
             gl.use_program(self.shaders.program);
             if let Some(location) = self.shaders.attrib_location_tex.as_ref() {
                 gl.uniform_1_i32(Some(location), 0);
@@ -618,17 +591,12 @@ impl GlowRenderer {
             if let Some(location) = self.shaders.attrib_location_proj_mtx.as_ref() {
                 gl.uniform_matrix_4_f32_slice(Some(location), false, &ortho_projection.concat());
             }
+            if let Some(location) = self.shaders.attrib_location_decode_vertex_srgb.as_ref() {
+                let decode_srgb = self.framebuffer_srgb && self.color_gamma_override.is_none();
+                gl.uniform_1_i32(Some(location), i32::from(decode_srgb));
+            }
             if let Some(location) = self.shaders.attrib_location_color_gamma.as_ref() {
-                // Decode vertex color from sRGB when writing to sRGB framebuffer,
-                // otherwise pass-through (1.0). Allow override if set.
-                let gamma = self
-                    .color_gamma_override
-                    .unwrap_or(if self.framebuffer_srgb {
-                        2.2_f32
-                    } else {
-                        1.0_f32
-                    });
-                gl.uniform_1_f32(Some(location), gamma);
+                gl.uniform_1_f32(Some(location), self.color_gamma_override.unwrap_or(1.0));
             }
 
             if let Some(samplers) = &self.samplers {
@@ -636,31 +604,34 @@ impl GlowRenderer {
             }
 
             // Bind vertex/index buffers and setup attributes for ImDrawVert
-            gl.bind_buffer(glow::ARRAY_BUFFER, self.vbo_handle);
             gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, self.ebo_handle);
             gl.enable_vertex_attrib_array(self.shaders.attrib_location_vtx_pos);
             gl.enable_vertex_attrib_array(self.shaders.attrib_location_vtx_uv);
             gl.enable_vertex_attrib_array(self.shaders.attrib_location_vtx_color);
+        }
+        self.set_vertex_attrib_pointers(gl, 0);
 
-            let pos_offset = std::mem::offset_of!(DrawVert, pos) as i32;
-            let uv_offset = std::mem::offset_of!(DrawVert, uv) as i32;
-            let color_offset = std::mem::offset_of!(DrawVert, col) as i32;
+        Ok(())
+    }
 
+    fn set_vertex_attrib_pointers(&self, gl: &Context, base_offset: i32) {
+        unsafe {
+            gl.bind_buffer(glow::ARRAY_BUFFER, self.vbo_handle);
             gl.vertex_attrib_pointer_f32(
                 self.shaders.attrib_location_vtx_pos,
                 2,
                 glow::FLOAT,
                 false,
-                size_of::<DrawVert>() as i32,
-                pos_offset,
+                VERTEX_STRIDE,
+                base_offset + std::mem::offset_of!(DrawVert, pos) as i32,
             );
             gl.vertex_attrib_pointer_f32(
                 self.shaders.attrib_location_vtx_uv,
                 2,
                 glow::FLOAT,
                 false,
-                size_of::<DrawVert>() as i32,
-                uv_offset,
+                VERTEX_STRIDE,
+                base_offset + std::mem::offset_of!(DrawVert, uv) as i32,
             );
             // Color attribute - our DrawVert uses u32 packed color, so we need to handle it as 4 bytes
             // The u32 is stored as RGBA in little-endian format, so we can treat it as 4 unsigned bytes
@@ -669,26 +640,24 @@ impl GlowRenderer {
                 4,
                 glow::UNSIGNED_BYTE,
                 true, // normalized = true, converts [0,255] to [0.0,1.0]
-                size_of::<DrawVert>() as i32,
-                color_offset,
+                VERTEX_STRIDE,
+                base_offset + VERTEX_COLOR_OFFSET,
             );
         }
-
-        Ok(())
     }
 
     /// Render all draw lists
     fn render_draw_lists(
         &self,
         gl: &Context,
-        texture_registry: &TextureRegistry,
         draw_data: &DrawData,
         extent: FramebufferExtent,
         vertex_array: &VertexArrayGuard<'_>,
         framebuffer_srgb: Option<&FramebufferSrgbScope<'_>>,
-        render_state: &RendererRenderStateGuard<'_, GlowRenderStateStorage<'_>>,
+        render_state: &ScopedRenderState<'_, GlowRenderStateStorage<'_>>,
     ) -> RenderResult<()> {
         let mut sampler_binding = SamplerBinding::reset(self.samplers.is_some());
+        let mut bound_vertex_byte_offset = Some(0);
 
         for draw_list in draw_data.draw_lists() {
             // Upload vertex/index buffers
@@ -697,7 +666,7 @@ impl GlowRenderer {
 
             let scope = DrawListRenderScope {
                 gl,
-                texture_registry,
+                texture_registry: &self.texture_registry,
                 display_pos: draw_data.display_pos(),
                 framebuffer_scale: draw_data.framebuffer_scale(),
                 extent,
@@ -708,44 +677,55 @@ impl GlowRenderer {
             for command in draw_list.commands() {
                 match command {
                     DrawCmd::Elements { count, cmd_params } => {
-                        self.render_elements(&scope, count, &cmd_params, sampler_binding)?;
-                    }
-                    DrawCmd::ResetRenderState => {
-                        self.set_up_render_state(
-                            gl,
-                            draw_data,
-                            extent,
-                            vertex_array,
-                            framebuffer_srgb,
+                        self.render_elements(
+                            &scope,
+                            count,
+                            &cmd_params,
+                            sampler_binding,
+                            &mut bound_vertex_byte_offset,
                         )?;
-                        sampler_binding = SamplerBinding::reset(self.samplers.is_some());
-                    }
-                    DrawCmd::SetSamplerLinear => {
-                        if let Some(samplers) = &self.samplers {
-                            samplers.bind(gl, SamplerFilter::Linear);
-                        }
-                        sampler_binding = SamplerBinding::explicit(SamplerFilter::Linear);
-                    }
-                    DrawCmd::SetSamplerNearest => {
-                        if let Some(samplers) = &self.samplers {
-                            samplers.bind(gl, SamplerFilter::Nearest);
-                        }
-                        sampler_binding = SamplerBinding::explicit(SamplerFilter::Nearest);
-                    }
-                    DrawCmd::SetSamplerFromTexture => {
-                        if self.samplers.is_some() {
-                            unsafe { gl.bind_sampler(0, None) };
-                        }
-                        sampler_binding = SamplerBinding::TextureOwned;
                     }
                     DrawCmd::RawCallback(callback) => {
                         unsafe { callback.invoke() };
+                        bound_vertex_byte_offset = None;
                         render_state
                             .validate()
                             .map_err(map_renderer_render_state_error)?;
                         sampler_binding =
                             sampler_binding.after_raw_callback(self.samplers.is_some());
                     }
+                    standard => match DrawCallbackDispatcher::from_draw_cmd(&standard) {
+                        Some(StandardDrawCallback::ResetRenderState) => {
+                            self.set_up_render_state(
+                                gl,
+                                draw_data,
+                                extent,
+                                vertex_array,
+                                framebuffer_srgb,
+                            )?;
+                            sampler_binding = SamplerBinding::reset(self.samplers.is_some());
+                            bound_vertex_byte_offset = Some(0);
+                        }
+                        Some(StandardDrawCallback::SetSamplerLinear) => {
+                            if let Some(samplers) = &self.samplers {
+                                samplers.bind(gl, SamplerFilter::Linear);
+                            }
+                            sampler_binding = SamplerBinding::explicit(SamplerFilter::Linear);
+                        }
+                        Some(StandardDrawCallback::SetSamplerNearest) => {
+                            if let Some(samplers) = &self.samplers {
+                                samplers.bind(gl, SamplerFilter::Nearest);
+                            }
+                            sampler_binding = SamplerBinding::explicit(SamplerFilter::Nearest);
+                        }
+                        Some(StandardDrawCallback::SetSamplerFromTexture) => {
+                            if self.samplers.is_some() {
+                                unsafe { gl.bind_sampler(0, None) };
+                            }
+                            sampler_binding = SamplerBinding::TextureOwned;
+                        }
+                        None => unreachable!("element and raw commands were handled above"),
+                    },
                 }
             }
         }
@@ -806,6 +786,7 @@ impl GlowRenderer {
         count: usize,
         cmd_params: &DrawCmdParams,
         sampler_binding: SamplerBinding,
+        bound_vertex_byte_offset: &mut Option<i32>,
     ) -> RenderResult<()> {
         if count == 0 {
             return Ok(());
@@ -865,11 +846,24 @@ impl GlowRenderer {
                 value: cmd_params.vtx_offset,
             }
         })?;
-        if !self.gl_version.supports_vertex_offset() && vertex_offset != 0 {
+        let supports_base_vertex = self.gl_version.supports_vertex_offset();
+        let vertex_byte_offset = if self.gl_version.supports_vertex_offset_emulation() {
+            Some(
+                vertex_offset
+                    .checked_mul(VERTEX_STRIDE)
+                    .filter(|offset| *offset <= i32::MAX - VERTEX_COLOR_OFFSET)
+                    .ok_or(RenderError::DrawParameterOutOfRange {
+                        field: "vertex offset",
+                        value: cmd_params.vtx_offset,
+                    })?,
+            )
+        } else if !supports_base_vertex && vertex_offset != 0 {
             return Err(RenderError::VertexOffsetUnsupported {
                 offset: cmd_params.vtx_offset,
             });
-        }
+        } else {
+            None
+        };
 
         let Some(scissor) = project_scissor_rect(
             cmd_params.clip_rect,
@@ -907,7 +901,7 @@ impl GlowRenderer {
                 glow::UNSIGNED_INT
             };
 
-            if self.gl_version.supports_vertex_offset() {
+            if supports_base_vertex {
                 scope.gl.draw_elements_base_vertex(
                     glow::TRIANGLES,
                     draw_count,
@@ -916,6 +910,12 @@ impl GlowRenderer {
                     vertex_offset,
                 );
             } else {
+                if let Some(offset) = vertex_byte_offset
+                    && *bound_vertex_byte_offset != Some(offset)
+                {
+                    self.set_vertex_attrib_pointers(scope.gl, offset);
+                    *bound_vertex_byte_offset = Some(offset);
+                }
                 scope
                     .gl
                     .draw_elements(glow::TRIANGLES, draw_count, index_type, index_byte_offset);
@@ -1059,6 +1059,10 @@ mod tests {
             project_scissor_rect([-8.0, -4.0, 72.0, 68.0], [0.0, 0.0], [1.0, 1.0], extent,)
                 .unwrap(),
             Some([0, 0, 64, 64])
+        );
+        assert_eq!(
+            project_scissor_rect([0.2, 1.2, 0.3, 1.4], [0.0; 2], [1.0; 2], extent).unwrap(),
+            Some([0, 62, 1, 1])
         );
     }
 

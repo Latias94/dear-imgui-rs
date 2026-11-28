@@ -14,17 +14,16 @@ use std::marker::PhantomData;
 use std::num::NonZeroU64;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 
 use crate::render::draw_data::{
     DrawData, DrawIdx, DrawList, DrawVert, StandardDrawCallback, classify_standard_draw_callback,
 };
 use crate::sys;
-use crate::texture::{
-    ManagedTextureError, ManagedTextureId, TextureFormat, TextureId, TextureRect, TextureStatus,
-};
+use crate::texture::{ManagedTextureId, TextureFormat, TextureId, TextureRect, TextureStatus};
 use crate::{ContextId, Id};
-use thiserror::Error;
+use crate::{FrameError, TextureError};
 
 /// Pointer-free identity used by detached renderers.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -95,9 +94,38 @@ impl SnapshotEpoch {
     }
 }
 
+/// Confirms that a renderer has released the resources for one consumer generation.
+///
+/// The signal holds no native pointers and may outlive its Context. After the consumer is dropped
+/// and its outstanding epochs drain, the Context resets its managed texture bindings before the
+/// replacement renderer uses them.
+#[derive(Clone, Debug)]
+pub struct RendererResetSignal {
+    generation: NonZeroU64,
+    renderer_dropped: Arc<AtomicBool>,
+}
+
+impl RendererResetSignal {
+    /// Notify the Context once renderer-owned callbacks and texture resources have been released.
+    ///
+    /// The renderer is responsible for keeping resources alive for previously submitted work.
+    /// Drop its consumer capability as well so the Context can drain that generation.
+    pub fn mark_renderer_dropped(&self) {
+        self.renderer_dropped.store(true, Ordering::Release);
+    }
+
+    pub(crate) const fn generation(&self) -> NonZeroU64 {
+        self.generation
+    }
+
+    pub(crate) fn is_marked(&self) -> bool {
+        self.renderer_dropped.load(Ordering::Acquire)
+    }
+}
+
 struct RendererConsumerState {
     context: ContextId,
-    generation: NonZeroU64,
+    reset: RendererResetSignal,
     sender: Sender<SnapshotMessage>,
     _not_send_or_sync: PhantomData<Rc<()>>,
 }
@@ -106,7 +134,10 @@ impl RendererConsumerState {
     fn new(context: ContextId, generation: NonZeroU64, sender: Sender<SnapshotMessage>) -> Self {
         Self {
             context,
-            generation,
+            reset: RendererResetSignal {
+                generation,
+                renderer_dropped: Arc::new(AtomicBool::new(false)),
+            },
             sender,
             _not_send_or_sync: PhantomData,
         }
@@ -117,7 +148,7 @@ impl Drop for RendererConsumerState {
     fn drop(&mut self) {
         let _ = self.sender.send(SnapshotMessage::Detach {
             context: self.context,
-            generation: self.generation,
+            generation: self.reset.generation(),
         });
     }
 }
@@ -163,7 +194,13 @@ impl SynchronousRendererConsumer {
     /// Current consumer generation.
     #[must_use]
     pub const fn generation(&self) -> u64 {
-        self.0.generation.get()
+        self.0.reset.generation().get()
+    }
+
+    /// Get the release signal for this consumer's renderer resources.
+    #[must_use]
+    pub fn reset_signal(&self) -> RendererResetSignal {
+        self.0.reset.clone()
     }
 }
 
@@ -172,7 +209,7 @@ impl std::fmt::Debug for SynchronousRendererConsumer {
         formatter
             .debug_struct("SynchronousRendererConsumer")
             .field("context", &self.0.context)
-            .field("generation", &self.0.generation)
+            .field("generation", &self.generation())
             .finish_non_exhaustive()
     }
 }
@@ -214,7 +251,13 @@ impl DetachedRendererConsumer {
     /// Current consumer generation.
     #[must_use]
     pub const fn generation(&self) -> u64 {
-        self.0.generation.get()
+        self.0.reset.generation().get()
+    }
+
+    /// Get the release signal for this consumer's renderer resources.
+    #[must_use]
+    pub fn reset_signal(&self) -> RendererResetSignal {
+        self.0.reset.clone()
     }
 }
 
@@ -223,7 +266,7 @@ impl std::fmt::Debug for DetachedRendererConsumer {
         formatter
             .debug_struct("DetachedRendererConsumer")
             .field("context", &self.0.context)
-            .field("generation", &self.0.generation)
+            .field("generation", &self.generation())
             .finish_non_exhaustive()
     }
 }
@@ -314,7 +357,7 @@ impl FrameSnapshot {
     pub fn commit(
         self,
         feedback: impl IntoIterator<Item = TextureFeedback>,
-    ) -> Result<(), SnapshotCommitError> {
+    ) -> Result<(), FrameError> {
         let feedback = feedback.into_iter().collect::<Vec<_>>();
         let expected = self
             .texture_requests
@@ -558,12 +601,12 @@ impl TextureRequest {
     }
 
     /// Complete a create or update request with its renderer texture identifier.
-    pub fn uploaded(&self, texture_id: TextureId) -> Result<TextureFeedback, TextureFeedbackError> {
+    pub fn uploaded(&self, texture_id: TextureId) -> Result<TextureFeedback, TextureError> {
         if self.key.kind == TextureRequestKind::Destroy {
-            return Err(TextureFeedbackError::UploadForDestroy);
+            return Err(TextureError::UploadForDestroy);
         }
         if texture_id.is_null() {
-            return Err(TextureFeedbackError::NullTextureId);
+            return Err(TextureError::NullTextureId);
         }
         Ok(TextureFeedback {
             key: self.key,
@@ -572,9 +615,9 @@ impl TextureRequest {
     }
 
     /// Complete a destroy request.
-    pub fn destroyed(&self) -> Result<TextureFeedback, TextureFeedbackError> {
+    pub fn destroyed(&self) -> Result<TextureFeedback, TextureError> {
         if self.key.kind != TextureRequestKind::Destroy {
-            return Err(TextureFeedbackError::DestroyForUpload);
+            return Err(TextureError::DestroyForUpload);
         }
         Ok(TextureFeedback {
             key: self.key,
@@ -634,30 +677,30 @@ pub(crate) fn validate_texture_feedback(
     epoch: SnapshotEpoch,
     expected: &HashSet<TextureRequestKey>,
     feedback: &[TextureFeedback],
-) -> Result<(), RendererConsumerError> {
+) -> Result<(), FrameError> {
     let mut seen = HashSet::with_capacity(feedback.len());
     for item in feedback {
         let key = item.key();
         if key.epoch.context_id() != epoch.context_id() {
-            return Err(RendererConsumerError::ForeignContext {
+            return Err(FrameError::ForeignContext {
                 expected: epoch.context_id(),
                 actual: key.epoch.context_id(),
             });
         }
         if key.epoch.consumer_generation_raw() != epoch.consumer_generation_raw() {
-            return Err(RendererConsumerError::StaleConsumerGeneration {
+            return Err(FrameError::StaleConsumerGeneration {
                 expected: epoch.consumer_generation(),
                 actual: key.epoch.consumer_generation(),
             });
         }
         if key.epoch.sequence() != epoch.sequence() || !expected.contains(&key) {
-            return Err(RendererConsumerError::FeedbackNotRequested {
+            return Err(FrameError::FeedbackNotRequested {
                 epoch: epoch.sequence(),
                 texture: key.texture,
             });
         }
         if !seen.insert(key) {
-            return Err(RendererConsumerError::DuplicateFeedback {
+            return Err(FrameError::DuplicateFeedback {
                 epoch: epoch.sequence(),
                 texture: key.texture,
             });
@@ -672,140 +715,19 @@ pub(crate) fn validate_texture_feedback(
             _ => false,
         };
         if !transition_is_valid {
-            return Err(RendererConsumerError::InvalidFeedbackTransition {
+            return Err(FrameError::InvalidFeedbackTransition {
                 texture: key.texture,
             });
         }
     }
     let missing = expected.len().saturating_sub(seen.len());
     if missing != 0 {
-        return Err(RendererConsumerError::MissingFeedback {
+        return Err(FrameError::MissingFeedback {
             epoch: epoch.sequence(),
             count: missing,
         });
     }
     Ok(())
-}
-
-/// Error returned when feedback does not match the request operation.
-#[derive(Copy, Clone, Debug, Eq, Error, PartialEq)]
-pub enum TextureFeedbackError {
-    #[error("an upload result cannot complete a destroy request")]
-    UploadForDestroy,
-    #[error("a destroy result cannot complete a create or update request")]
-    DestroyForUpload,
-    #[error("an upload result requires a non-null renderer texture identifier")]
-    NullTextureId,
-}
-
-/// Error returned when a snapshot cannot be captured.
-#[derive(Debug, Error)]
-pub enum SnapshotError {
-    #[error("user callback commands are not supported by detached snapshots")]
-    UserCallbackUnsupported,
-    #[error("draw data contains a managed texture not owned by this Context or its font atlas")]
-    UnknownManagedTexture,
-    #[error("managed texture {id:?} has status {status:?} but no pixel buffer is available")]
-    TexturePixelsMissing {
-        id: SnapshotTextureId,
-        status: TextureStatus,
-    },
-    #[error(
-        "managed texture {id:?} has invalid dimensions/format (width={width}, height={height}, bpp={bpp})"
-    )]
-    TextureInvalidLayout {
-        id: SnapshotTextureId,
-        width: i32,
-        height: i32,
-        bpp: i32,
-    },
-    #[error(
-        "managed texture {id:?} full update exceeds ImTextureRect limits (width={width}, height={height})"
-    )]
-    TextureFullUpdateOutOfRange {
-        id: SnapshotTextureId,
-        width: u32,
-        height: u32,
-    },
-    #[error(transparent)]
-    Consumer(#[from] RendererConsumerError),
-    #[error(transparent)]
-    ManagedTexture(#[from] ManagedTextureError),
-}
-
-/// Renderer registration or completion contract violation.
-#[derive(Copy, Clone, Debug, Eq, Error, PartialEq)]
-#[non_exhaustive]
-pub enum RendererConsumerError {
-    #[error("this Context already has an active renderer consumer")]
-    ConsumerAlreadyActive,
-    #[error(
-        "managed font-atlas rendering requires exactly one registered Context; found {registered_contexts}"
-    )]
-    SharedFontAtlasRequiresExclusiveContext { registered_contexts: usize },
-    #[error(
-        "the font atlas is claimed by a legacy renderer or contains legacy-preloaded data; clear and repopulate it before attaching a managed renderer"
-    )]
-    FontAtlasRequiresManagedRebuild,
-    #[error(
-        "the shared font atlas still belongs to a renderer whose texture release was not committed"
-    )]
-    SharedFontAtlasRendererReleasePending,
-    #[error("the previous renderer consumer is still draining outstanding epochs")]
-    ConsumerDraining,
-    /// The previous renderer's texture resources must be released before this generation draws.
-    #[error(
-        "release the previous renderer's texture resources and commit a renderer texture reset"
-    )]
-    RendererTextureResetRequired,
-    #[error("this Context has no active renderer consumer")]
-    NoActiveConsumer,
-    #[error("{caller} requires a renderer that advertises RENDERER_HAS_TEXTURES")]
-    RendererTexturesUnavailable { caller: &'static str },
-    #[error("renderer consumer belongs to Context {actual:?}, not Context {expected:?}")]
-    ForeignContext {
-        expected: ContextId,
-        actual: ContextId,
-    },
-    #[error("renderer consumer generation {actual} is stale; current generation is {expected}")]
-    StaleConsumerGeneration { expected: u64, actual: u64 },
-    #[error("renderer consumer generation space is exhausted")]
-    ConsumerGenerationExhausted,
-    #[error("snapshot epoch space is exhausted")]
-    EpochExhausted,
-    #[error("snapshot completion references unknown epoch {epoch}")]
-    UnknownEpoch { epoch: u64 },
-    #[error("snapshot epoch {epoch} was completed more than once")]
-    EpochAlreadyCompleted { epoch: u64 },
-    #[error("renderer consumer still owns {count} outstanding epoch(s)")]
-    OutstandingEpochs { count: usize },
-    #[error("snapshot epoch {epoch} contains duplicate feedback for {texture:?}")]
-    DuplicateFeedback {
-        epoch: u64,
-        texture: SnapshotTextureId,
-    },
-    #[error("snapshot epoch {epoch} is missing {count} required feedback outcome(s)")]
-    MissingFeedback { epoch: u64, count: usize },
-    #[error("snapshot epoch {epoch} did not request feedback for {texture:?}")]
-    FeedbackNotRequested {
-        epoch: u64,
-        texture: SnapshotTextureId,
-    },
-    #[error("feedback result does not match the request kind for {texture:?}")]
-    InvalidFeedbackTransition { texture: SnapshotTextureId },
-    #[error("font-atlas feedback targets a stale atlas allocation or generation")]
-    StaleFontAtlas,
-    #[error(transparent)]
-    ManagedTexture(#[from] ManagedTextureError),
-}
-
-/// Failure to deliver completion after the owning Context was destroyed.
-#[derive(Copy, Clone, Debug, Eq, Error, PartialEq)]
-pub enum SnapshotCommitError {
-    #[error(transparent)]
-    InvalidFeedback(#[from] RendererConsumerError),
-    #[error("the snapshot's owning Context no longer accepts completion")]
-    ContextDropped,
 }
 
 /// Work applied while polling detached completions.
@@ -851,14 +773,14 @@ struct CompletionTicket {
 }
 
 impl CompletionTicket {
-    fn commit(mut self, feedback: Vec<TextureFeedback>) -> Result<(), SnapshotCommitError> {
+    fn commit(mut self, feedback: Vec<TextureFeedback>) -> Result<(), FrameError> {
         self.completed = true;
         self.sender
             .send(SnapshotMessage::Completion(SnapshotCompletion {
                 epoch: self.epoch,
                 outcome: SnapshotCompletionOutcome::Committed(feedback),
             }))
-            .map_err(|_| SnapshotCommitError::ContextDropped)
+            .map_err(|_| FrameError::ContextDropped)
     }
 }
 
@@ -1014,19 +936,15 @@ pub(crate) fn finalize_texture_requests(
 
 pub(crate) fn capture_texture_requests_only(
     draw_data: &DrawData,
-    resolve: &mut impl FnMut(
-        *const sys::ImTextureData,
-    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
-) -> Result<Vec<CapturedTextureOperation>, SnapshotError> {
+    resolve: &mut impl FnMut(*const sys::ImTextureData) -> Result<ResolvedSnapshotTexture, FrameError>,
+) -> Result<Vec<CapturedTextureOperation>, FrameError> {
     snapshot_texture_requests(draw_data, resolve)
 }
 
 pub(crate) fn capture_draw_data(
     draw_data: &DrawData,
-    resolve: &mut impl FnMut(
-        *const sys::ImTextureData,
-    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
-) -> Result<PendingSnapshot, SnapshotError> {
+    resolve: &mut impl FnMut(*const sys::ImTextureData) -> Result<ResolvedSnapshotTexture, FrameError>,
+) -> Result<PendingSnapshot, FrameError> {
     preflight_detached_callbacks(draw_data)?;
     let draw = snapshot_draw_data(draw_data, resolve)?;
     let texture_operations = snapshot_texture_requests(draw_data, resolve)?;
@@ -1053,10 +971,8 @@ pub(crate) fn capture_draw_data(
 /// entire call. The function never retains those pointers or references after returning.
 pub(crate) unsafe fn capture_platform_io(
     platform_io: &crate::platform_io::PlatformIo,
-    resolve: &mut impl FnMut(
-        *const sys::ImTextureData,
-    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
-) -> Result<PendingSnapshot, SnapshotError> {
+    resolve: &mut impl FnMut(*const sys::ImTextureData) -> Result<ResolvedSnapshotTexture, FrameError>,
+) -> Result<PendingSnapshot, FrameError> {
     for viewport in platform_io.viewports_iter() {
         let raw_draw_data = viewport.draw_data();
         if raw_draw_data.is_null() {
@@ -1143,10 +1059,8 @@ fn draw_data_from_sys(draw_data: &sys::ImDrawData) -> &DrawData {
 
 fn snapshot_draw_data(
     draw_data: &DrawData,
-    resolve: &mut impl FnMut(
-        *const sys::ImTextureData,
-    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
-) -> Result<DrawDataSnapshot, SnapshotError> {
+    resolve: &mut impl FnMut(*const sys::ImTextureData) -> Result<ResolvedSnapshotTexture, FrameError>,
+) -> Result<DrawDataSnapshot, FrameError> {
     let mut draw_lists = Vec::with_capacity(draw_data.draw_lists_count());
     for draw_list in draw_data.draw_lists() {
         draw_lists.push(snapshot_draw_list(draw_list, resolve)?);
@@ -1163,16 +1077,16 @@ fn snapshot_draw_data(
 fn detached_callback_kind(
     draw_list: &DrawList,
     callback: sys::ImDrawCallback,
-) -> Result<Option<StandardDrawCallback>, SnapshotError> {
+) -> Result<Option<StandardDrawCallback>, FrameError> {
     match callback {
         None => Ok(None),
         Some(_) => classify_standard_draw_callback(draw_list, callback)
             .map(Some)
-            .ok_or(SnapshotError::UserCallbackUnsupported),
+            .ok_or(FrameError::UserCallbackUnsupported),
     }
 }
 
-fn preflight_detached_callbacks(draw_data: &DrawData) -> Result<(), SnapshotError> {
+fn preflight_detached_callbacks(draw_data: &DrawData) -> Result<(), FrameError> {
     for draw_list in draw_data.draw_lists() {
         for command in unsafe { draw_list.cmd_buffer() } {
             let _ = detached_callback_kind(draw_list, command.UserCallback)?;
@@ -1183,10 +1097,8 @@ fn preflight_detached_callbacks(draw_data: &DrawData) -> Result<(), SnapshotErro
 
 fn snapshot_draw_list(
     draw_list: &DrawList,
-    resolve: &mut impl FnMut(
-        *const sys::ImTextureData,
-    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
-) -> Result<DrawListSnapshot, SnapshotError> {
+    resolve: &mut impl FnMut(*const sys::ImTextureData) -> Result<ResolvedSnapshotTexture, FrameError>,
+) -> Result<DrawListSnapshot, FrameError> {
     let vtx = draw_list.vtx_buffer().to_vec();
     let idx = draw_list.idx_buffer().to_vec();
     let mut commands = Vec::new();
@@ -1231,25 +1143,19 @@ fn count_from_u32(caller: &str, raw: u32) -> usize {
 
 fn snapshot_texture_binding(
     tex_ref: sys::ImTextureRef,
-    resolve: &mut impl FnMut(
-        *const sys::ImTextureData,
-    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
-) -> Result<TextureBinding, SnapshotError> {
+    resolve: &mut impl FnMut(*const sys::ImTextureData) -> Result<ResolvedSnapshotTexture, FrameError>,
+) -> Result<TextureBinding, FrameError> {
     if !tex_ref._TexData.is_null() {
         return resolve(tex_ref._TexData.cast_const())
             .map(|resolved| TextureBinding::Managed(resolved.id));
     }
-    Ok(TextureBinding::Legacy(TextureId::from(
-        tex_ref._TexID as u64,
-    )))
+    Ok(TextureBinding::Legacy(TextureId::from(tex_ref._TexID)))
 }
 
 fn snapshot_texture_requests(
     draw_data: &DrawData,
-    resolve: &mut impl FnMut(
-        *const sys::ImTextureData,
-    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
-) -> Result<Vec<CapturedTextureOperation>, SnapshotError> {
+    resolve: &mut impl FnMut(*const sys::ImTextureData) -> Result<ResolvedSnapshotTexture, FrameError>,
+) -> Result<Vec<CapturedTextureOperation>, FrameError> {
     let mut out = Vec::new();
     for texture in draw_data.textures() {
         let status = texture.status();
@@ -1273,19 +1179,19 @@ fn snapshot_texture_requests(
         let format = texture.format();
         let pixels = texture
             .pixels()
-            .ok_or(SnapshotError::TexturePixelsMissing { id, status })?;
+            .ok_or(FrameError::TexturePixelsMissing { id, status })?;
         let expected = usize::try_from(width)
             .ok()
             .and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)))
             .and_then(|count| count.checked_mul(bpp))
-            .ok_or(SnapshotError::TextureInvalidLayout {
+            .ok_or(FrameError::TextureInvalidLayout {
                 id,
                 width: raw_width,
                 height: raw_height,
                 bpp: raw_bpp,
             })?;
         if pixels.len() < expected {
-            return Err(SnapshotError::TextureInvalidLayout {
+            return Err(FrameError::TextureInvalidLayout {
                 id,
                 width: raw_width,
                 height: raw_height,
@@ -1301,7 +1207,7 @@ fn snapshot_texture_requests(
                 row_pitch: usize::try_from(width)
                     .ok()
                     .and_then(|width| width.checked_mul(bpp))
-                    .ok_or(SnapshotError::TextureInvalidLayout {
+                    .ok_or(FrameError::TextureInvalidLayout {
                         id,
                         width: raw_width,
                         height: raw_height,
@@ -1327,7 +1233,7 @@ fn snapshot_texture_requests(
                         .into_iter()
                         .map(|rect| {
                             copy_upload_rect(pixels, width, height, bpp, rect).ok_or(
-                                SnapshotError::TextureInvalidLayout {
+                                FrameError::TextureInvalidLayout {
                                     id,
                                     width: raw_width,
                                     height: raw_height,
@@ -1354,8 +1260,8 @@ fn full_texture_update_rect(
     id: SnapshotTextureId,
     width: u32,
     height: u32,
-) -> Result<TextureRect, SnapshotError> {
-    let out_of_range = || SnapshotError::TextureFullUpdateOutOfRange { id, width, height };
+) -> Result<TextureRect, FrameError> {
+    let out_of_range = || FrameError::TextureFullUpdateOutOfRange { id, width, height };
     Ok(TextureRect {
         x: 0,
         y: 0,
@@ -1369,8 +1275,8 @@ fn validated_texture_layout(
     width: i32,
     height: i32,
     bpp: i32,
-) -> Result<(u32, u32, usize), SnapshotError> {
-    let invalid = || SnapshotError::TextureInvalidLayout {
+) -> Result<(u32, u32, usize), FrameError> {
+    let invalid = || FrameError::TextureInvalidLayout {
         id,
         width,
         height,
@@ -1490,7 +1396,7 @@ mod layout_tests {
         let error = validated_texture_layout(id, 17, -3, 4).unwrap_err();
         assert!(matches!(
             error,
-            SnapshotError::TextureInvalidLayout {
+            FrameError::TextureInvalidLayout {
                 id: actual,
                 width: 17,
                 height: -3,
@@ -1519,7 +1425,7 @@ mod layout_tests {
         );
         assert!(matches!(
             full_texture_update_rect(id, u16::MAX as u32 + 1, 1),
-            Err(SnapshotError::TextureFullUpdateOutOfRange {
+            Err(FrameError::TextureFullUpdateOutOfRange {
                 id: actual,
                 width,
                 height: 1,
@@ -1617,13 +1523,10 @@ mod callback_preflight_tests {
         let mut resolve_calls = 0usize;
         let result = capture_draw_data(rendered.draw_data(), &mut |_| {
             resolve_calls += 1;
-            Err(SnapshotError::UnknownManagedTexture)
+            Err(FrameError::UnknownManagedTexture)
         });
 
-        assert!(matches!(
-            result,
-            Err(SnapshotError::UserCallbackUnsupported)
-        ));
+        assert!(matches!(result, Err(FrameError::UserCallbackUnsupported)));
         assert_eq!(resolve_calls, 0);
     }
 }
@@ -1694,9 +1597,7 @@ mod tests {
             )
         };
         let pending = unsafe {
-            capture_platform_io(&platform_io, &mut |_| {
-                Err(SnapshotError::UnknownManagedTexture)
-            })
+            capture_platform_io(platform_io, &mut |_| Err(FrameError::UnknownManagedTexture))
         }
         .expect("empty draw data should capture");
         assert_eq!(pending.draw_data().display_size, [640.0, 360.0]);
@@ -1708,14 +1609,12 @@ mod tests {
             &pending.viewports[1].draw
         ));
 
-        let suspended_context = context.suspend_or_panic();
+        let suspended_context = context;
         let other_context = crate::Context::create();
         assert!(!pending.viewports[0].is_main());
         assert!(pending.viewports[1].is_main());
         drop(other_context);
-        let _context = suspended_context
-            .activate()
-            .expect("the snapshot owner Context should reactivate");
+        let _context = suspended_context;
 
         unsafe {
             (*main).DrawData = previous_main_draw;
@@ -1817,14 +1716,11 @@ mod tests {
         let result = unsafe {
             capture_platform_io(platform_io, &mut |_| {
                 resolve_calls += 1;
-                Err(SnapshotError::UnknownManagedTexture)
+                Err(FrameError::UnknownManagedTexture)
             })
         };
 
-        assert!(matches!(
-            result,
-            Err(SnapshotError::UserCallbackUnsupported)
-        ));
+        assert!(matches!(result, Err(FrameError::UserCallbackUnsupported)));
         assert_eq!(resolve_calls, 0);
 
         unsafe {

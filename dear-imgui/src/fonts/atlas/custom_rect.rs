@@ -496,7 +496,7 @@ mod tests {
         let storage = [0u8; 8];
         let alignment = std::mem::align_of::<u32>();
         let offset = (0..alignment)
-            .find(|offset| (storage.as_ptr() as usize + offset) % alignment != 0)
+            .find(|offset| !(storage.as_ptr() as usize + offset).is_multiple_of(alignment))
             .expect("one of the first u32-alignment offsets must be unaligned");
         let unaligned_rgba = &storage[offset..offset + 4];
         assert_ne!((unaligned_rgba.as_ptr() as usize) % alignment, 0);
@@ -553,7 +553,7 @@ mod tests {
             .expect("the custom rectangle should fit");
         assert!(ctx_a.font_atlas().remove_custom_rect(id));
         assert!(!ctx_a.font_atlas().remove_custom_rect(id));
-        let suspended_a = ctx_a.suspend_or_panic();
+        let suspended_a = ctx_a;
 
         let ctx_b = crate::Context::create();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

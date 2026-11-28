@@ -179,8 +179,9 @@ impl TextFilter {
     /// }
     /// ```
     pub fn draw(&mut self, ui: &Ui) -> bool {
-        let label_ptr = ui.scratch_txt(&self.label);
-        ui.run_with_bound_context(|| unsafe { sys::ImGuiTextFilter_Draw(self.raw, label_ptr) })
+        ui.with_scratch_txt(&self.label, |label| unsafe {
+            sys::ImGuiTextFilter_Draw(self.raw, label)
+        })
     }
 
     /// Draws the filter input with a custom hint when the filter is empty.
@@ -189,8 +190,7 @@ impl TextFilter {
     /// to set the input width.
     #[doc(alias = "DrawWithHint")]
     pub fn draw_with_hint(&mut self, ui: &Ui, hint: impl AsRef<str>) -> bool {
-        let (label_ptr, hint_ptr) = ui.scratch_txt_two(&self.label, hint);
-        ui.run_with_bound_context(|| unsafe {
+        ui.with_scratch_txt_two(&self.label, hint, |label_ptr, hint_ptr| unsafe {
             sys::ImGuiTextFilter_DrawWithHint(self.raw, label_ptr, hint_ptr)
         })
     }
@@ -346,7 +346,7 @@ mod tests {
     use std::sync::Mutex;
 
     // Dear ImGui maintains a single global "current context". Tests that create
-    // a context must be serialized to avoid `ContextAlreadyActive`.
+    // a context must be serialized because contexts cannot span different OS threads.
     static TEST_CTX_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
@@ -440,7 +440,7 @@ mod tests {
                 unsafe { crate::sys::igSetCurrentContext(raw_b) };
                 assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
 
-                let _ = filter.draw(&ui_a);
+                let _ = filter.draw(ui_a);
 
                 assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
             });

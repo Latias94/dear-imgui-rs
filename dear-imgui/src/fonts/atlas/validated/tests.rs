@@ -2,12 +2,14 @@ use std::fs::{self, File};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::FontError;
+
 use super::glyph::{
     CompositeComponent, CompositeTransform, CoordinateBounds, GlyphKind, expand_glyph,
 };
 use super::{
-    MAX_COMPOSITE_DEPTH, MAX_EXPANDED_GLYPH_COMPLEXITY, StbTrueTypeFontData, StbTrueTypeFontError,
-    StbTrueTypeFontLoadError, validate_font_data_length,
+    MAX_COMPOSITE_DEPTH, MAX_EXPANDED_GLYPH_COMPLEXITY, StbTrueTypeFontData,
+    validate_font_data_length,
 };
 
 const PROGGY: &[u8] = include_bytes!(
@@ -71,10 +73,18 @@ fn reads_and_validates_a_file() {
 
 #[test]
 fn distinguishes_file_io_from_validation_errors() {
-    let error =
-        StbTrueTypeFontData::from_file("this/path/must/not/exist/dear-imgui-font-proof.ttf")
-            .unwrap_err();
-    assert!(matches!(error, StbTrueTypeFontLoadError::Io { .. }));
+    let filename = "this/path/must/not/exist/dear-imgui-font-proof.ttf";
+    let error = StbTrueTypeFontData::from_file(filename).unwrap_err();
+    let FontError::Io { path, source } = &error else {
+        panic!("expected a file IO error, got {error:?}");
+    };
+    assert_eq!(path, std::path::Path::new(filename));
+    assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
+    assert!(
+        std::error::Error::source(&error)
+            .unwrap()
+            .is::<std::io::Error>()
+    );
 }
 
 #[test]
@@ -86,7 +96,7 @@ fn reports_validation_for_a_readable_invalid_file() {
 
     assert!(matches!(
         result,
-        Err(StbTrueTypeFontLoadError::Validation(_))
+        Err(FontError::UnsupportedContainer { .. })
     ));
 }
 
@@ -102,9 +112,7 @@ fn rejects_oversized_file_metadata_before_reading_the_body() {
     fs::remove_file(&path).unwrap();
     assert!(matches!(
         result,
-        Err(StbTrueTypeFontLoadError::Validation(
-            StbTrueTypeFontError::DataTooLarge { length, limit }
-        )) if length == StbTrueTypeFontData::MAX_BYTES + 1
+        Err(FontError::DataTooLarge { length, limit }) if length == StbTrueTypeFontData::MAX_BYTES + 1
             && limit == StbTrueTypeFontData::MAX_BYTES
     ));
 }
@@ -113,7 +121,7 @@ fn rejects_oversized_file_metadata_before_reading_the_body() {
 fn rejects_oversized_owned_input_before_validation() {
     assert!(matches!(
         validate_font_data_length(StbTrueTypeFontData::MAX_BYTES + 1),
-        Err(StbTrueTypeFontError::DataTooLarge { length, limit })
+        Err(FontError::DataTooLarge { length, limit })
             if length == StbTrueTypeFontData::MAX_BYTES + 1
                 && limit == StbTrueTypeFontData::MAX_BYTES
     ));
@@ -122,7 +130,7 @@ fn rejects_oversized_owned_input_before_validation() {
 #[test]
 fn rejects_truncated_sfnt_directory() {
     let error = StbTrueTypeFontData::from_slice(&PROGGY[..11]).unwrap_err();
-    assert!(matches!(error, StbTrueTypeFontError::Truncated { .. }));
+    assert!(matches!(error, FontError::Truncated { .. }));
 }
 
 #[test]
@@ -130,10 +138,7 @@ fn rejects_non_truetype_containers() {
     let mut font = PROGGY.to_vec();
     font[..4].copy_from_slice(b"OTTO");
     let error = StbTrueTypeFontData::try_from(font).unwrap_err();
-    assert!(matches!(
-        error,
-        StbTrueTypeFontError::UnsupportedContainer { .. }
-    ));
+    assert!(matches!(error, FontError::UnsupportedContainer { .. }));
 }
 
 #[test]
@@ -143,7 +148,7 @@ fn rejects_directory_count_overflow_or_truncation() {
     let error = StbTrueTypeFontData::try_from(font).unwrap_err();
     assert!(matches!(
         error,
-        StbTrueTypeFontError::Truncated { .. } | StbTrueTypeFontError::InvalidDirectory { .. }
+        FontError::Truncated { .. } | FontError::InvalidDirectory { .. }
     ));
 }
 
@@ -153,7 +158,15 @@ fn rejects_duplicate_table_tags() {
     let first_tag: [u8; 4] = font[12..16].try_into().unwrap();
     font[28..32].copy_from_slice(&first_tag);
     let error = StbTrueTypeFontData::try_from(font).unwrap_err();
-    assert!(matches!(error, StbTrueTypeFontError::DuplicateTable { .. }));
+    assert!(matches!(error, FontError::DuplicateTable { .. }));
+}
+
+#[test]
+fn accepts_a_font_with_unsorted_table_records() {
+    let mut font = PROGGY.to_vec();
+    let records = font[12..44].as_chunks_mut::<16>().0;
+    records.swap(0, 1);
+    StbTrueTypeFontData::try_from(font).unwrap();
 }
 
 #[test]
@@ -161,10 +174,7 @@ fn rejects_out_of_bounds_table_ranges() {
     let mut font = PROGGY.to_vec();
     font[20..24].copy_from_slice(&u32::MAX.to_be_bytes());
     let error = StbTrueTypeFontData::try_from(font).unwrap_err();
-    assert!(matches!(
-        error,
-        StbTrueTypeFontError::TableOutOfBounds { .. }
-    ));
+    assert!(matches!(error, FontError::TableOutOfBounds { .. }));
 }
 
 #[test]
@@ -177,8 +187,26 @@ fn rejects_zero_or_negative_stb_pixel_height_denominator() {
     let error = StbTrueTypeFontData::try_from(font).unwrap_err();
     assert!(matches!(
         error,
-        StbTrueTypeFontError::InvalidTable { tag, .. } if tag == *b"hhea"
+        FontError::InvalidTable { tag, .. } if tag == *b"hhea"
     ));
+}
+
+#[test]
+fn rejects_hmtx_with_an_incomplete_trailing_side_bearing() {
+    let mut font = PROGGY.to_vec();
+    let (_, length) = table(&font, b"hmtx");
+    let table_count = usize::from(u16::from_be_bytes(font[4..6].try_into().unwrap()));
+    let records = &mut font[12..12 + table_count * 16];
+    let record = records
+        .as_chunks_mut::<16>()
+        .0
+        .iter_mut()
+        .find(|record| &record[..4] == b"hmtx")
+        .unwrap();
+    record[12..16].copy_from_slice(&((length - 1) as u32).to_be_bytes());
+
+    let error = StbTrueTypeFontData::try_from(font).unwrap_err();
+    assert!(matches!(error, FontError::InvalidTable { tag, .. } if tag == *b"hmtx"));
 }
 
 #[test]
@@ -216,7 +244,7 @@ fn rejects_the_exact_unsupported_cmap_selected_by_stb() {
     let error = StbTrueTypeFontData::try_from(font).unwrap_err();
     assert!(matches!(
         error,
-        StbTrueTypeFontError::UnsupportedCmapFormat { format: 0, .. }
+        FontError::UnsupportedCmapFormat { format: 0, .. }
     ));
 }
 
@@ -227,7 +255,36 @@ fn rejects_malformed_format_4_search_fields() {
     let selected = selected_cmap_offset(&font[cmap.0..cmap.0 + cmap.1]);
     font[cmap.0 + selected + 8..cmap.0 + selected + 10].copy_from_slice(&0_u16.to_be_bytes());
     let error = StbTrueTypeFontData::try_from(font).unwrap_err();
-    assert!(matches!(error, StbTrueTypeFontError::InvalidCmap { .. }));
+    assert!(matches!(error, FontError::InvalidCmap { .. }));
+}
+
+#[test]
+fn rejects_a_format_4_array_glyph_even_if_applying_the_delta_would_fit() {
+    // Format 4 maps U+0041 via glyphIdArray and ends with the U+FFFF sentinel.
+    let mut cmap = vec![0, 0, 0, 1, 0, 3, 0, 1, 0, 0, 0, 12];
+    cmap.extend(
+        [
+            4_u16, 34, 0, 4, 4, 1, 0, 0x0041, 0xffff, 0, 0x0041, 0xffff, 0xfffc, 1, 4, 0, 5,
+        ]
+        .into_iter()
+        .flat_map(u16::to_be_bytes),
+    );
+    let subtable = ttf_parser::cmap::Table::parse(&cmap)
+        .unwrap()
+        .subtables
+        .get(0)
+        .unwrap();
+    assert_eq!(subtable.glyph_index(0x0041), Some(ttf_parser::GlyphId(1)));
+
+    let table = super::Table {
+        tag: super::CMAP,
+        offset: 0,
+        bytes: &cmap,
+    };
+    assert!(matches!(
+        super::validate_cmap(table, 2),
+        Err(FontError::InvalidCmap { .. })
+    ));
 }
 
 #[test]
@@ -243,7 +300,7 @@ fn rejects_malformed_format_12_groups() {
     font[first_group..first_group + 4].copy_from_slice(&0x11_0000_u32.to_be_bytes());
     font[first_group + 4..first_group + 8].copy_from_slice(&0x11_0000_u32.to_be_bytes());
     let error = StbTrueTypeFontData::try_from(font).unwrap_err();
-    assert!(matches!(error, StbTrueTypeFontError::InvalidCmap { .. }));
+    assert!(matches!(error, FontError::InvalidCmap { .. }));
 }
 
 #[test]
@@ -257,7 +314,31 @@ fn rejects_truncated_simple_glyph_records() {
     assert!(first_end > 1);
     font[loca.0 + 2..loca.0 + 4].copy_from_slice(&1_u16.to_be_bytes());
     let error = StbTrueTypeFontData::try_from(font).unwrap_err();
-    assert!(matches!(error, StbTrueTypeFontError::InvalidGlyph { .. }));
+    assert!(matches!(error, FontError::InvalidGlyph { .. }));
+}
+
+#[test]
+fn rejects_decreasing_loca_offsets() {
+    let mut font = PROGGY.to_vec();
+    let (loca, _) = table(&font, b"loca");
+    let first_end = u16::from_be_bytes(font[loca + 2..loca + 4].try_into().unwrap());
+    assert!(first_end > 0);
+    font[loca + 4..loca + 6].copy_from_slice(&0_u16.to_be_bytes());
+
+    let error = StbTrueTypeFontData::try_from(font).unwrap_err();
+    assert!(matches!(error, FontError::InvalidTable { tag, .. } if tag == *b"loca"));
+}
+
+#[test]
+fn rejects_a_single_off_curve_point_in_a_contour() {
+    let mut font = PROGGY.to_vec();
+    let (glyf, _) = table(&font, b"glyf");
+    // One contour ending at point zero, no instructions, and an off-curve point at (0, 0).
+    font[glyf..glyf + 2].copy_from_slice(&1_i16.to_be_bytes());
+    font[glyf + 10..glyf + 15].copy_from_slice(&[0, 0, 0, 0, 0x30]);
+
+    let error = StbTrueTypeFontData::try_from(font).unwrap_err();
+    assert!(matches!(error, FontError::InvalidGlyph { glyph_id: 0, .. }));
 }
 
 #[test]
@@ -266,7 +347,7 @@ fn rejects_composite_glyph_cycles() {
     let (glyph_id, component_offset, _) = first_composite_component(&font);
     font[component_offset..component_offset + 2].copy_from_slice(&glyph_id.to_be_bytes());
     let error = StbTrueTypeFontData::try_from(font).unwrap_err();
-    assert!(matches!(error, StbTrueTypeFontError::CompositeCycle { .. }));
+    assert!(matches!(error, FontError::CompositeCycle { .. }));
 }
 
 #[test]
@@ -275,10 +356,7 @@ fn rejects_out_of_range_composite_references() {
     let (_, component_offset, glyph_count) = first_composite_component(&font);
     font[component_offset..component_offset + 2].copy_from_slice(&glyph_count.to_be_bytes());
     let error = StbTrueTypeFontData::try_from(font).unwrap_err();
-    assert!(matches!(
-        error,
-        StbTrueTypeFontError::InvalidGlyphReference { .. }
-    ));
+    assert!(matches!(error, FontError::InvalidGlyphReference { .. }));
 }
 
 #[test]
@@ -288,7 +366,7 @@ fn rejects_composites_above_the_declared_maxp_component_limit() {
     font[maxp.0 + 28..maxp.0 + 30].copy_from_slice(&0_u16.to_be_bytes());
 
     let error = StbTrueTypeFontData::try_from(font).unwrap_err();
-    assert!(matches!(error, StbTrueTypeFontError::InvalidGlyph { .. }));
+    assert!(matches!(error, FontError::InvalidGlyph { .. }));
 }
 
 #[test]
@@ -320,7 +398,7 @@ fn rejects_composite_chains_above_the_recursion_limit() {
     .unwrap_err();
     assert!(matches!(
         error,
-        StbTrueTypeFontError::CompositeDepth { limit, .. }
+        FontError::CompositeDepth { limit, .. }
             if limit == MAX_COMPOSITE_DEPTH
     ));
 }
@@ -348,7 +426,7 @@ fn rejects_shared_composite_dags_above_the_expansion_limit() {
     let error = expand_glyph(1, &glyphs, &mut [0; 2], &mut [None; 2], 0).unwrap_err();
     assert!(matches!(
         error,
-        StbTrueTypeFontError::CompositeComplexity { limit, .. }
+        FontError::CompositeComplexity { limit, .. }
             if limit == MAX_EXPANDED_GLYPH_COMPLEXITY
     ));
 }
@@ -375,7 +453,33 @@ fn rejects_composite_translation_outside_native_short_coordinates() {
     ];
 
     let error = expand_glyph(1, &glyphs, &mut [0; 2], &mut [None; 2], 0).unwrap_err();
-    assert!(matches!(error, StbTrueTypeFontError::InvalidGlyph { .. }));
+    assert!(matches!(error, FontError::InvalidGlyph { .. }));
+}
+
+#[test]
+fn includes_zeroed_control_coordinates_in_the_composite_bounds() {
+    let glyphs = vec![
+        simple_glyph_with_bounds(CoordinateBounds {
+            min_x: -10_000,
+            max_x: -10_000,
+            min_y: 0,
+            max_y: 0,
+        }),
+        GlyphKind::Composite {
+            components: vec![CompositeComponent {
+                glyph_id: 0,
+                transform: CompositeTransform {
+                    xx: 1.5,
+                    dx: 25_000,
+                    ..CompositeTransform::default()
+                },
+                source_offset: 10,
+            }],
+        },
+    ];
+
+    let error = expand_glyph(1, &glyphs, &mut [0; 2], &mut [None; 2], 0).unwrap_err();
+    assert!(matches!(error, FontError::InvalidGlyph { glyph_id: 1, .. }));
 }
 
 #[test]
@@ -409,7 +513,7 @@ fn rejects_nested_composite_matrix_overflow() {
     ];
 
     let error = expand_glyph(2, &glyphs, &mut [0; 3], &mut [None; 3], 0).unwrap_err();
-    assert!(matches!(error, StbTrueTypeFontError::InvalidGlyph { .. }));
+    assert!(matches!(error, FontError::InvalidGlyph { .. }));
 }
 
 fn simple_glyph_with_bounds(bounds: CoordinateBounds) -> GlyphKind {

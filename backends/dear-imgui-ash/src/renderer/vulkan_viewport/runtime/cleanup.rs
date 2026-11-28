@@ -71,7 +71,7 @@ impl RuntimeControl {
         let callback_result = release_callbacks(self);
         self.mark_detached();
 
-        let (shutdown_result, destroyed) = {
+        let (shutdown_result, destroyed, released) = {
             let mut storage = self.renderer.try_borrow_mut().map_err(|_| {
                 AshViewportError::CallbackReentered {
                     callback: "Ash viewport runtime shutdown",
@@ -80,10 +80,14 @@ impl RuntimeControl {
             match storage.as_mut().ok_or(AshViewportError::RuntimeDetached)? {
                 RendererStorage::Real(renderer) => {
                     let shutdown_result = renderer.destroy_internal();
-                    (shutdown_result, renderer.destroyed)
+                    (
+                        shutdown_result,
+                        renderer.destroyed,
+                        renderer.allocator.is_released(),
+                    )
                 }
                 #[cfg(test)]
-                RendererStorage::Fake { .. } => (Ok(()), true),
+                RendererStorage::Fake { .. } => (Ok(()), true, true),
             }
         };
 
@@ -96,9 +100,11 @@ impl RuntimeControl {
             ]);
         }
 
-        // The renderer's complete texture map is gone, so the already-validated reset can now
-        // invalidate Context-owned bindings before we publish the renderer teardown.
-        permit.commit();
+        if released {
+            permit.commit();
+        } else {
+            drop(permit);
+        }
         let renderer = {
             let mut storage = self.renderer.try_borrow_mut().map_err(|_| {
                 AshViewportError::CallbackReentered {
@@ -188,19 +194,26 @@ impl RuntimeControl {
             #[cfg(test)]
             RendererStorage::Fake { .. } => Ok(()),
         };
-        let may_release = match storage {
-            RendererStorage::Real(renderer) => renderer.destroyed,
+        let released = match storage {
+            RendererStorage::Real(renderer) => renderer.allocator.is_released(),
             #[cfg(test)]
             RendererStorage::Fake { .. } => true,
         };
-        if !may_release {
+        if !released {
             return shutdown_result.map_err(Into::into);
         }
         let renderer = renderer.take();
         drop(renderer);
         self.globals.borrow_mut().take();
         self.set_state(RuntimeState::ResourceDropped);
-        map_renderer_shutdown_result(shutdown_result, "renderer teardown")
+        match map_renderer_shutdown_result(shutdown_result, "renderer teardown") {
+            Err(error @ AshViewportError::DeviceLost { .. }) => {
+                // The released resources satisfy Context teardown even on a lost device.
+                self.record_fault(error);
+                Ok(())
+            }
+            result => result,
+        }
     }
 
     /// Releases remaining renderer resources after native Context destruction.

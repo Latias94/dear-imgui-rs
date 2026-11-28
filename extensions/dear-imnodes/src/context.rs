@@ -15,7 +15,7 @@ pub use post::PostEditor;
 pub use tokens::NodeToken;
 
 /// Global ImNodes context
-pub struct Context {
+pub struct ImNodesContext {
     raw: *mut sys::ImNodesContext,
     imgui_binding: ContextBinding,
     alive: Rc<()>,
@@ -45,7 +45,7 @@ struct SubmittedObjects {
 }
 
 pub(crate) struct ImNodesScope<'ctx> {
-    ctx: &'ctx Context,
+    ctx: &'ctx ImNodesContext,
     editor_lease: Option<Rc<EditorContextInner>>,
 }
 
@@ -179,7 +179,7 @@ impl Drop for ImNodesContextGuard {
 /// Per-frame Ui extension entry point
 pub struct NodesUi<'ui> {
     ui: &'ui Ui,
-    ctx: &'ui Context,
+    ctx: &'ui ImNodesContext,
 }
 
 /// Pre-submission phase of a node editor frame.
@@ -235,7 +235,7 @@ pub struct NodeEditor<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Context as ImNodesContext, EditorContext, ImNodesContextGuard, sys};
+    use super::{EditorContext, ImNodesContext, ImNodesContextGuard, sys};
     use crate::ImNodesExt;
     use dear_imgui_rs::Context as ImGuiContext;
     use dear_imgui_rs::sys as imgui_sys;
@@ -346,7 +346,6 @@ mod tests {
         };
         let scope_a = nodes_a.scope(Some(&editor_a));
         drop(editor_a);
-        let suspended_a = imgui_a.suspend_or_panic();
 
         let mut imgui_b = ImGuiContext::create();
         prepare_imgui(&mut imgui_b);
@@ -356,6 +355,7 @@ mod tests {
         let editor_b = nodes_b.create_editor_context();
         let raw_editor_b = editor_b.raw();
         unsafe {
+            imgui_sys::igSetCurrentContext(raw_imgui_b);
             sys::imnodes_SetCurrentContext(raw_nodes_b);
             sys::imnodes_EditorContextSet(raw_editor_b);
         }
@@ -393,7 +393,6 @@ mod tests {
         drop(editor_b);
         drop(nodes_b);
         drop(imgui_b);
-        let imgui_a = suspended_a.activate().expect("context A should reactivate");
         drop(nodes_a);
         drop(imgui_a);
     }
@@ -428,7 +427,6 @@ mod tests {
         prepare_imgui(&mut imgui_a);
         let nodes_a = ImNodesContext::create(&imgui_a);
         let editor_a = nodes_a.create_editor_context();
-        let suspended_a = imgui_a.suspend_or_panic();
 
         let mut imgui_b = ImGuiContext::create();
         prepare_imgui(&mut imgui_b);
@@ -438,11 +436,12 @@ mod tests {
         let editor_b = nodes_b.create_editor_context();
         let raw_editor_b = editor_b.raw();
         unsafe {
+            imgui_sys::igSetCurrentContext(raw_imgui_b);
             sys::imnodes_SetCurrentContext(raw_nodes_b);
             sys::imnodes_EditorContextSet(raw_editor_b);
         }
 
-        drop(suspended_a);
+        drop(imgui_a);
         drop(editor_a);
         drop(nodes_a);
 
@@ -471,7 +470,7 @@ mod tests {
             fn quiesce(
                 &self,
                 _context: &dear_imgui_rs::ContextTeardown<'_>,
-            ) -> Result<(), dear_imgui_rs::ContextAttachmentTeardownError> {
+            ) -> Result<(), dear_imgui_rs::ContextError> {
                 drop(self.editor.borrow_mut().take());
                 drop(self.context.borrow_mut().take());
                 self.quiesced.set(true);
@@ -509,7 +508,6 @@ mod tests {
         let mut imgui_a = ImGuiContext::create();
         prepare_imgui(&mut imgui_a);
         let nodes = ImNodesContext::create(&imgui_a);
-        let suspended_a = imgui_a.suspend_or_panic();
 
         let mut imgui_b = ImGuiContext::create();
         prepare_imgui(&mut imgui_b);
@@ -521,7 +519,6 @@ mod tests {
         drop(frame);
 
         drop(imgui_b);
-        let imgui_a = suspended_a.activate().expect("context A should reactivate");
         drop(nodes);
         drop(imgui_a);
     }

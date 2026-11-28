@@ -37,8 +37,6 @@ mod bridge;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) use bridge::ImguiViewportBridgeContext;
 
-#[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
-use callbacks::platform_show_window;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use callbacks::{
     platform_create_window_raw_callback, platform_destroy_window_raw_callback,
@@ -71,6 +69,10 @@ use frame::clear_imgui_viewport_platform_handles;
 use frame::clear_imgui_viewport_platform_handles_for_keepalive;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) use frame::{NativeViewportFrameSupport, prepare_platform_viewports_for_frame};
+#[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) use platform::{
+    abandon_viewport_ecs_release, detach_owned_bridge, track_viewport_ecs_despawn_for_test,
+};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) use platform::{
     begin_owned_bridge_release, finish_owned_bridge_release, finish_viewport_ecs_release,
@@ -79,8 +81,6 @@ pub(crate) use platform::{
     preflight_platform_callback_ownership, record_owned_platform_name,
     retire_native_viewport_windows, viewport_ecs_release_pending,
 };
-#[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
-pub(crate) use platform::{detach_owned_bridge, track_viewport_ecs_despawn_for_test};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use platform::{
     latch_platform_ownership_fault, missing_platform_io_aggregate_hooks,
@@ -208,13 +208,13 @@ impl imgui::ContextAttachment for ImguiViewportBridgeTeardownAttachment {
     fn begin_platform_window_teardown(
         &self,
         context: &imgui::ContextPlatformWindowTeardown<'_>,
-    ) -> Result<(), imgui::ContextAttachmentTeardownError> {
+    ) -> Result<(), imgui::ContextError> {
         self.keepalive.core_teardown_owns_native_guard.set(false);
         context.with_bound_context(|| {
             let context_raw = unsafe { sys::igGetCurrentContext() };
             let main_viewport = unsafe { sys::igGetMainViewport() };
             platform_callback_ownership_raw(context_raw, main_viewport, &self.keepalive)
-                .map_err(|error| imgui::ContextAttachmentTeardownError::new(error.to_string()))?;
+                .map_err(|error| imgui::ContextError::attachment_teardown(error.to_string()))?;
             if !self.keepalive.native_teardown_in_progress.replace(true) {
                 self.keepalive.core_teardown_owns_native_guard.set(true);
             }
@@ -225,7 +225,7 @@ impl imgui::ContextAttachment for ImguiViewportBridgeTeardownAttachment {
     fn end_platform_window_teardown(
         &self,
         context: &imgui::ContextPlatformWindowTeardown<'_>,
-    ) -> Result<(), imgui::ContextAttachmentTeardownError> {
+    ) -> Result<(), imgui::ContextError> {
         if !self
             .keepalive
             .core_teardown_owns_native_guard
@@ -234,7 +234,7 @@ impl imgui::ContextAttachment for ImguiViewportBridgeTeardownAttachment {
             return Ok(());
         }
         if !self.keepalive.native_teardown_in_progress.get() {
-            return Err(imgui::ContextAttachmentTeardownError::new(
+            return Err(imgui::ContextError::attachment_teardown(
                 "Bevy viewport bridge lost its native teardown guard",
             ));
         }

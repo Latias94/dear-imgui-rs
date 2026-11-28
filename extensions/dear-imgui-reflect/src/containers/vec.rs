@@ -14,10 +14,11 @@ where
     T: ImGuiValue + Default,
 {
     let ui = inspector.ui();
-    // Show element count in the header label.
-    let header_label = format!("{label} [{}]", value.len());
+    let _container_id = ui.push_id(label);
+    let mut header_label = container_header(label, value.len());
 
     if vec_settings.dropdown {
+        header_label.push_str("###reflect_vec");
         if let Some(_node) = ui.tree_node(&header_label) {
             imgui_vec_body(inspector, label, value, vec_settings)
         } else {
@@ -29,7 +30,7 @@ where
     }
 }
 
-pub(super) fn imgui_vec_body<T>(
+fn imgui_vec_body<T>(
     inspector: &mut Inspector<'_, '_>,
     label: &str,
     value: &mut Vec<T>,
@@ -47,13 +48,12 @@ where
     }
 
     let mut changed = false;
-    let mut pending_op: Option<VecOp> = None;
+    let mut pending_op = None;
 
     // Inline "+" / "-" controls for inserting/removing elements.
     if vec_settings.insertable {
         ui.same_line();
-        let add_label = format!("+##{label}_vec_add");
-        if ui.small_button(&add_label) {
+        if ui.small_button("+##reflect_vec_add") {
             let new_index = value.len();
             value.push(T::default());
             inspector.record_event(crate::ReflectEvent::VecInserted {
@@ -66,8 +66,7 @@ where
 
     if vec_settings.removable && !value.is_empty() {
         ui.same_line();
-        let remove_label = format!("-##{label}_vec_remove");
-        if ui.small_button(&remove_label) {
+        if ui.small_button("-##reflect_vec_remove") {
             let removed_index = value.len().saturating_sub(1);
             value.pop();
             inspector.record_event(crate::ReflectEvent::VecRemoved {
@@ -78,49 +77,56 @@ where
         }
     }
 
-    // Optional drag-and-drop reordering state captured for this frame.
-    let mut move_op: Option<(usize, usize)> = None;
+    let len = value.len();
+    let payload_tag = vec_settings.reorderable.then(|| {
+        let container_addr = std::ptr::from_ref(value).addr();
+        let view_id = ui.get_id("reflect_vec_drag").raw();
+        format!("Reflect{container_addr:x}:{view_id:x}")
+    });
+    let mut drag_move = None;
 
-    // Render each element as "label[index]" with an optional drag handle.
-    for index in 0..value.len() {
-        let popup_id = format!("vec_item_context_{index}##{label}");
-        let mut open_context_menu = false;
-
-        if vec_settings.reorderable {
-            let handle_label = format!("==##{label}_handle_{index}");
-            let _ = ui.small_button(&handle_label);
-            open_context_menu |= ui.is_item_clicked_with_button(imgui::MouseButton::Right);
+    for (index, elem) in value.iter_mut().enumerate() {
+        let row_id = index.to_string();
+        let _row_id = ui.push_id(&row_id);
+        let popup_id = "reflect_vec_item_context";
+        let (handle_id, mut open_context_menu) = if let Some(tag) = &payload_tag {
+            ui.small_button("==##drag");
+            let handle_id = ui.item_id();
+            let clicked = ui.is_item_clicked_with_button(imgui::MouseButton::Right);
 
             if let Some(_source) = ui
-                .drag_drop_source_config("IMGUI_REFLECT_VEC_ITEM")
-                .begin_payload(index as i32)
+                .drag_drop_source_config(tag)
+                .condition(imgui::DragDropPayloadCond::Once)
+                .begin_payload((index, len))
             {
                 ui.text("==");
             }
-
+            capture_vec_drop(ui, tag, index, len, &mut drag_move);
             ui.same_line();
-        }
+            (Some(handle_id), clicked)
+        } else {
+            (None, false)
+        };
 
         let elem_label = format!("{label}[{index}]");
-        let (elem_changed, elem_right_clicked) = if inspector.is_path_active() {
-            let segment = format!("[{index}]");
-            let _path = inspector.push_path(segment);
-            let local_changed = T::imgui_value(inspector, &elem_label, &mut value[index]);
-            let right_clicked = ui.is_item_clicked_with_button(imgui::MouseButton::Right);
-            (local_changed, right_clicked)
-        } else {
-            let local_changed = T::imgui_value(inspector, &elem_label, &mut value[index]);
-            let right_clicked = ui.is_item_clicked_with_button(imgui::MouseButton::Right);
-            (local_changed, right_clicked)
-        };
-        changed |= elem_changed;
-        open_context_menu |= elem_right_clicked;
-
-        if open_context_menu {
-            ui.open_popup(&popup_id);
+        {
+            let _path = inspector
+                .tracks_nested_paths()
+                .then(|| inspector.push_path(format!("[{index}]")));
+            changed |= inspector.render_value(&elem_label, elem);
+        }
+        if handle_id.is_none() || handle_id != Some(ui.item_id()) {
+            open_context_menu |= ui.is_item_clicked_with_button(imgui::MouseButton::Right);
+            if let Some(tag) = &payload_tag {
+                capture_vec_drop(ui, tag, index, len, &mut drag_move);
+            }
         }
 
-        ui.popup(&popup_id, || {
+        if open_context_menu {
+            ui.open_popup(popup_id);
+        }
+
+        ui.popup(popup_id, || {
             let can_insert = vec_settings.insertable;
             let can_remove = vec_settings.removable;
             let can_reorder = vec_settings.reorderable;
@@ -158,7 +164,7 @@ where
                     if ui.menu_item("Move up") && pending_op.is_none() {
                         pending_op = Some(VecOp::Move {
                             from: index,
-                            to: index.saturating_sub(1),
+                            to: index - 1,
                         });
                     }
                 } else {
@@ -167,7 +173,7 @@ where
                     drop(_disabled);
                 }
 
-                if index + 1 < value.len() {
+                if index + 1 < len {
                     if ui.menu_item("Move down") && pending_op.is_none() {
                         pending_op = Some(VecOp::Move {
                             from: index,
@@ -186,24 +192,9 @@ where
                 drop(_disabled);
             }
         });
-
-        if vec_settings.reorderable
-            && let Some(target) = ui.drag_drop_target()
-        {
-            if let Some(Ok(payload)) = target.accept_payload::<i32, _>(
-                "IMGUI_REFLECT_VEC_ITEM",
-                imgui::DragDropTargetFlags::NONE,
-            ) && payload.delivery
-            {
-                let from = payload.data as usize;
-                let to = index;
-                move_op = Some((from, to));
-            }
-            target.pop();
-        }
     }
 
-    if let Some(op) = pending_op {
+    if let Some(op) = pending_op.or(drag_move.map(|(from, to)| VecOp::Move { from, to })) {
         match op {
             VecOp::Insert { index } => {
                 let index = index.min(value.len());
@@ -227,8 +218,11 @@ where
             VecOp::Move { from, to } => {
                 let len = value.len();
                 if from < len && to < len && from != to {
-                    let item = value.remove(from);
-                    value.insert(to, item);
+                    if from < to {
+                        value[from..=to].rotate_left(1);
+                    } else {
+                        value[to..=from].rotate_right(1);
+                    }
                     inspector.record_event(crate::ReflectEvent::VecReordered {
                         path: inspector.current_path(),
                         from,
@@ -249,20 +243,27 @@ where
                 }
             }
         }
-    } else if let Some((from, to)) = move_op {
-        let len = value.len();
-        if from < len && to < len && from != to {
-            let item = value.remove(from);
-            let insert_index = if from < to { to.saturating_sub(1) } else { to };
-            value.insert(insert_index, item);
-            inspector.record_event(crate::ReflectEvent::VecReordered {
-                path: inspector.current_path(),
-                from,
-                to: insert_index,
-            });
-            changed = true;
-        }
     }
 
     changed
+}
+
+fn capture_vec_drop(
+    ui: &imgui::Ui,
+    tag: &str,
+    index: usize,
+    len: usize,
+    drag_move: &mut Option<(usize, usize)>,
+) {
+    if let Some(target) = ui.drag_drop_target()
+        && !ui.item_flags().contains(imgui::ItemStateFlags::DISABLED)
+        && let Some(Ok(payload)) =
+            target.accept_payload::<(usize, usize), _>(tag, imgui::DragDropTargetFlags::NONE)
+        && payload.delivery
+    {
+        let (from, source_len) = payload.data;
+        if source_len == len {
+            *drag_move = Some((from, index));
+        }
+    }
 }

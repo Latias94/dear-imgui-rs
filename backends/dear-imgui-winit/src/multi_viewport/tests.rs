@@ -5,10 +5,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use dear_imgui_rs::{
-    BackendFlags, Context, ContextAttachment, ContextAttachmentRole,
-    ContextPlatformAttachmentReleaseError,
-};
+use dear_imgui_rs::{BackendFlags, Context, ContextAttachment, ContextAttachmentRole};
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::WindowId;
@@ -381,7 +378,6 @@ fn construction_panic_rolls_back_target_context_and_restores_the_previous_curren
     let _guard = lock_context();
     let mut context_a = Context::create();
     let raw_a = context_a.as_raw();
-    unsafe { dear_imgui_rs::sys::igSetCurrentContext(std::ptr::null_mut()) };
     let context_b = Context::create();
     let raw_b = context_b.as_raw();
 
@@ -410,9 +406,7 @@ fn construction_panic_rolls_back_target_context_and_restores_the_previous_curren
     runtime.shutdown(&mut context_a).unwrap();
     assert_eq!(unsafe { dear_imgui_rs::sys::igGetCurrentContext() }, raw_b);
 
-    unsafe { dear_imgui_rs::sys::igSetCurrentContext(raw_a) };
     drop(context_a);
-    unsafe { dear_imgui_rs::sys::igSetCurrentContext(raw_b) };
     drop(context_b);
 }
 
@@ -902,8 +896,6 @@ fn callback_claim_targets_the_passed_context_and_restores_the_previous_one() {
     let _guard = lock_context();
     let mut context_a = Context::create();
     let raw_a = context_a.as_raw();
-    unsafe { dear_imgui_rs::sys::igSetCurrentContext(std::ptr::null_mut()) };
-
     let context_b = Context::create();
     let raw_b = context_b.as_raw();
     let platform_io_b = unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw_b) };
@@ -921,9 +913,7 @@ fn callback_claim_targets_the_passed_context_and_restores_the_previous_one() {
     let mut runtime = runtime;
     runtime.shutdown(&mut context_a).unwrap();
     assert_eq!(unsafe { dear_imgui_rs::sys::igGetCurrentContext() }, raw_b);
-    unsafe { dear_imgui_rs::sys::igSetCurrentContext(raw_a) };
     drop(context_a);
-    unsafe { dear_imgui_rs::sys::igSetCurrentContext(raw_b) };
     drop(context_b);
 }
 
@@ -1925,7 +1915,7 @@ fn direct_context_platform_teardown_releases_the_runtime_slot_after_postflight_e
         .expect_err("postflight callback drift should be reported after native teardown");
     assert!(matches!(
         error,
-        dear_imgui_rs::ContextPlatformWindowTeardownError::AttachmentPostflight(_)
+        dear_imgui_rs::ContextError::PlatformWindowTeardownPostflight(_)
     ));
     assert_eq!(runtime.control().state(), RuntimeState::Detached);
     assert!(super::registry::runtime_for_context(context.as_raw()).is_none());
@@ -2117,7 +2107,6 @@ fn public_platform_owner_rejects_a_foreign_context_without_detaching() {
     let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
     let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
         .expect("test runtime should attach to the platform owner");
-    let suspended = context.suspend_or_panic();
     let mut foreign = Context::create();
 
     assert_eq!(
@@ -2127,7 +2116,6 @@ fn public_platform_owner_rejects_a_foreign_context_without_detaching() {
     assert!(platform.viewports_enabled());
 
     drop(foreign);
-    let mut context = suspended.activate().unwrap();
     platform.disable_viewports(&mut context).unwrap();
     platform.shutdown(&mut context).unwrap();
     drop(runtime);
@@ -2145,7 +2133,6 @@ fn full_event_route_rejects_a_foreign_context_before_consuming_faults() {
         .record_fault(WinitPlatformError::CallbackPanicked {
             callback: "queued before foreign full event",
         });
-    let suspended = context.suspend_or_panic();
     let mut foreign = Context::create();
     let foreign_flags = foreign.io().backend_flags();
 
@@ -2167,7 +2154,6 @@ fn full_event_route_rejects_a_foreign_context_before_consuming_faults() {
     ));
 
     drop(foreign);
-    let mut context = suspended.activate().unwrap();
     platform.disable_viewports(&mut context).unwrap();
     platform.shutdown(&mut context).unwrap();
     drop(runtime);
@@ -2185,7 +2171,6 @@ fn secondary_window_route_rejects_a_foreign_context_before_consuming_faults() {
         .record_fault(WinitPlatformError::CallbackPanicked {
             callback: "queued before foreign window event",
         });
-    let suspended = context.suspend_or_panic();
     let mut foreign = Context::create();
     let foreign_flags = foreign.io().backend_flags();
 
@@ -2207,7 +2192,6 @@ fn secondary_window_route_rejects_a_foreign_context_before_consuming_faults() {
     ));
 
     drop(foreign);
-    let mut context = suspended.activate().unwrap();
     platform.disable_viewports(&mut context).unwrap();
     platform.shutdown(&mut context).unwrap();
     drop(runtime);
@@ -2230,7 +2214,7 @@ fn direct_context_platform_teardown_rejects_renderer_state_before_native_destroy
         .expect_err("renderer callbacks must reject core platform teardown before native destroy");
     assert!(matches!(
         error,
-        dear_imgui_rs::ContextPlatformWindowTeardownError::AttachmentPreflight(_)
+        dear_imgui_rs::ContextError::PlatformWindowTeardownPreflight(_)
     ));
     assert_eq!(runtime.control().state(), RuntimeState::Attached);
     assert!(!runtime.control().teardown_callbacks_active());
@@ -2406,14 +2390,13 @@ fn runtime_shutdown_rejects_an_active_renderer_attachment_before_frame_or_native
 
     assert!(matches!(
         runtime.shutdown(&mut context),
-        Err(WinitPlatformError::PlatformAttachmentRelease(
-            ContextPlatformAttachmentReleaseError::RendererActive
-        ))
+        Err(WinitPlatformError::Context(error))
+                if matches!(error.context_error(), dear_imgui_rs::ContextError::RendererAttachmentActive)
     ));
     assert_eq!(runtime.control().state(), RuntimeState::Attached);
     assert!(runtime.validate_renderer_owner(&context).is_ok());
 
-    assert_eq!(renderer.detach(), Ok(true));
+    assert!(renderer.detach().unwrap());
     runtime.shutdown(&mut context).unwrap();
 }
 
@@ -2690,7 +2673,6 @@ fn shutdown_rejects_a_foreign_context_before_changing_runtime_state() {
     let _guard = lock_context();
     let mut context = Context::create();
     let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
-    let suspended = context.suspend_or_panic();
     let mut foreign = Context::create();
 
     assert_eq!(
@@ -2700,7 +2682,6 @@ fn shutdown_rejects_a_foreign_context_before_changing_runtime_state() {
     assert_eq!(runtime.control().state(), RuntimeState::Attached);
 
     drop(foreign);
-    let mut context = suspended.activate().unwrap();
     runtime.shutdown(&mut context).unwrap();
 }
 

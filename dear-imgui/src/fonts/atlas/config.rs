@@ -1,14 +1,13 @@
+use std::cell::UnsafeCell;
 use std::ffi::c_char;
 use std::ptr;
 
+use crate::FontError;
+use crate::context::binding::ContextThreadLease;
 use crate::sys;
+use crate::validation::{assert_finite_f32, assert_finite_vec2};
 
-use super::loader::{FontLoader, FontLoaderFlags};
-use super::validation::{
-    RASTERIZER_MULTIPLY_MAX, assert_finite_f32, assert_finite_vec2, assert_non_negative_f32,
-    assert_non_negative_i8, assert_positive_f32, assert_reference_font_size_for_metrics,
-    encode_glyph_ranges, validate_font_size_pixels,
-};
+use super::FontAtlas;
 
 /// Font configuration for loading fonts with v1.92+ features
 #[derive(Debug)]
@@ -256,4 +255,223 @@ impl Default for FontConfig {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Borrowed handle to a complete Dear ImGui font-loader callback table.
+///
+/// Safe code can obtain the built-in stb_truetype loader. Custom loaders must
+/// be created in native code and enter through [`FontLoader::from_raw`], whose
+/// safety contract covers every callback and stored pointer.
+#[repr(transparent)]
+pub struct FontLoader(UnsafeCell<sys::ImFontLoader>);
+
+impl FontLoader {
+    /// Return the built-in stb_truetype loader, panicking if [`Self::try_stb_truetype`] fails.
+    #[doc(alias = "ImFontAtlasGetFontLoaderForStbTruetype")]
+    pub fn stb_truetype() -> &'static Self {
+        Self::try_stb_truetype().expect("Failed to get Dear ImGui's stb_truetype font loader")
+    }
+
+    /// Return the built-in loader on the Dear ImGui owner thread, or any thread while unowned.
+    ///
+    /// Returns [`FontError::Context`] if the thread lease cannot be acquired.
+    pub fn try_stb_truetype() -> Result<&'static Self, FontError> {
+        // The upstream getter writes its static callback table on every call, including during
+        // native atlas builds. Existing handles view that storage through UnsafeCell.
+        let _lease = ContextThreadLease::acquire()?;
+        let raw = unsafe { sys::igImFontAtlasGetFontLoaderForStbTruetype() };
+        unsafe { raw.cast::<Self>().as_ref() }.ok_or(FontError::BuiltInLoaderUnavailable)
+    }
+
+    /// Borrow an externally owned font loader.
+    ///
+    /// # Safety
+    ///
+    /// `raw` must point to a fully initialized `ImFontLoader`. Its name and all
+    /// callback pointers, callback userdata, and referenced native state must
+    /// remain valid for `'a`. Every callback must obey Dear ImGui's ABI, must not
+    /// unwind across FFI, and must satisfy the callback-specific ownership rules.
+    pub unsafe fn from_raw<'a>(raw: *const sys::ImFontLoader) -> &'a Self {
+        assert!(
+            !raw.is_null(),
+            "FontLoader::from_raw() received a null pointer"
+        );
+        unsafe { &*raw.cast::<Self>() }
+    }
+
+    /// Return the borrowed raw loader pointer.
+    pub(crate) fn as_ptr(&self) -> *const sys::ImFontLoader {
+        self.0.get().cast_const()
+    }
+}
+
+/// Font loader flags for controlling font loading behavior.
+///
+/// These bits mirror Dear ImGui's `ImGuiFreeTypeLoaderFlags` (see
+/// `misc/freetype/imgui_freetype.h`) and are only interpreted by the
+/// FreeType font backend. When using the stb_truetype backend, they
+/// are ignored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FontLoaderFlags(pub u32);
+
+impl FontLoaderFlags {
+    /// No special flags
+    pub const NONE: Self = Self(0);
+
+    /// Disable hinting (more faithful to the original glyph shapes, but blurrier)
+    pub const NO_HINTING: Self = Self(1 << 0);
+
+    /// Disable auto-hinter (prefer the font's native hinter only)
+    pub const NO_AUTOHINT: Self = Self(1 << 1);
+
+    /// Prefer auto-hinter over the font's native hinter
+    pub const FORCE_AUTOHINT: Self = Self(1 << 2);
+
+    /// Light hinting (often closer to Windows ClearType appearance)
+    pub const LIGHT_HINTING: Self = Self(1 << 3);
+
+    /// Strong/mono hinting (intended for monochrome outputs)
+    pub const MONO_HINTING: Self = Self(1 << 4);
+
+    /// Artificially embolden the font
+    pub const BOLD: Self = Self(1 << 5);
+
+    /// Artificially slant the font (oblique)
+    pub const OBLIQUE: Self = Self(1 << 6);
+
+    /// Disable anti-aliasing (combine with `MONO_HINTING` for best results)
+    pub const MONOCHROME: Self = Self(1 << 7);
+
+    /// Enable color-layered glyphs (e.g. color emoji)
+    pub const LOAD_COLOR: Self = Self(1 << 8);
+
+    /// Enable FreeType bitmap glyphs
+    pub const BITMAP: Self = Self(1 << 9);
+}
+
+impl std::ops::BitOr for FontLoaderFlags {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for FontLoaderFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl FontAtlas {
+    /// Sets the font loader for this atlas.
+    ///
+    /// Use [`FontLoader::stb_truetype`] to select stb_truetype even in a FreeType build.
+    /// Returns an error if any font source has already been added, before native state changes.
+    /// The loader must be static because Dear ImGui stores the raw `ImFontLoader*`.
+    pub fn set_font_loader(&self, loader: &'static FontLoader) -> Result<(), FontError> {
+        self.assert_mutation_allowed("FontAtlas::set_font_loader()");
+        let source_count = unsafe { (*self.raw()).Sources.Size };
+        assert!(
+            source_count >= 0,
+            "FontAtlas::set_font_loader() observed a negative native source count"
+        );
+        if source_count != 0 {
+            return Err(FontError::SourcesAlreadyAdded {
+                source_count: source_count as usize,
+            });
+        }
+        unsafe {
+            sys::ImFontAtlas_SetFontLoader(self.raw(), loader.as_ptr());
+        }
+        Ok(())
+    }
+
+    /// Sets global font loader flags
+    ///
+    /// These flags apply to all fonts loaded with this atlas unless overridden
+    /// in individual FontConfig instances.
+    pub fn set_font_loader_flags(&self, flags: FontLoaderFlags) {
+        self.assert_mutation_allowed("FontAtlas::set_font_loader_flags()");
+        unsafe {
+            (*self.raw()).FontLoaderFlags = flags.0;
+        }
+    }
+
+    /// Gets the current font loader flags
+    pub fn font_loader_flags(&self) -> FontLoaderFlags {
+        unsafe { FontLoaderFlags((*self.raw()).FontLoaderFlags) }
+    }
+}
+
+pub(super) const RASTERIZER_MULTIPLY_MAX: f32 = 16_000_000.0;
+
+fn assert_non_negative_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value >= 0.0, "{caller} {name} must be non-negative");
+}
+
+fn assert_positive_f32(caller: &str, name: &str, value: f32) {
+    assert_finite_f32(caller, name, value);
+    assert!(value > 0.0, "{caller} {name} must be positive");
+}
+
+fn assert_non_negative_i8(caller: &str, name: &str, value: i8) {
+    assert!(value >= 0, "{caller} {name} must be non-negative");
+}
+
+pub(super) fn validate_font_size_pixels(caller: &str, name: &str, size_pixels: f32) -> f32 {
+    assert_non_negative_f32(caller, name, size_pixels);
+    size_pixels
+}
+
+pub(super) fn validate_font_size_pixels_option(
+    caller: &str,
+    name: &str,
+    size_pixels: Option<f32>,
+) -> f32 {
+    let size_pixels = size_pixels.unwrap_or(0.0);
+    validate_font_size_pixels(caller, name, size_pixels)
+}
+
+fn encode_glyph_ranges(caller: &str, ranges: &[(u32, u32)]) -> Vec<sys::ImWchar> {
+    if ranges.is_empty() {
+        return Vec::new();
+    }
+    const IMWCHAR_MAX: u32 = if std::mem::size_of::<sys::ImWchar>() == 2 {
+        0xFFFF
+    } else {
+        0x10FFFF
+    };
+    let capacity = ranges
+        .len()
+        .checked_mul(2)
+        .and_then(|length| length.checked_add(1))
+        .expect("glyph range count overflowed usize");
+    let mut encoded = Vec::with_capacity(capacity);
+    for &(start, end) in ranges {
+        assert!(start != 0, "{caller} glyph range cannot start at U+0000");
+        assert!(
+            start <= end,
+            "{caller} glyph range start must be less than or equal to its end"
+        );
+        assert!(
+            end <= IMWCHAR_MAX,
+            "{caller} glyph range exceeds ImWchar's maximum codepoint {IMWCHAR_MAX:#x}"
+        );
+        encoded.push(start as sys::ImWchar);
+        encoded.push(end as sys::ImWchar);
+    }
+    encoded.push(0);
+    encoded
+}
+
+fn assert_reference_font_size_for_metrics(
+    caller: &str,
+    size_pixels: f32,
+    has_reference_size_dependent_metrics: bool,
+) {
+    assert!(
+        !has_reference_size_dependent_metrics || size_pixels > 0.0,
+        "{caller} glyph offset/advance overrides require a positive reference size"
+    );
 }

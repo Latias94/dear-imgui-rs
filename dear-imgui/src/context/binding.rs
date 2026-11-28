@@ -9,10 +9,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::ThreadId;
 
 use parking_lot::{Mutex, ReentrantMutex};
-use thiserror::Error;
 
+use crate::error::context::{BindingKind, ContextError};
 use crate::render::draw_data::StandardDrawCallbacks;
-use crate::{ImGuiError, ImGuiResult, sys};
+use crate::sys;
 
 // All safe context switching, including backend callbacks, serializes through this lock.
 pub(crate) static CTX_MUTEX: ReentrantMutex<()> = ReentrantMutex::new(());
@@ -22,16 +22,42 @@ static CONTEXT_THREAD_OWNER: Mutex<ContextThreadOwner> = Mutex::new(ContextThrea
 static NEXT_CONTEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
-    // Reusing an address replaces its entry, while guards that captured the old Weak retain the
-    // old Context generation and cannot restore the reused address by mistake.
-    static MANAGED_CONTEXTS: RefCell<HashMap<usize, ManagedContextEntry>> =
-        RefCell::new(HashMap::new());
-    // Main viewport addresses are stable for the lifetime of their native Context. Keeping a
-    // generation-bound reverse index makes Viewport::is_main independent from GImGui and avoids
-    // scanning historical Context tombstones on every platform snapshot.
+    static MANAGED_CONTEXTS: RefCell<ManagedContexts> = RefCell::new(ManagedContexts::default());
     static LIVE_MAIN_VIEWPORTS: RefCell<HashMap<usize, ContextId>> =
         RefCell::new(HashMap::new());
     static BOUND_CONTEXT_DEPTH: Cell<usize> = const { Cell::new(0) };
+}
+
+#[derive(Default)]
+struct ManagedContexts {
+    by_id: HashMap<ContextId, Weak<ContextState>>,
+    by_address: HashMap<usize, ContextId>,
+}
+
+fn managed_context(raw: *mut sys::ImGuiContext) -> Option<Weak<ContextState>> {
+    MANAGED_CONTEXTS
+        .try_with(|contexts| {
+            let contexts = contexts.borrow();
+            let id = contexts.by_address.get(&(raw as usize))?;
+            contexts.by_id.get(id).cloned()
+        })
+        .ok()
+        .flatten()
+}
+
+#[cfg(test)]
+#[test]
+fn destroying_a_context_removes_both_generation_indexes() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let context = crate::Context::create();
+    let raw = context.as_raw();
+    let id = context.id();
+    let binding = context.binding();
+    assert!(managed_context(raw).is_some());
+    drop(context);
+    assert!(managed_context(raw).is_none());
+    MANAGED_CONTEXTS.with(|contexts| assert!(!contexts.borrow().by_id.contains_key(&id)));
+    assert!(!binding.is_alive());
 }
 
 #[derive(Debug)]
@@ -70,17 +96,18 @@ impl ContextThreadLease {
     ///
     /// # Errors
     ///
-    /// Returns [`ImGuiError::ContextThreadConflict`] if another thread holds a lease, or
-    /// [`ImGuiError::ResourceAllocation`] if the process-wide lease count is exhausted.
-    pub fn acquire() -> ImGuiResult<Self> {
+    /// Returns [`ContextError::ThreadConflict`] if another thread holds a lease, or
+    /// [`ContextError::ThreadLeaseExhausted`] if the process-wide lease count is exhausted.
+    pub fn acquire() -> Result<Self, ContextError> {
         let thread = std::thread::current().id();
         let mut owner = CONTEXT_THREAD_OWNER.lock();
         if owner.thread.is_some_and(|current| current != thread) {
-            return Err(ImGuiError::ContextThreadConflict);
+            return Err(ContextError::ThreadConflict);
         }
-        owner.live_leases = owner.live_leases.checked_add(1).ok_or_else(|| {
-            ImGuiError::resource_allocation("Dear ImGui native owner thread lease count exhausted")
-        })?;
+        owner.live_leases = owner
+            .live_leases
+            .checked_add(1)
+            .ok_or(ContextError::ThreadLeaseExhausted)?;
         owner.thread = Some(thread);
         Ok(Self {
             thread,
@@ -126,33 +153,12 @@ pub(crate) fn viewport_is_main_viewport(viewport: *const sys::ImGuiViewport) -> 
     if current.is_null() {
         return false;
     }
-    let current_is_managed = MANAGED_CONTEXTS.with(|contexts| {
-        matches!(
-            contexts.borrow().get(&(current as usize)),
-            Some(ManagedContextEntry::Live { state, .. })
-                if state.upgrade().is_some_and(|state| {
-                    state.lifecycle() != ContextLifecycle::NativeDestroyed
-                        && state.raw_during_teardown() == current
-                })
-        )
-    });
-    if current_is_managed {
+    if managed_context(current).is_some() {
         return false;
     }
 
     let main = unsafe { sys::igGetMainViewport() };
     !main.is_null() && std::ptr::eq(viewport, main.cast_const())
-}
-
-#[derive(Clone)]
-enum ManagedContextEntry {
-    Live {
-        id: ContextId,
-        state: Weak<ContextState>,
-    },
-    Dead {
-        id: ContextId,
-    },
 }
 
 /// Process-unique identity for a Dear ImGui context.
@@ -203,21 +209,9 @@ pub(crate) fn rendered_draw_callbacks(
     context: *mut sys::ImGuiContext,
     frame: i32,
 ) -> Option<StandardDrawCallbacks> {
-    MANAGED_CONTEXTS
-        .try_with(|contexts| {
-            let contexts = contexts.borrow();
-            let ManagedContextEntry::Live { id, state } = contexts.get(&(context as usize))? else {
-                return None;
-            };
-            let state = state.upgrade()?;
-            if state.id != *id || state.raw.get() != context {
-                return None;
-            }
-            let (rendered_frame, callbacks) = state.rendered_callbacks.get()?;
-            (rendered_frame == frame).then_some(callbacks)
-        })
-        .ok()
-        .flatten()
+    let state = managed_context(context)?.upgrade()?;
+    let (rendered_frame, callbacks) = state.rendered_callbacks.get()?;
+    (rendered_frame == frame).then_some(callbacks)
 }
 
 #[derive(Default)]
@@ -272,13 +266,9 @@ impl ContextState {
             dock_layout_applications: RefCell::new(FrameIdClaims::default()),
         });
         MANAGED_CONTEXTS.with(|contexts| {
-            contexts.borrow_mut().insert(
-                raw as usize,
-                ManagedContextEntry::Live {
-                    id,
-                    state: Rc::downgrade(&state),
-                },
-            );
+            let mut contexts = contexts.borrow_mut();
+            contexts.by_address.insert(raw as usize, id);
+            contexts.by_id.insert(id, Rc::downgrade(&state));
         });
         LIVE_MAIN_VIEWPORTS.with(|viewports| {
             let mut viewports = viewports.borrow_mut();
@@ -317,16 +307,23 @@ impl ContextState {
     }
 
     pub(crate) fn mark_native_destroyed(&self) {
-        self.unregister_main_viewport();
+        self.unregister();
         self.raw.set(ptr::null_mut());
         self.lifecycle.set(ContextLifecycle::NativeDestroyed);
     }
 
-    fn unregister_main_viewport(&self) {
+    fn unregister(&self) {
         let _ = LIVE_MAIN_VIEWPORTS.try_with(|viewports| {
             let mut viewports = viewports.borrow_mut();
             if viewports.get(&self.main_viewport_address) == Some(&self.id) {
                 viewports.remove(&self.main_viewport_address);
+            }
+        });
+        let _ = MANAGED_CONTEXTS.try_with(|contexts| {
+            let mut contexts = contexts.borrow_mut();
+            contexts.by_id.remove(&self.id);
+            if contexts.by_address.get(&self.address) == Some(&self.id) {
+                contexts.by_address.remove(&self.address);
             }
         });
     }
@@ -334,34 +331,10 @@ impl ContextState {
 
 impl Drop for ContextState {
     fn drop(&mut self) {
-        self.unregister_main_viewport();
-        let _ = MANAGED_CONTEXTS.try_with(|contexts| {
-            let mut contexts = contexts.borrow_mut();
-            let Some(entry) = contexts.get_mut(&self.address) else {
-                return;
-            };
-            let matches_generation = match entry {
-                ManagedContextEntry::Live { id, .. } | ManagedContextEntry::Dead { id } => {
-                    *id == self.id
-                }
-            };
-            if matches_generation {
-                *entry = ManagedContextEntry::Dead { id: self.id };
-            }
-        });
+        if self.lifecycle.get() != ContextLifecycle::NativeDestroyed {
+            self.unregister();
+        }
     }
-}
-
-/// Failure to enter a Context through a persistent binding capability.
-#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
-#[non_exhaustive]
-pub enum ContextBindingError {
-    /// Context teardown has started, so ordinary safe access is no longer permitted.
-    #[error("Dear ImGui context teardown is in progress")]
-    Dropping,
-    /// The originating native Context no longer exists.
-    #[error("Dear ImGui context has been destroyed")]
-    NativeDestroyed,
 }
 
 /// Persistent, non-thread-safe capability for calling against one live Context.
@@ -492,44 +465,35 @@ impl ContextBinding {
     }
 
     /// Runs a closure while the originating Context is current.
-    pub fn try_with_bound_context<R>(
-        &self,
-        f: impl FnOnce() -> R,
-    ) -> Result<R, ContextBindingError> {
-        self.try_with_bound_context_guarded(|_| f())
+    pub fn try_with_bound_context<R>(&self, f: impl FnOnce() -> R) -> Result<R, ContextError> {
+        self.try_bind(f).map_err(ContextError::Binding)
     }
 
-    pub(crate) fn try_with_bound_context_guarded<R>(
-        &self,
-        f: impl FnOnce(&mut RawBoundContextGuard) -> R,
-    ) -> Result<R, ContextBindingError> {
-        let state = self
-            .state
-            .upgrade()
-            .ok_or(ContextBindingError::NativeDestroyed)?;
+    pub(super) fn try_bind<R>(&self, f: impl FnOnce() -> R) -> Result<R, BindingKind> {
+        let state = self.state.upgrade().ok_or(BindingKind::NativeDestroyed)?;
         match state.lifecycle() {
             ContextLifecycle::Alive => {}
-            ContextLifecycle::Dropping => return Err(ContextBindingError::Dropping),
+            ContextLifecycle::Dropping => return Err(BindingKind::Dropping),
             ContextLifecycle::NativeDestroyed => {
-                return Err(ContextBindingError::NativeDestroyed);
+                return Err(BindingKind::NativeDestroyed);
             }
         }
 
         let _lock = CTX_MUTEX.lock();
         match state.lifecycle() {
             ContextLifecycle::Alive => {}
-            ContextLifecycle::Dropping => return Err(ContextBindingError::Dropping),
+            ContextLifecycle::Dropping => return Err(BindingKind::Dropping),
             ContextLifecycle::NativeDestroyed => {
-                return Err(ContextBindingError::NativeDestroyed);
+                return Err(BindingKind::NativeDestroyed);
             }
         }
         let raw = state.raw.get();
         if raw.is_null() {
-            return Err(ContextBindingError::NativeDestroyed);
+            return Err(BindingKind::NativeDestroyed);
         }
 
-        let mut bound = RawBoundContextGuard::bind(raw);
-        Ok(f(&mut bound))
+        let _bound = RawBoundContextGuard::bind(raw);
+        Ok(f())
     }
 
     /// Runs a closure while the originating Context is current.
@@ -539,7 +503,7 @@ impl ContextBinding {
     /// Panics if Context teardown has started or the native Context was destroyed. Use
     /// [`ContextBinding::try_with_bound_context`] when teardown is an expected condition.
     pub fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.try_with_bound_context(f)
+        self.try_bind(f)
             .unwrap_or_else(|error| panic!("ContextBinding::with_bound_context(): {error}"))
     }
 }
@@ -603,7 +567,7 @@ impl ContextAliveToken {
 
 pub(crate) struct RawBoundContextGuard {
     previous: *mut sys::ImGuiContext,
-    previous_state: Option<ManagedContextEntry>,
+    previous_state: Option<Weak<ContextState>>,
     restore: bool,
 }
 
@@ -621,10 +585,7 @@ impl RawBoundContextGuard {
             let previous = sys::igGetCurrentContext();
             let restore = previous != target;
             let previous_state = if restore {
-                MANAGED_CONTEXTS
-                    .try_with(|contexts| contexts.borrow().get(&(previous as usize)).cloned())
-                    .ok()
-                    .flatten()
+                managed_context(previous)
             } else {
                 None
             };
@@ -639,8 +600,8 @@ impl RawBoundContextGuard {
         }
     }
 
-    pub(crate) fn previous_context(&self) -> *mut sys::ImGuiContext {
-        self.previous
+    pub(super) fn keep_current(mut self) {
+        self.restore = false;
     }
 }
 
@@ -649,14 +610,10 @@ impl Drop for RawBoundContextGuard {
         if self.restore {
             let previous_is_valid = match self.previous_state.as_ref() {
                 None => true,
-                Some(ManagedContextEntry::Live { id, state }) => {
-                    state.upgrade().is_some_and(|state| {
-                        state.id() == *id
-                            && state.lifecycle() != ContextLifecycle::NativeDestroyed
-                            && state.raw_during_teardown() == self.previous
-                    })
-                }
-                Some(ManagedContextEntry::Dead { .. }) => false,
+                Some(state) => state.upgrade().is_some_and(|state| {
+                    state.lifecycle() != ContextLifecycle::NativeDestroyed
+                        && state.raw_during_teardown() == self.previous
+                }),
             };
             set_current_context(if previous_is_valid {
                 self.previous
@@ -672,17 +629,8 @@ impl Drop for RawBoundContextGuard {
     }
 }
 
-pub(super) fn clear_current_context() {
-    set_current_context(ptr::null_mut());
-}
-
 pub(super) fn set_current_context(ctx: *mut sys::ImGuiContext) {
     unsafe { sys::igSetCurrentContext(ctx) }
-}
-
-pub(super) fn no_current_context() -> bool {
-    let ctx = unsafe { sys::igGetCurrentContext() };
-    ctx.is_null()
 }
 
 pub(crate) fn with_bound_context<R>(ctx: *mut sys::ImGuiContext, f: impl FnOnce() -> R) -> R {
@@ -693,10 +641,10 @@ pub(crate) fn with_bound_context<R>(ctx: *mut sys::ImGuiContext, f: impl FnOnce(
 
 #[cfg(test)]
 mod thread_lease_tests {
+    use super::{BindingKind, ContextError, ContextThreadLease};
     use crate::{
-        BasicSelection, Context, ContextBindingError, ContextThreadLease, Id, ImGuiError,
-        ImGuiResult, OwnedStateStorage, OwnedTextureData, StateStorage, TextFilter,
-        TextureDataError, TextureFormat,
+        BasicSelection, Context, Id, ImGuiError, OwnedStateStorage, OwnedTextureData, StateStorage,
+        TextFilter, TextureError, TextureFormat,
     };
     use static_assertions::assert_not_impl_any;
 
@@ -706,7 +654,7 @@ mod thread_lease_tests {
     assert_not_impl_any!(TextFilter: Send, Sync);
     assert_not_impl_any!(BasicSelection: Send, Sync);
 
-    fn acquire_on_another_thread() -> ImGuiResult<()> {
+    fn acquire_on_another_thread() -> Result<(), ContextError> {
         std::thread::spawn(|| ContextThreadLease::acquire().map(drop))
             .join()
             .unwrap()
@@ -719,23 +667,23 @@ mod thread_lease_tests {
         std::thread::spawn(|| {
             assert!(matches!(
                 Context::try_create(),
-                Err(ImGuiError::ContextThreadConflict)
+                Err(ContextError::ThreadConflict)
             ));
             assert!(matches!(
                 OwnedTextureData::from_pixels(TextureFormat::Alpha8, 1, 1, &[7]),
-                Err(TextureDataError::ContextThreadConflict)
+                Err(TextureError::ContextThreadConflict)
             ));
             assert!(matches!(
                 OwnedStateStorage::try_new(),
-                Err(ImGuiError::ContextThreadConflict)
+                Err(ImGuiError::Context(ContextError::ThreadConflict))
             ));
             assert!(matches!(
                 TextFilter::try_new("Search"),
-                Err(ImGuiError::ContextThreadConflict)
+                Err(ImGuiError::Context(ContextError::ThreadConflict))
             ));
             assert!(matches!(
                 BasicSelection::try_new(),
-                Err(ImGuiError::ContextThreadConflict)
+                Err(ImGuiError::Context(ContextError::ThreadConflict))
             ));
         })
         .join()
@@ -748,13 +696,13 @@ mod thread_lease_tests {
             let context = Context::create();
             let binding = context.binding();
             drop(context);
-            assert_eq!(
+            assert!(matches!(
                 binding.try_with_bound_context(|| ()),
-                Err(ContextBindingError::NativeDestroyed)
-            );
+                Err(ContextError::Binding(BindingKind::NativeDestroyed))
+            ));
             assert!(matches!(
                 acquire_on_another_thread(),
-                Err(ImGuiError::ContextThreadConflict)
+                Err(ContextError::ThreadConflict)
             ));
             drop(owner);
             acquire_on_another_thread().unwrap();
@@ -781,14 +729,14 @@ mod thread_lease_tests {
         let (raw, lease) = texture.into_raw_parts();
         assert!(matches!(
             acquire_on_another_thread(),
-            Err(ImGuiError::ContextThreadConflict)
+            Err(ContextError::ThreadConflict)
         ));
         // The raw allocation has one owner on this thread throughout both transfers.
         let texture = unsafe { OwnedTextureData::from_raw_owned(raw) };
         drop(lease);
         assert!(matches!(
             acquire_on_another_thread(),
-            Err(ImGuiError::ContextThreadConflict)
+            Err(ContextError::ThreadConflict)
         ));
         let lease = ContextThreadLease::acquire().unwrap();
         let raw = texture.into_raw();

@@ -131,10 +131,10 @@ impl FrameTraceState {
     }
 
     pub(super) fn target(&mut self, key: Option<ObservationKey>, target: NativeWindowTarget) {
-        if let Some(observation) = self.observation_mut(key) {
-            if observation.target.instance_id == target.instance_id {
-                observation.target = target;
-            }
+        if let Some(observation) = self.observation_mut(key)
+            && observation.target.instance_id == target.instance_id
+        {
+            observation.target = target;
         }
     }
 

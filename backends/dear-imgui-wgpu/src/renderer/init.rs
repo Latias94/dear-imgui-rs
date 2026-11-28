@@ -46,7 +46,8 @@ impl WgpuRenderer {
             #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_clear_color: Color::BLACK,
             renderer_consumer: None,
-            drop_deferral: None,
+            #[cfg(any(feature = "mv-log", feature = "tracing"))]
+            last_framebuffer_mismatch: std::cell::Cell::new(None),
         }
     }
 

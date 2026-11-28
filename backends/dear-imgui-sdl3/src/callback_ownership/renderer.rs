@@ -11,9 +11,9 @@ use super::native_callbacks::{
 };
 use super::{
     PlatformCallbacks, PlatformClaimBaseline, RendererBackendState, RendererCallbackOwnership,
-    RendererSetWindowSizeCallback, RendererSetWindowSizeInvocation, RendererShutdownRestore,
-    SDL_RENDERER_RESERVED_FLAGS, callback_eq, for_each_renderer_non_aggregate_callback,
-    for_each_renderer_value, restored_owned_pointer,
+    RendererSetWindowSizeCallback, RendererShutdownRestore, SDL_RENDERER_RESERVED_FLAGS,
+    callback_eq, for_each_renderer_non_aggregate_callback, for_each_renderer_value,
+    restored_owned_pointer,
 };
 
 impl RendererCallbackOwnership {
@@ -433,11 +433,8 @@ impl RendererCallbackOwnership {
         self.original.raw.Renderer_RenderWindow
     }
 
-    pub(crate) fn original_set_window_size_invocation(&self) -> RendererSetWindowSizeInvocation {
-        RendererSetWindowSizeInvocation {
-            callback: self.original_set_window_size,
-            native_callbacks: self.original.snapshot(),
-        }
+    pub(crate) fn original_set_window_size(&self) -> RendererSetWindowSizeCallback {
+        self.original_set_window_size
     }
 
     pub(crate) fn original_swap_buffers(

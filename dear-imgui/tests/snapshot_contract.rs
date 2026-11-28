@@ -250,7 +250,7 @@ fn unsupported_user_callback_is_an_explicit_capture_error() {
     }
     assert!(matches!(
         frame.render_snapshot(&consumer),
-        Err(imgui::render::SnapshotError::UserCallbackUnsupported)
+        Err(imgui::FrameError::UserCallbackUnsupported)
     ));
     assert_eq!(ctx.poll_snapshot_completions().unwrap().watermark(), 0);
 
@@ -286,7 +286,7 @@ fn abandoned_epoch_repeats_destroy_and_blocks_consumer_replacement_until_drained
     drop(consumer);
     assert!(matches!(
         ctx.create_detached_renderer_consumer(),
-        Err(imgui::render::RendererConsumerError::ConsumerDraining)
+        Err(imgui::FrameError::ConsumerDraining)
     ));
     drop(second);
     let progress = ctx.poll_snapshot_completions().unwrap();
@@ -353,12 +353,10 @@ fn upload_identity_tracks_normalized_operation_content_instead_of_capture_count(
         ctx.try_with_texture_mut(texture_id, |mut texture| {
             texture.replace_pixels(&[0; 15])
         }),
-        Err(imgui::ManagedTextureMutationError::Data(
-            imgui::texture::TextureDataError::ByteLengthMismatch {
-                expected: 16,
-                actual: 15,
-            }
-        ))
+        Err(imgui::TextureError::ByteLengthMismatch {
+            expected: 16,
+            actual: 15,
+        })
     );
 
     let retry = ctx.begin_frame().render_snapshot(&consumer).unwrap();
@@ -590,12 +588,10 @@ fn managed_mutation_closure_preserves_earlier_success_when_a_later_call_fails() 
             texture.replace_pixels(&replacement)?;
             texture.replace_pixels(&replacement[..15])
         }),
-        Err(imgui::ManagedTextureMutationError::Data(
-            imgui::TextureDataError::ByteLengthMismatch {
-                expected: 16,
-                actual: 15,
-            }
-        ))
+        Err(imgui::TextureError::ByteLengthMismatch {
+            expected: 16,
+            actual: 15,
+        })
     );
     ctx.with_texture(texture_id, |texture| {
         assert_eq!(texture.pixels(), Some(replacement.as_slice()));
@@ -671,9 +667,7 @@ fn invalid_earlier_completion_does_not_block_a_later_valid_epoch() {
     invalid.push(duplicate_b);
     assert!(matches!(
         first.commit(invalid),
-        Err(imgui::render::SnapshotCommitError::InvalidFeedback(
-            imgui::render::RendererConsumerError::DuplicateFeedback { .. }
-        ))
+        Err(imgui::FrameError::DuplicateFeedback { .. })
     ));
     second.commit(valid).unwrap();
 
@@ -907,9 +901,7 @@ fn duplicate_feedback_abandons_the_epoch_without_partial_registry_mutation() {
 
     assert!(matches!(
         snapshot.commit(invalid),
-        Err(imgui::render::SnapshotCommitError::InvalidFeedback(
-            imgui::render::RendererConsumerError::DuplicateFeedback { .. }
-        ))
+        Err(imgui::FrameError::DuplicateFeedback { .. })
     ));
     let progress = ctx.poll_snapshot_completions().unwrap();
     assert_eq!(progress.watermark(), 1);
@@ -952,9 +944,7 @@ fn feedback_from_an_old_consumer_generation_cannot_mutate_a_new_generation() {
     invalid.extend(retry_all(&second));
     assert!(matches!(
         second.commit(invalid),
-        Err(imgui::render::SnapshotCommitError::InvalidFeedback(
-            imgui::render::RendererConsumerError::StaleConsumerGeneration { .. }
-        ))
+        Err(imgui::FrameError::StaleConsumerGeneration { .. })
     ));
     let progress = ctx.poll_snapshot_completions().unwrap();
     assert_eq!(progress.watermark(), 2);
@@ -984,7 +974,7 @@ fn feedback_from_a_foreign_context_is_rejected_before_registry_mutation() {
     context_a.poll_snapshot_completions().unwrap();
     drop(consumer_a);
     context_a.poll_snapshot_completions().unwrap();
-    let suspended_a = context_a.suspend_or_panic();
+    let suspended_a = context_a;
 
     let mut context_b = imgui::Context::create();
     prepare_context(&mut context_b);
@@ -997,9 +987,7 @@ fn feedback_from_a_foreign_context_is_rejected_before_registry_mutation() {
     invalid.extend(retry_all(&snapshot_b));
     assert!(matches!(
         snapshot_b.commit(invalid),
-        Err(imgui::render::SnapshotCommitError::InvalidFeedback(
-            imgui::render::RendererConsumerError::ForeignContext { .. }
-        ))
+        Err(imgui::FrameError::ForeignContext { .. })
     ));
     let progress = context_b.poll_snapshot_completions().unwrap();
     assert_eq!(progress.watermark(), 1);
@@ -1013,7 +1001,7 @@ fn feedback_from_a_foreign_context_is_rejected_before_registry_mutation() {
 
     drop(consumer_b);
     drop(context_b);
-    drop(suspended_a.activate().unwrap());
+    drop(suspended_a);
 }
 
 #[test]
@@ -1048,9 +1036,7 @@ fn stale_feedback_cannot_mutate_a_texture_in_a_reused_slot() {
     invalid.extend(retry_all(&replacement));
     assert!(matches!(
         replacement.commit(invalid),
-        Err(imgui::render::SnapshotCommitError::InvalidFeedback(
-            imgui::render::RendererConsumerError::FeedbackNotRequested { .. }
-        ))
+        Err(imgui::FrameError::FeedbackNotRequested { .. })
     ));
     let progress = ctx.poll_snapshot_completions().unwrap();
     assert_eq!(progress.abandoned(), 1);
@@ -1081,11 +1067,11 @@ fn removal_during_a_frame_keeps_submitted_geometry_and_pixels_until_the_next_fra
     ctx.remove_texture(id).unwrap();
     assert_eq!(
         ctx.with_texture(id, |_| ()),
-        Err(imgui::ManagedTextureError::Retiring(id))
+        Err(imgui::TextureError::Retiring(id))
     );
     assert_eq!(
         ctx.remove_texture(id),
-        Err(imgui::ManagedTextureError::AlreadyRetiring(id))
+        Err(imgui::TextureError::AlreadyRetiring(id))
     );
 
     let first = ctx.render_snapshot(&consumer).unwrap();
@@ -1106,7 +1092,7 @@ fn removal_during_a_frame_keeps_submitted_geometry_and_pixels_until_the_next_fra
     ctx.poll_snapshot_completions().unwrap();
     assert_eq!(
         ctx.with_texture(id, |_| ()),
-        Err(imgui::ManagedTextureError::AlreadyRemoved(id))
+        Err(imgui::TextureError::AlreadyRemoved(id))
     );
 }
 
@@ -1148,7 +1134,7 @@ fn remove_after_capture_waits_for_create_then_matching_destroy_completion() {
     ctx.poll_snapshot_completions().unwrap();
     assert_eq!(
         ctx.with_texture(texture_id, |_| ()),
-        Err(imgui::ManagedTextureError::Retiring(texture_id))
+        Err(imgui::TextureError::Retiring(texture_id))
     );
 
     let destroy = ctx.begin_frame().render_snapshot(&consumer).unwrap();
@@ -1157,7 +1143,7 @@ fn remove_after_capture_waits_for_create_then_matching_destroy_completion() {
     ctx.poll_snapshot_completions().unwrap();
     assert_eq!(
         ctx.with_texture(texture_id, |_| ()),
-        Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))
+        Err(imgui::TextureError::AlreadyRemoved(texture_id))
     );
 }
 
@@ -1167,7 +1153,7 @@ fn foreign_consumer_is_rejected_before_capture() {
     let mut context_a = imgui::Context::create();
     prepare_context(&mut context_a);
     let consumer_a = context_a.create_detached_renderer_consumer().unwrap();
-    let suspended_a = context_a.suspend_or_panic();
+    let suspended_a = context_a;
 
     let mut context_b = imgui::Context::create();
     prepare_context(&mut context_b);
@@ -1177,9 +1163,7 @@ fn foreign_consumer_is_rejected_before_capture() {
     frame.ui().image(texture_id, [16.0, 16.0]);
     assert!(matches!(
         frame.render_snapshot(&consumer_a),
-        Err(imgui::render::SnapshotError::Consumer(
-            imgui::render::RendererConsumerError::ForeignContext { .. }
-        ))
+        Err(imgui::FrameError::ForeignContext { .. })
     ));
     assert_eq!(
         context_b.frame_lifecycle_state(),
@@ -1188,16 +1172,12 @@ fn foreign_consumer_is_rejected_before_capture() {
     context_b.frame().image(texture_id, [16.0, 16.0]);
     assert!(matches!(
         context_b.render_snapshot(&consumer_a),
-        Err(imgui::render::SnapshotError::Consumer(
-            imgui::render::RendererConsumerError::ForeignContext { .. }
-        ))
+        Err(imgui::FrameError::ForeignContext { .. })
     ));
     #[cfg(feature = "multi-viewport")]
     assert!(matches!(
         context_b.render_platform_viewport_snapshot(&consumer_a),
-        Err(imgui::render::SnapshotError::Consumer(
-            imgui::render::RendererConsumerError::ForeignContext { .. }
-        ))
+        Err(imgui::FrameError::ForeignContext { .. })
     ));
     assert_eq!(
         context_b.frame_lifecycle_state(),
@@ -1216,7 +1196,7 @@ fn foreign_consumer_is_rejected_before_capture() {
     ));
     drop(snapshot);
     drop(context_b);
-    drop(suspended_a.activate().unwrap());
+    drop(suspended_a);
 }
 
 #[test]
@@ -1231,7 +1211,7 @@ fn context_drop_closes_completion_without_cross_thread_panic() {
     drop(ctx);
     assert_eq!(
         snapshot.commit(feedback),
-        Err(imgui::render::SnapshotCommitError::ContextDropped)
+        Err(imgui::FrameError::ContextDropped)
     );
 }
 
@@ -1251,16 +1231,12 @@ fn replacement_consumer_recreates_textures_before_using_a_new_renderer_namespace
     #[cfg(feature = "multi-viewport")]
     assert!(matches!(
         ctx.platform_viewport_snapshot(&replacement),
-        Err(imgui::render::SnapshotError::Consumer(
-            imgui::render::RendererConsumerError::RendererTextureResetRequired
-        ))
+        Err(imgui::FrameError::RendererTextureResetRequired)
     ));
     ctx.frame().image(id, [16.0; 2]);
     assert!(matches!(
         ctx.render_snapshot(&replacement),
-        Err(imgui::render::SnapshotError::Consumer(
-            imgui::render::RendererConsumerError::RendererTextureResetRequired
-        ))
+        Err(imgui::FrameError::RendererTextureResetRequired)
     ));
     ctx.prepare_renderer_texture_reset(&replacement)
         .unwrap()
@@ -1272,11 +1248,88 @@ fn replacement_consumer_recreates_textures_before_using_a_new_renderer_namespace
 }
 
 #[test]
+fn confirmed_renderer_drop_waits_for_the_last_epoch_before_admitting_a_replacement() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let id = ctx.register_texture(owned_texture());
+    let renderer = ctx.create_detached_renderer_consumer().unwrap();
+    let reset = renderer.reset_signal();
+    let pending = ctx.begin_frame().render_snapshot(&renderer).unwrap();
+    let feedback = acknowledge_all(&pending, 41);
+
+    reset.mark_renderer_dropped();
+    drop(renderer);
+    assert!(matches!(
+        ctx.create_detached_renderer_consumer(),
+        Err(imgui::FrameError::ConsumerDraining)
+    ));
+
+    pending.commit(feedback).unwrap();
+    let replacement = ctx.create_detached_renderer_consumer().unwrap();
+    ctx.with_texture(id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert!(texture.texture_id().is_null());
+    })
+    .unwrap();
+    let next = ctx.begin_frame().render_snapshot(&replacement).unwrap();
+    assert!(matches!(
+        request_for(&next, id).operation(),
+        imgui::render::TextureOp::Create { pixels, .. } if pixels.len() == 16
+    ));
+    let feedback = acknowledge_all(&next, 100);
+    next.commit(feedback).unwrap();
+    ctx.poll_snapshot_completions().unwrap();
+
+    reset.mark_renderer_dropped();
+    ctx.poll_snapshot_completions().unwrap();
+    ctx.with_texture(id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::OK)
+    })
+    .unwrap();
+}
+
+#[test]
+fn context_drop_applies_the_confirmed_reset_before_releasing_a_shared_atlas() {
+    let _guard = test_guard();
+    let atlas = imgui::SharedFontAtlas::create();
+    let mut ctx = imgui::Context::create_with_shared_font_atlas(atlas.clone());
+    prepare_context(&mut ctx);
+    let renderer = ctx.create_detached_renderer_consumer().unwrap();
+    let frame = ctx.begin_frame();
+    frame.ui().text("managed atlas");
+    let snapshot = frame.render_snapshot(&renderer).unwrap();
+    assert!(snapshot.texture_requests().iter().any(|request| matches!(
+        request.texture(),
+        imgui::render::SnapshotTextureId::FontAtlas { .. }
+    )));
+    let feedback = acknowledge_all(&snapshot, 41);
+    snapshot.commit(feedback).unwrap();
+    renderer.reset_signal().mark_renderer_dropped();
+    drop(renderer);
+    drop(ctx);
+
+    let _replacement = imgui::Context::try_create_with_shared_font_atlas(atlas)
+        .expect("the previous renderer released the shared atlas bindings");
+}
+
+#[test]
+fn renderer_reset_signal_can_outlive_its_context() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    let renderer = ctx.create_synchronous_renderer_consumer().unwrap();
+    let reset = renderer.reset_signal();
+    drop(ctx);
+    reset.mark_renderer_dropped();
+    drop(renderer);
+}
+
+#[test]
 fn foreign_reset_leaves_committed_feedback_for_its_owner() {
     let _guard = test_guard();
     let mut other = imgui::Context::create();
     let foreign = other.create_detached_renderer_consumer().unwrap();
-    let _other = other.suspend_or_panic();
+    let _other = other;
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
     let owner = ctx.create_detached_renderer_consumer().unwrap();
@@ -1285,7 +1338,7 @@ fn foreign_reset_leaves_committed_feedback_for_its_owner() {
     snapshot.commit(feedback).unwrap();
     assert!(matches!(
         ctx.prepare_renderer_texture_reset(&foreign),
-        Err(imgui::render::RendererConsumerError::ForeignContext { .. })
+        Err(imgui::FrameError::ForeignContext { .. })
     ));
     assert_eq!(ctx.poll_snapshot_completions().unwrap().committed(), 1);
 }
@@ -1300,7 +1353,7 @@ fn renderer_reset_rejects_an_outstanding_detached_epoch() {
 
     assert!(matches!(
         ctx.prepare_renderer_texture_reset(&consumer),
-        Err(imgui::render::RendererConsumerError::OutstandingEpochs { count: 1 })
+        Err(imgui::FrameError::OutstandingEpochs { count: 1 })
     ));
     drop(snapshot);
     ctx.poll_snapshot_completions().unwrap();
@@ -1537,7 +1590,7 @@ fn removing_an_unconfirmed_staged_create_keeps_destroy_pending_until_acknowledge
     ctx.remove_texture(id).unwrap();
     assert_eq!(
         ctx.with_texture(id, |_| ()),
-        Err(imgui::ManagedTextureError::Retiring(id))
+        Err(imgui::TextureError::Retiring(id))
     );
     let destroy = ctx.begin_frame().render_snapshot(&consumer).unwrap();
     assert_eq!(
@@ -1548,7 +1601,7 @@ fn removing_an_unconfirmed_staged_create_keeps_destroy_pending_until_acknowledge
     ctx.poll_snapshot_completions().unwrap();
     assert_eq!(
         ctx.with_texture(id, |_| ()),
-        Err(imgui::ManagedTextureError::Retiring(id))
+        Err(imgui::TextureError::Retiring(id))
     );
 
     let retry = ctx.begin_frame().render_snapshot(&consumer).unwrap();
@@ -1561,7 +1614,7 @@ fn removing_an_unconfirmed_staged_create_keeps_destroy_pending_until_acknowledge
     ctx.poll_snapshot_completions().unwrap();
     assert_eq!(
         ctx.with_texture(id, |_| ()),
-        Err(imgui::ManagedTextureError::Retiring(id))
+        Err(imgui::TextureError::Retiring(id))
     );
 
     let latest = ctx.begin_frame().render_snapshot(&consumer).unwrap();
@@ -1574,7 +1627,7 @@ fn removing_an_unconfirmed_staged_create_keeps_destroy_pending_until_acknowledge
     ctx.poll_snapshot_completions().unwrap();
     assert_eq!(
         ctx.with_texture(id, |_| ()),
-        Err(imgui::ManagedTextureError::AlreadyRemoved(id))
+        Err(imgui::TextureError::AlreadyRemoved(id))
     );
 }
 

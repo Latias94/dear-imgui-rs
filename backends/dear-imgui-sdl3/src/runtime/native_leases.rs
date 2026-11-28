@@ -139,6 +139,22 @@ impl Sdl3NativeWindowLease {
     }
 }
 
+/// Keeps an SDL window and its current native parents alive for an idle graphics surface.
+///
+/// Acquire a [`Sdl3NativeWindowLease`] separately when rendering or presenting needs to
+/// hold the parent chain fixed. Drop the surface before releasing this lease.
+#[doc(hidden)]
+pub struct Sdl3SurfaceWindowLease(Rc<NativeWindowAllocation>);
+
+impl Sdl3SurfaceWindowLease {
+    /// Borrows the SDL window on its owner thread for surface creation.
+    pub fn as_ptr(&self) -> *mut SDL_Window {
+        self.0.pointer
+    }
+}
+
+type NativeWindowLeaseChain = (Sdl3WindowSnapshot, Vec<Rc<NativeWindowAllocation>>);
+
 impl RuntimeControl {
     pub(crate) fn record_native_window_owner_unavailable(&self) {
         self.record_fault(RuntimeFault::NativeWindowLeaseUnavailable);
@@ -200,10 +216,10 @@ impl RuntimeControl {
         true
     }
 
-    pub(crate) fn acquire_native_window_lease(
+    fn native_window_allocations_for_lease(
         &self,
         instance_id: NativeWindowInstanceId,
-    ) -> Result<Option<Sdl3NativeWindowLease>, Sdl3BackendError> {
+    ) -> Result<Option<NativeWindowLeaseChain>, Sdl3BackendError> {
         self.with_window_query(|| {
             let address = self
                 .owned_viewports
@@ -258,24 +274,34 @@ impl RuntimeControl {
                 allocations.push(allocation);
                 current = parent;
             }
-            let mut owner = None;
-            for allocation in allocations.into_iter().rev() {
-                let next = allocation
-                    .work_pins
-                    .get()
-                    .checked_add(1)
-                    .ok_or(Sdl3BackendError::NativeWindowLeaseUnavailable)?;
-                allocation.work_pins.set(next);
-                owner = Some(Box::new(NativeWindowPin { allocation, owner }));
-            }
-            let Some(pin) = owner else {
-                return Err(Sdl3BackendError::NativeWindowLeaseUnavailable);
-            };
-            Ok(Some(Sdl3NativeWindowLease {
-                snapshot,
-                pin: Rc::from(pin),
-            }))
+            Ok(Some((snapshot, allocations)))
         })?
+    }
+
+    pub(crate) fn acquire_native_window_lease(
+        &self,
+        instance_id: NativeWindowInstanceId,
+    ) -> Result<Option<Sdl3NativeWindowLease>, Sdl3BackendError> {
+        let Some((snapshot, allocations)) =
+            self.native_window_allocations_for_lease(instance_id)?
+        else {
+            return Ok(None);
+        };
+        let mut owner = None;
+        for allocation in allocations.into_iter().rev() {
+            let next = allocation
+                .work_pins
+                .get()
+                .checked_add(1)
+                .ok_or(Sdl3BackendError::NativeWindowLeaseUnavailable)?;
+            allocation.work_pins.set(next);
+            owner = Some(Box::new(NativeWindowPin { allocation, owner }));
+        }
+        let pin = owner.ok_or(Sdl3BackendError::NativeWindowLeaseUnavailable)?;
+        Ok(Some(Sdl3NativeWindowLease {
+            snapshot,
+            pin: Rc::from(pin),
+        }))
     }
 
     pub(crate) unsafe fn defer_native_window_destruction(
@@ -345,6 +371,24 @@ impl RuntimeControl {
 }
 
 impl Sdl3ViewportRendererAdapter {
+    /// Retains the exact native window for the lifetime of a surface and allows reparenting.
+    pub fn acquire_surface_window_lease(
+        &self,
+        instance_id: NativeWindowInstanceId,
+    ) -> Result<Option<Sdl3SurfaceWindowLease>, Sdl3BackendError> {
+        let Some((_, allocations)) = self
+            .control
+            .native_window_allocations_for_lease(instance_id)?
+        else {
+            return Ok(None);
+        };
+        let window = allocations
+            .into_iter()
+            .next()
+            .ok_or(Sdl3BackendError::NativeWindowLeaseUnavailable)?;
+        Ok(Some(Sdl3SurfaceWindowLease(window)))
+    }
+
     /// Pins the exact native allocation and its validated native owner chain for renderer work.
     pub fn acquire_native_window_lease(
         &self,

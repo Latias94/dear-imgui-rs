@@ -5,6 +5,17 @@ fn with_native_window<R>(callback: impl FnOnce(&sdl3::video::Window) -> R) -> R 
 }
 
 fn with_video_driver<R>(driver: &str, callback: impl FnOnce(&sdl3::video::Window) -> R) -> R {
+    with_video(driver, |video| {
+        let window = video
+            .window("SDL3 native registration test", 80, 60)
+            .hidden()
+            .build()
+            .unwrap();
+        callback(&window)
+    })
+}
+
+fn with_video<R>(driver: &str, callback: impl FnOnce(&sdl3::VideoSubsystem) -> R) -> R {
     struct DriverHintRestore(Option<String>);
     impl Drop for DriverHintRestore {
         fn drop(&mut self) {
@@ -28,12 +39,118 @@ fn with_video_driver<R>(driver: &str, callback: impl FnOnce(&sdl3::video::Window
     ));
     let sdl = sdl3::init().unwrap();
     let video = sdl.video().unwrap();
-    let window = video
-        .window("SDL3 native registration test", 80, 60)
-        .hidden()
-        .build()
-        .unwrap();
-    callback(&window)
+    callback(&video)
+}
+
+#[test]
+fn platform_sessions_route_window_events_cursor_and_text_input() {
+    use sdl3_sys::{
+        keyboard::{SDL_GetKeyboardFocus, SDL_TextInputActive},
+        mouse::{SDL_CursorVisible, SDL_GetMouseFocus},
+    };
+
+    fn request_text_input(context: &Context) {
+        context.binding().with_bound_context(|| unsafe {
+            let platform = sys::igGetPlatformIO_Nil();
+            let mut request = sys::ImGuiPlatformImeData {
+                WantTextInput: true,
+                ..Default::default()
+            };
+            (*platform).Platform_SetImeDataFn.unwrap()(
+                sys::igGetCurrentContext(),
+                sys::igGetMainViewport(),
+                &mut request,
+            );
+        });
+    }
+
+    let _guard = crate::tests::test_guard();
+    with_video("dummy", |video| {
+        let mut window_a = video.window("Context A", 80, 60).hidden().build().unwrap();
+        let mut window_b = video.window("Context B", 80, 60).hidden().build().unwrap();
+        let mut context_a = Context::create();
+        let mut context_b = Context::create();
+        let mut platform_a =
+            unsafe { crate::Sdl3PlatformBackend::init_for_other(&mut context_a, &window_a) }
+                .unwrap();
+        assert!(matches!(
+            unsafe { crate::Sdl3PlatformBackend::init_for_other(&mut context_b, &window_a) },
+            Err(Sdl3BackendError::PlatformWindowOccupied { window_id }) if window_id == window_a.id()
+        ));
+        let mut platform_b =
+            unsafe { crate::Sdl3PlatformBackend::init_for_other(&mut context_b, &window_b) }
+                .unwrap();
+
+        let event = sdl3::event::Event::TextInput {
+            timestamp: 0,
+            window_id: window_b.id(),
+            text: "B".into(),
+        };
+        assert!(!platform_a.process_event(&mut context_a, &event).unwrap());
+        assert!(platform_b.process_event(&mut context_b, &event).unwrap());
+        assert!(platform_a.window_snapshot(window_b.id()).unwrap().is_none());
+        assert!(platform_b.window_snapshot(window_a.id()).unwrap().is_none());
+
+        assert!(window_a.show());
+        assert_eq!(unsafe { SDL_GetKeyboardFocus() }, window_a.raw());
+        assert_eq!(unsafe { SDL_GetMouseFocus() }, window_a.raw());
+        context_a.io_mut().set_mouse_draw_cursor(true);
+        platform_a.new_frame(&mut context_a).unwrap();
+        assert!(!unsafe { SDL_CursorVisible() });
+        platform_b.new_frame(&mut context_b).unwrap();
+        assert!(!unsafe { SDL_CursorVisible() });
+        request_text_input(&context_b);
+        assert!(!unsafe { SDL_TextInputActive(window_a.raw()) });
+        request_text_input(&context_a);
+        assert!(unsafe { SDL_TextInputActive(window_a.raw()) });
+
+        assert!(window_b.show());
+        assert_eq!(unsafe { SDL_GetKeyboardFocus() }, window_b.raw());
+        assert_eq!(unsafe { SDL_GetMouseFocus() }, window_b.raw());
+        platform_b.new_frame(&mut context_b).unwrap();
+        assert!(unsafe { SDL_CursorVisible() });
+        assert!(unsafe { SDL_TextInputActive(window_b.raw()) });
+        assert!(!unsafe { SDL_TextInputActive(window_a.raw()) });
+        platform_a.shutdown(&mut context_a).unwrap();
+        assert!(unsafe { SDL_CursorVisible() });
+        assert!(unsafe { SDL_TextInputActive(window_b.raw()) });
+        assert!(platform_b.process_event(&mut context_b, &event).unwrap());
+        platform_b.shutdown(&mut context_b).unwrap();
+        assert!(!unsafe { SDL_TextInputActive(window_b.raw()) });
+    });
+}
+
+#[test]
+fn platform_sessions_retain_sdl_video_until_the_last_host_is_released() {
+    use sdl3_sys::init::{SDL_INIT_VIDEO, SDL_InitFlags, SDL_WasInit};
+
+    let _guard = crate::tests::test_guard();
+    let (window_a, window_b) = with_video("dummy", |video| {
+        (
+            video.window("Context A", 80, 60).hidden().build().unwrap(),
+            video.window("Context B", 80, 60).hidden().build().unwrap(),
+        )
+    });
+    let mut context_a = Context::create();
+    let mut context_b = Context::create();
+    let mut platform_a =
+        unsafe { crate::Sdl3PlatformBackend::init_for_other(&mut context_a, &window_a) }.unwrap();
+    let mut platform_b =
+        unsafe { crate::Sdl3PlatformBackend::init_for_other(&mut context_b, &window_b) }.unwrap();
+    let id_b = sdl3_sys::video::SDL_WindowID(window_b.id());
+    let raw_b = window_b.raw();
+    drop(window_a);
+    drop(window_b);
+
+    platform_a.shutdown(&mut context_a).unwrap();
+    assert_eq!(unsafe { SDL_WasInit(SDL_INIT_VIDEO) }, SDL_INIT_VIDEO);
+    assert_eq!(unsafe { sdl3_sys::video::SDL_GetWindowFromID(id_b) }, raw_b);
+    platform_b.new_frame(&mut context_b).unwrap();
+    platform_b.shutdown(&mut context_b).unwrap();
+    assert_eq!(
+        unsafe { SDL_WasInit(SDL_INIT_VIDEO) },
+        SDL_InitFlags::default()
+    );
 }
 
 #[test]
@@ -129,6 +246,71 @@ fn callback_drop_keeps_observed_registration_after_retirement_without_aliasing_r
 
 #[cfg(all(target_os = "windows", sdl3_native_self_test))]
 #[test]
+fn native_secondary_window_rejects_parent_from_another_session() {
+    let _guard = crate::tests::test_guard();
+    with_video("windows", |video| {
+        let window_a = video.window("Context A", 80, 60).hidden().build().unwrap();
+        let window_b = video.window("Context B", 80, 60).hidden().build().unwrap();
+        let mut context_a = Context::create();
+        let mut context_b = Context::create();
+        let mut platform_a =
+            unsafe { crate::Sdl3PlatformBackend::init_for_other(&mut context_a, &window_a) }
+                .unwrap();
+        let mut platform_b =
+            unsafe { crate::Sdl3PlatformBackend::init_for_other(&mut context_b, &window_b) }
+                .unwrap();
+        let foreign_parent = context_b
+            .binding()
+            .with_bound_context(|| unsafe { sys::igGetMainViewport() });
+        let binding_a = context_a.binding();
+        let child = binding_a.with_bound_context(|| unsafe {
+            let child = crate::core::ffi::dear_imgui_sdl3_create_live_viewport_for_test(0x610003);
+            assert!(!child.is_null());
+            create_window_callback_for_test(child);
+            // Match UpdatePlatformWindows so normal shutdown dispatches the destroy callback.
+            (*child).PlatformWindowCreated = true;
+            child
+        });
+        let before = platform_a
+            .window_snapshot_for_viewport(dear_imgui_rs::Id::from(0x610003))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            before.state.native_owner.unwrap().unwrap().window_id,
+            window_a.id()
+        );
+        binding_a.with_bound_context(|| unsafe {
+            (*child).ParentViewport = foreign_parent;
+            (*sys::igGetPlatformIO_Nil()).Platform_UpdateWindow.unwrap()(child);
+            (*child).ParentViewport = sys::igGetMainViewport();
+            let window = sdl3_sys::video::SDL_GetWindowFromID(sdl3_sys::video::SDL_WindowID(
+                before.window_id,
+            ));
+            assert_eq!(sdl3_sys::video::SDL_GetWindowParent(window), window_a.raw());
+        });
+        let faults = platform_a.drain_faults();
+        assert!(
+            matches!(
+                faults.as_slice(),
+                [Sdl3BackendError::PlatformStateReplaced {
+                    field: "Viewport.ParentViewport"
+                }]
+            ),
+            "unexpected parent validation faults: {faults:?}"
+        );
+        platform_a.shutdown(&mut context_a).unwrap();
+        let child_id = sdl3_sys::video::SDL_WindowID(before.window_id);
+        assert!(unsafe { sdl3_sys::video::SDL_GetWindowFromID(child_id) }.is_null());
+        binding_a.with_bound_context(|| unsafe {
+            crate::core::ffi::dear_imgui_sdl3_delete_live_viewport_for_test(child);
+        });
+        assert!(platform_b.window_snapshot(window_b.id()).unwrap().is_some());
+        platform_b.shutdown(&mut context_b).unwrap();
+    });
+}
+
+#[cfg(all(target_os = "windows", sdl3_native_self_test))]
+#[test]
 fn native_lease_freezes_owner_changes_and_parent_retirement_does_not_destroy_child() {
     let _guard = crate::tests::test_guard();
     with_video_driver("windows", |window| {
@@ -161,6 +343,10 @@ fn native_lease_freezes_owner_changes_and_parent_retirement_does_not_destroy_chi
             .unwrap();
         let child_snapshot = backend
             .window_snapshot_for_viewport(dear_imgui_rs::Id::from(0x610002))
+            .unwrap()
+            .unwrap();
+        let surface_lease = adapter
+            .acquire_surface_window_lease(child_snapshot.target.instance_id)
             .unwrap()
             .unwrap();
         let lease = adapter
@@ -203,7 +389,17 @@ fn native_lease_freezes_owner_changes_and_parent_retirement_does_not_destroy_chi
         });
         assert!(unsafe { sdl3_sys::video::SDL_GetWindowFromID(parent_id) }.is_null());
         assert!(!unsafe { sdl3_sys::video::SDL_GetWindowFromID(child_id) }.is_null());
+        assert_eq!(
+            unsafe { sdl3_sys::video::SDL_GetWindowParent(surface_lease.as_ptr()) },
+            window.raw(),
+        );
+        assert!(backend.drain_faults().is_empty());
         drop(child);
+        assert_eq!(
+            unsafe { sdl3_sys::video::SDL_GetWindowFromID(child_id) },
+            surface_lease.as_ptr(),
+        );
+        drop(surface_lease);
         assert!(unsafe { sdl3_sys::video::SDL_GetWindowFromID(child_id) }.is_null());
         backend.shutdown(&mut context).unwrap();
     });
@@ -638,7 +834,6 @@ fn window_queries_follow_hidden_live_viewports_and_id_remaps_without_consuming_f
             [Sdl3BackendError::ViewportCreationFailed]
         ));
 
-        let suspended = context.suspend_or_panic();
         let other = Context::create();
         let foreign = NativeWindowInstanceId::allocate(other.id()).unwrap();
         assert!(
@@ -656,7 +851,6 @@ fn window_queries_follow_hidden_live_viewports_and_id_remaps_without_consuming_f
                 .is_none()
         );
         drop(other);
-        let mut context = suspended.activate().unwrap();
         backend.shutdown(&mut context).unwrap();
     });
 }
@@ -672,8 +866,10 @@ fn secondary_window_callback_recreation_retires_the_previous_registration() {
         Rc::new(Cell::new(0)),
         synthetic_create_window,
     );
-    let mut viewport = sys::ImGuiViewport::default();
-    viewport.ID = 41;
+    let mut viewport = sys::ImGuiViewport {
+        ID: 41,
+        ..Default::default()
+    };
     let address = (&mut viewport) as *mut sys::ImGuiViewport as usize;
     let create = |viewport: &mut sys::ImGuiViewport| {
         context

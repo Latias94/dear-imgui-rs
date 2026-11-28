@@ -666,10 +666,6 @@ fn context_key(context_id: ContextId) -> u64 {
     context_id.get().get()
 }
 
-pub(super) fn optional_context_key(context_id: Option<ContextId>) -> Option<u64> {
-    context_id.map(context_key)
-}
-
 fn valid_rect(rect: Rect) -> bool {
     finite_vec2(rect.min)
         && finite_vec2(rect.max)

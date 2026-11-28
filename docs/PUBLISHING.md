@@ -1,6 +1,6 @@
 # Publishing Guide
 
-The workspace uses one release train: all 29 publishable crates inherit `workspace.package.version` and must be published together. Examples, the web demo, and `xtask` are not published.
+All 30 publishable crates inherit `workspace.package.version` and ship together. Examples, the web demo, and `xtask` are private workspace packages.
 
 ## One-time setup
 
@@ -8,7 +8,7 @@ The release workflow uses crates.io Trusted Publishing. It does not store a crat
 
 1. Create a protected GitHub Environment named `release`.
 2. Require maintainer approval for that environment and restrict deployments to `main`.
-3. For each of the 29 crates on crates.io, add the same GitHub Trusted Publisher configuration: repository owner `Latias94`, repository `dear-imgui-rs`, workflow `release.yml`, environment `release`.
+3. Add the same GitHub Trusted Publisher configuration for all 30 crates. Use owner `Latias94`, repository `dear-imgui-rs`, workflow `release.yml`, and environment `release`.
 
 The repository workflow token defaults to read-only. The protected crates.io job receives `id-token: write` and `contents: write` so it can reserve the exact tag before the first upload. The final GitHub Release job receives `contents: write` to publish the verified assets.
 
@@ -24,9 +24,9 @@ rustup toolchain install 1.100.0 --profile minimal --component rustfmt --compone
 rustup toolchain install 1.95.0 --profile minimal --component rustfmt
 ```
 
-The binding updater and pre-publication checks explicitly run Rust 1.95.0
-and its rustfmt, independently of the workspace development toolchain or a
-parent `RUSTUP_TOOLCHAIN` setting. Keep the canonical LLVM version available
+The binding updater and pre-publication checks build `xtask` with the workspace
+toolchain. `xtask` explicitly selects the Rust 1.95.0 formatter for canonical
+bindings. Keep the canonical LLVM version available
 through `LIBCLANG_PATH` when regenerating bindings (LLVM 14.0.0 in Linux CI).
 Install `cargo-nextest`, add the `wasm32-unknown-unknown` target, and activate
 Emscripten 7.0.1 for the packaged WASM-provider gate:
@@ -76,10 +76,10 @@ The workflow binds the tag to the workspace version and the exact `main` commit 
 3. Enters the protected `release` environment and atomically creates or
    verifies the exact candidate tag before publishing any crate.
 4. Obtains a short-lived crates.io OIDC token and publishes the complete
-   29-crate dependency train, automatically skipping an
+   30-crate dependency train, automatically skipping an
    exact version only when its published Cargo archive records the same clean
    candidate commit.
-5. Confirms that all 29 exact versions are available through crates.io and
+5. Confirms that all 30 exact versions are available through crates.io and
    Cargo.
 6. Generates deterministic `SHA256SUMS`, validates every existing Release
    asset by name and GitHub-computed digest, and lets the release action upload

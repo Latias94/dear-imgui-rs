@@ -1,31 +1,40 @@
 use super::*;
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(super) fn guard_viewport_callback<R: Copy>(fallback: R, callback: impl FnOnce() -> R) -> R {
+    imgui::ffi::guard_native_callback(fallback, callback, || {
+        unsafe {
+            latch_current_viewport_runtime_fault(ImguiViewportRuntimeError::CallbackPanicked)
+        };
+    })
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) unsafe extern "C" fn platform_create_window_raw_callback(
     viewport: *mut sys::ImGuiViewport,
 ) {
-    unsafe { platform_create_window(viewport.cast()) };
+    guard_viewport_callback((), || unsafe { platform_create_window(viewport.cast()) });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) unsafe extern "C" fn platform_destroy_window_raw_callback(
     viewport: *mut sys::ImGuiViewport,
 ) {
-    unsafe { platform_destroy_window(viewport.cast()) };
+    guard_viewport_callback((), || unsafe { platform_destroy_window(viewport.cast()) });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) unsafe extern "C" fn platform_show_window_raw_callback(
     viewport: *mut sys::ImGuiViewport,
 ) {
-    unsafe { platform_show_window(viewport.cast()) };
+    guard_viewport_callback((), || unsafe { platform_show_window(viewport.cast()) });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) unsafe extern "C" fn platform_update_window_raw_callback(
     viewport: *mut sys::ImGuiViewport,
 ) {
-    unsafe { platform_update_window(viewport.cast()) };
+    guard_viewport_callback((), || unsafe { platform_update_window(viewport.cast()) });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -33,10 +42,12 @@ pub(super) unsafe extern "C" fn platform_set_window_pos_raw_callback(
     viewport: *mut sys::ImGuiViewport,
     pos: *const sys::ImVec2,
 ) {
-    let Some(pos) = (unsafe { pos.as_ref() }) else {
-        return;
-    };
-    unsafe { platform_set_window_pos(viewport.cast(), *pos) };
+    guard_viewport_callback((), || {
+        let Some(pos) = (unsafe { pos.as_ref() }) else {
+            return;
+        };
+        unsafe { platform_set_window_pos(viewport.cast(), *pos) };
+    });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -44,17 +55,19 @@ pub(super) unsafe extern "C" fn platform_set_window_size_raw_callback(
     viewport: *mut sys::ImGuiViewport,
     size: *const sys::ImVec2,
 ) {
-    let Some(size) = (unsafe { size.as_ref() }) else {
-        return;
-    };
-    unsafe { platform_set_window_size(viewport.cast(), *size) };
+    guard_viewport_callback((), || {
+        let Some(size) = (unsafe { size.as_ref() }) else {
+            return;
+        };
+        unsafe { platform_set_window_size(viewport.cast(), *size) };
+    });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) unsafe extern "C" fn platform_set_window_focus_raw_callback(
     viewport: *mut sys::ImGuiViewport,
 ) {
-    unsafe { platform_set_window_focus(viewport.cast()) };
+    guard_viewport_callback((), || unsafe { platform_set_window_focus(viewport.cast()) });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -62,7 +75,9 @@ pub(super) unsafe extern "C" fn platform_set_window_title_raw_callback(
     viewport: *mut sys::ImGuiViewport,
     title: *const std::ffi::c_char,
 ) {
-    unsafe { platform_set_window_title(viewport.cast(), title) };
+    guard_viewport_callback((), || unsafe {
+        platform_set_window_title(viewport.cast(), title)
+    });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -70,7 +85,9 @@ pub(super) unsafe extern "C" fn platform_get_window_pos_raw_callback(
     viewport: *mut sys::ImGuiViewport,
     out_pos: *mut sys::ImVec2,
 ) {
-    unsafe { platform_get_window_pos(viewport.cast(), out_pos) };
+    guard_viewport_callback((), || unsafe {
+        platform_get_window_pos(viewport.cast(), out_pos)
+    });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -78,7 +95,9 @@ pub(super) unsafe extern "C" fn platform_get_window_size_raw_callback(
     viewport: *mut sys::ImGuiViewport,
     out_size: *mut sys::ImVec2,
 ) {
-    unsafe { platform_get_window_size(viewport.cast(), out_size) };
+    guard_viewport_callback((), || unsafe {
+        platform_get_window_size(viewport.cast(), out_size)
+    });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -86,28 +105,36 @@ pub(super) unsafe extern "C" fn platform_get_window_framebuffer_scale_raw_callba
     viewport: *mut sys::ImGuiViewport,
     out_scale: *mut sys::ImVec2,
 ) {
-    unsafe { platform_get_window_framebuffer_scale(viewport.cast(), out_scale) };
+    guard_viewport_callback((), || unsafe {
+        platform_get_window_framebuffer_scale(viewport.cast(), out_scale)
+    });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) unsafe extern "C" fn platform_get_window_dpi_scale_raw_callback(
     viewport: *mut sys::ImGuiViewport,
 ) -> f32 {
-    unsafe { platform_get_window_dpi_scale(viewport.cast()) }
+    guard_viewport_callback(1.0, || unsafe {
+        platform_get_window_dpi_scale(viewport.cast())
+    })
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) unsafe extern "C" fn platform_get_window_focus_raw_callback(
     viewport: *mut sys::ImGuiViewport,
 ) -> bool {
-    unsafe { platform_get_window_focus(viewport.cast()) }
+    guard_viewport_callback(false, || unsafe {
+        platform_get_window_focus(viewport.cast())
+    })
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) unsafe extern "C" fn platform_get_window_minimized_raw_callback(
     viewport: *mut sys::ImGuiViewport,
 ) -> bool {
-    unsafe { platform_get_window_minimized(viewport.cast()) }
+    guard_viewport_callback(false, || unsafe {
+        platform_get_window_minimized(viewport.cast())
+    })
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -183,7 +210,7 @@ unsafe fn observe_callback_viewport(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe extern "C" fn platform_create_window(viewport: *mut imgui::Viewport) {
+unsafe fn platform_create_window(viewport: *mut imgui::Viewport) {
     let Some(viewport) = (unsafe { viewport.as_mut() }) else {
         return;
     };
@@ -269,7 +296,7 @@ unsafe fn latch_current_viewport_runtime_fault(error: ImguiViewportRuntimeError)
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe extern "C" fn platform_destroy_window(viewport: *mut imgui::Viewport) {
+unsafe fn platform_destroy_window(viewport: *mut imgui::Viewport) {
     let Some(viewport) = (unsafe { viewport.as_mut() }) else {
         return;
     };
@@ -346,7 +373,7 @@ unsafe extern "C" fn platform_destroy_window(viewport: *mut imgui::Viewport) {
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-pub(super) unsafe extern "C" fn platform_show_window(viewport: *mut imgui::Viewport) {
+unsafe fn platform_show_window(viewport: *mut imgui::Viewport) {
     let Some(viewport) = (unsafe { viewport.as_ref() }) else {
         return;
     };
@@ -367,7 +394,7 @@ pub(super) unsafe extern "C" fn platform_show_window(viewport: *mut imgui::Viewp
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe extern "C" fn platform_update_window(viewport: *mut imgui::Viewport) {
+unsafe fn platform_update_window(viewport: *mut imgui::Viewport) {
     let Some(viewport) = (unsafe { viewport.as_ref() }) else {
         return;
     };
@@ -441,7 +468,7 @@ unsafe fn platform_set_window_size(viewport: *mut imgui::Viewport, size: sys::Im
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe extern "C" fn platform_set_window_focus(viewport: *mut imgui::Viewport) {
+unsafe fn platform_set_window_focus(viewport: *mut imgui::Viewport) {
     let Some(viewport) = (unsafe { viewport.as_ref() }) else {
         return;
     };
@@ -461,7 +488,7 @@ unsafe extern "C" fn platform_set_window_focus(viewport: *mut imgui::Viewport) {
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe extern "C" fn platform_set_window_title(
+unsafe fn platform_set_window_title(
     viewport: *mut imgui::Viewport,
     title: *const std::ffi::c_char,
 ) {
@@ -494,10 +521,7 @@ unsafe extern "C" fn platform_set_window_title(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe extern "C" fn platform_get_window_pos(
-    viewport: *mut imgui::Viewport,
-    out_pos: *mut sys::ImVec2,
-) {
+unsafe fn platform_get_window_pos(viewport: *mut imgui::Viewport, out_pos: *mut sys::ImVec2) {
     let Some(feedback) = feedback_for_viewport(viewport) else {
         return;
     };
@@ -511,10 +535,7 @@ unsafe extern "C" fn platform_get_window_pos(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe extern "C" fn platform_get_window_size(
-    viewport: *mut imgui::Viewport,
-    out_size: *mut sys::ImVec2,
-) {
+unsafe fn platform_get_window_size(viewport: *mut imgui::Viewport, out_size: *mut sys::ImVec2) {
     let Some(feedback) = feedback_for_viewport(viewport) else {
         return;
     };
@@ -528,7 +549,7 @@ unsafe extern "C" fn platform_get_window_size(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe extern "C" fn platform_get_window_framebuffer_scale(
+unsafe fn platform_get_window_framebuffer_scale(
     viewport: *mut imgui::Viewport,
     out_scale: *mut sys::ImVec2,
 ) {
@@ -547,7 +568,7 @@ unsafe extern "C" fn platform_get_window_framebuffer_scale(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe extern "C" fn platform_get_window_dpi_scale(viewport: *mut imgui::Viewport) -> f32 {
+unsafe fn platform_get_window_dpi_scale(viewport: *mut imgui::Viewport) -> f32 {
     feedback_for_viewport(viewport)
         .flatten()
         .map(|feedback| feedback.dpi_scale)
@@ -555,14 +576,14 @@ unsafe extern "C" fn platform_get_window_dpi_scale(viewport: *mut imgui::Viewpor
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe extern "C" fn platform_get_window_focus(viewport: *mut imgui::Viewport) -> bool {
+unsafe fn platform_get_window_focus(viewport: *mut imgui::Viewport) -> bool {
     feedback_for_viewport(viewport)
         .flatten()
         .is_some_and(|feedback| feedback.focused)
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe extern "C" fn platform_get_window_minimized(viewport: *mut imgui::Viewport) -> bool {
+unsafe fn platform_get_window_minimized(viewport: *mut imgui::Viewport) -> bool {
     feedback_for_viewport(viewport)
         .flatten()
         .is_some_and(|feedback| feedback.minimized)

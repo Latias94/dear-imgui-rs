@@ -71,7 +71,7 @@ impl MemberSettings {
     pub fn try_numerics_f32_slider_0_to_1(
         &mut self,
         precision: u32,
-    ) -> Result<&mut Self, dear_imgui_rs::NumericFormatError> {
+    ) -> Result<&mut Self, dear_imgui_rs::ContextError> {
         let settings = F32NumericSettings::default().try_slider_0_to_1(precision)?;
         self.numerics_f32 = Some(settings);
         Ok(self)
@@ -82,7 +82,7 @@ impl MemberSettings {
     pub fn try_numerics_f32_slider_minus1_to_1(
         &mut self,
         precision: u32,
-    ) -> Result<&mut Self, dear_imgui_rs::NumericFormatError> {
+    ) -> Result<&mut Self, dear_imgui_rs::ContextError> {
         let settings = F32NumericSettings::default().try_slider_minus1_to_1(precision)?;
         self.numerics_f32 = Some(settings);
         Ok(self)
@@ -94,7 +94,7 @@ impl MemberSettings {
         &mut self,
         speed: f64,
         precision: u32,
-    ) -> Result<&mut Self, dear_imgui_rs::NumericFormatError> {
+    ) -> Result<&mut Self, dear_imgui_rs::ContextError> {
         let settings = F32NumericSettings::default().try_drag_with_speed(speed, precision)?;
         self.numerics_f32 = Some(settings);
         Ok(self)
@@ -105,7 +105,7 @@ impl MemberSettings {
     pub fn try_numerics_f32_percentage_slider_0_to_1(
         &mut self,
         precision: u32,
-    ) -> Result<&mut Self, dear_imgui_rs::NumericFormatError> {
+    ) -> Result<&mut Self, dear_imgui_rs::ContextError> {
         let settings = F32NumericSettings::default().try_percentage_slider_0_to_1(precision)?;
         self.numerics_f32 = Some(settings);
         Ok(self)
@@ -116,7 +116,7 @@ impl MemberSettings {
     pub fn try_numerics_f64_slider_0_to_1(
         &mut self,
         precision: u32,
-    ) -> Result<&mut Self, dear_imgui_rs::NumericFormatError> {
+    ) -> Result<&mut Self, dear_imgui_rs::ContextError> {
         let settings = F64NumericSettings::default().try_slider_0_to_1(precision)?;
         self.numerics_f64 = Some(settings);
         Ok(self)
@@ -127,7 +127,7 @@ impl MemberSettings {
     pub fn try_numerics_f64_slider_minus1_to_1(
         &mut self,
         precision: u32,
-    ) -> Result<&mut Self, dear_imgui_rs::NumericFormatError> {
+    ) -> Result<&mut Self, dear_imgui_rs::ContextError> {
         let settings = F64NumericSettings::default().try_slider_minus1_to_1(precision)?;
         self.numerics_f64 = Some(settings);
         Ok(self)
@@ -139,7 +139,7 @@ impl MemberSettings {
         &mut self,
         speed: f64,
         precision: u32,
-    ) -> Result<&mut Self, dear_imgui_rs::NumericFormatError> {
+    ) -> Result<&mut Self, dear_imgui_rs::ContextError> {
         let settings = F64NumericSettings::default().try_drag_with_speed(speed, precision)?;
         self.numerics_f64 = Some(settings);
         Ok(self)
@@ -150,7 +150,7 @@ impl MemberSettings {
     pub fn try_numerics_f64_percentage_slider_0_to_1(
         &mut self,
         precision: u32,
-    ) -> Result<&mut Self, dear_imgui_rs::NumericFormatError> {
+    ) -> Result<&mut Self, dear_imgui_rs::ContextError> {
         let settings = F64NumericSettings::default().try_percentage_slider_0_to_1(precision)?;
         self.numerics_f64 = Some(settings);
         Ok(self)

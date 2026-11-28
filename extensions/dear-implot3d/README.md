@@ -69,7 +69,7 @@ use dear_imgui_rs::Ui;
 use dear_implot3d::*;
 
 fn draw(ui: &Ui, context: &Plot3DContext) {
-    let plot_ui = context.get_plot_ui(ui);
+    let plot_ui = ui.implot3d(context);
     plot_ui.begin_plot("3D Demo").size([600.0, 400.0]).build_with_setup(
         |setup| {
             setup.setup_axes("X", "Y", "Z", Axis3DFlags::NONE, Axis3DFlags::NONE, Axis3DFlags::NONE);
@@ -88,6 +88,15 @@ Use `.build(|plot| { ... })` for a plot with default axes. With `.build_with_set
 closure receives `&Plot3DSetup` and the second receives `&Plot3DScope`. Submit each `Plot3D`
 item with `.plot(plot)` or `.try_plot(plot)`. Both builders return `None` when the plot is skipped.
 The builder ends each open plot in its original window and table cell, including on unwind.
+
+Axis limits must have a finite span and increasing endpoints. To draw a base-10 logarithmic
+axis, use `setup.setup_axis_log_limits(Axis3D::X, 1.0, 100.0)` in the setup closure. This fixes
+the axis limits for that submission. Custom ticks and limit constraints on that axis must also
+be positive.
+
+Strings containing NUL are rejected rather than truncated or replaced. A plot with an invalid
+title returns `None`, and built-in item `try_plot` methods report `Plot3DError::StringConversion`.
+Convenience drawing and setup methods without a return value skip the invalid operation.
 
 ## Examples
 

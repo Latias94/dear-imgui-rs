@@ -4,7 +4,7 @@ This directory contains automation scripts for managing the dear-imgui-rs worksp
 
 ## Overview
 
-The workspace uses a **unified release train** model. All 29 publishable packages inherit `workspace.package.version`; examples and workspace-only tools keep independent package versions. Release tooling prepares, validates, and publishes that single version source.
+All 30 publishable packages inherit `workspace.package.version`. Examples and workspace tools have independent versions. Release tooling reads the shared version when preparing, validating, and publishing packages.
 
 ## Quick Start
 
@@ -32,7 +32,7 @@ gh workflow run release.yml --ref main -f tag=v0.23.0
 Local success is necessary but not sufficient. `release.yml` binds the candidate
 to the exact `main` commit, requires successful normal CI, builds and consumes all
 five prebuilt targets, reserves or verifies the tag in the protected environment,
-publishes the complete 29-crate train through Trusted Publishing, and then creates
+publishes the complete 30-crate train through Trusted Publishing, and then creates
 the GitHub Release.
 
 ## Available Scripts
@@ -258,7 +258,7 @@ gh workflow run release.yml --ref main -f tag=v0.23.0
 The release workflow acquires a short-lived crates.io token only after all
 prebuilt targets pass, reserves or verifies the candidate tag before the first
 upload, resumes exact already-published versions automatically, and creates the
-GitHub Release only after all 29 crates are available.
+GitHub Release only after all 30 crates are available.
 
 ## Common Tasks
 

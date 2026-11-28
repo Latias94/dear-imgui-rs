@@ -1,6 +1,6 @@
 use super::{
-    Context, EditorContext, EditorContextInner, ImNodesContextAliveToken, ImNodesContextGuard,
-    ImNodesScope, SavedBinding,
+    EditorContext, EditorContextInner, ImNodesContext, ImNodesContextAliveToken,
+    ImNodesContextGuard, ImNodesScope, SavedBinding,
 };
 use crate::sys;
 use dear_imgui_rs::Context as ImGuiContext;
@@ -37,7 +37,9 @@ impl<'a> BoundEditor<'a> {
         [out.x, out.y]
     }
 
+    /// Sets the editor's pan offset. Both coordinates must be finite.
     pub fn reset_panning(&self, pos: [f32; 2]) {
+        crate::style::validate_finite_pair("panning", pos);
         self.with_bound_context(|| unsafe {
             sys::imnodes_EditorContextResetPanning(sys::ImVec2_c {
                 x: pos[0],
@@ -105,7 +107,7 @@ impl<'a> BoundEditor<'a> {
     }
 }
 
-impl Context {
+impl ImNodesContext {
     /// Try to create a new ImNodes context bound to the current Dear ImGui context
     pub fn try_create(imgui: &ImGuiContext) -> dear_imgui_rs::ImGuiResult<Self> {
         let thread_lease = Rc::new(dear_imgui_rs::ContextThreadLease::acquire()?);
@@ -115,9 +117,10 @@ impl Context {
             unsafe { sys::imnodes_CreateContext() }
         });
         if raw.is_null() {
-            return Err(dear_imgui_rs::ImGuiError::context_creation(
-                "imnodes_CreateContext returned null",
-            ));
+            return Err(dear_imgui_rs::ContextError::Creation {
+                reason: "imnodes_CreateContext returned null".into(),
+            }
+            .into());
         }
         Ok(Self {
             raw,
@@ -162,9 +165,10 @@ impl Context {
             unsafe { sys::imnodes_EditorContextCreate() }
         });
         if raw.is_null() {
-            return Err(dear_imgui_rs::ImGuiError::context_creation(
-                "imnodes_EditorContextCreate returned null",
-            ));
+            return Err(dear_imgui_rs::ContextError::Creation {
+                reason: "imnodes_EditorContextCreate returned null".into(),
+            }
+            .into());
         }
         Ok(EditorContext {
             inner: Rc::new(EditorContextInner {
@@ -232,7 +236,7 @@ impl EditorContext {
     }
 }
 
-impl Drop for Context {
+impl Drop for ImNodesContext {
     fn drop(&mut self) {
         if !self.raw.is_null() {
             let raw = std::mem::replace(&mut self.raw, std::ptr::null_mut());

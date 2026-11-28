@@ -1,0 +1,29 @@
+error: unknown imgui struct attribute
+ --> tests/ui/unknown_attributes.rs:4:9
+  |
+4 | #[imgui(slider)]
+  |         ^^^^^^
+
+error: unknown imgui enum attribute
+ --> tests/ui/unknown_attributes.rs:8:9
+  |
+8 | #[imgui(dropdown)]
+  |         ^^^^^^^^
+
+error: unknown imgui variant attribute
+  --> tests/ui/unknown_attributes.rs:15:13
+   |
+15 |     #[imgui(skip)]
+   |             ^^^^
+
+error: unknown imgui field attribute
+  --> tests/ui/unknown_attributes.rs:21:13
+   |
+21 |     #[imgui(sldier)]
+   |             ^^^^^^
+
+error: unknown imgui field attribute
+  --> tests/ui/unknown_attributes.rs:27:19
+   |
+27 |     Value(#[imgui(min_wdith = 42.0)] String),
+   |                   ^^^^^^^^^

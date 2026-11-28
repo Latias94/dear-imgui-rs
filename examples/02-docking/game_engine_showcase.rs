@@ -75,9 +75,9 @@ struct EditorState {
     entities: Vec<SceneEntity>,
     selected: Option<usize>,
     assets: Vec<&'static str>,
-    asset_filter: ImString,
+    asset_filter: String,
     console_lines: Vec<String>,
-    console_input: ImString,
+    console_input: String,
     show_grid: bool,
     camera_distance: f32,
     camera_yaw: f32,
@@ -108,12 +108,12 @@ impl Default for EditorState {
                 "default.mat",
                 "player.rs",
             ],
-            asset_filter: ImString::new(""),
+            asset_filter: String::new(),
             console_lines: vec![
                 "[info] editor initialized".to_owned(),
                 "[info] scene and game render targets registered".to_owned(),
             ],
-            console_input: ImString::new(""),
+            console_input: String::new(),
             show_grid: true,
             camera_distance: 6.0,
             camera_yaw: 45.0_f32.to_radians(),
@@ -196,7 +196,7 @@ impl EditorState {
     }
 
     fn process_console_command(&mut self) {
-        let command = self.console_input.to_str().trim().to_owned();
+        let command = self.console_input.trim().to_owned();
         self.console_input.clear();
         if command.is_empty() {
             return;
@@ -311,9 +311,12 @@ struct App {
 
 impl AppWindow {
     fn setup_gpu(event_loop: &ActiveEventLoop) -> AppResult<Self> {
+        let descriptor = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
+            event_loop.owned_display_handle(),
+        ));
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
+            ..descriptor
         });
         let version = env!("CARGO_PKG_VERSION");
         let window = Arc::new(
@@ -467,7 +470,9 @@ impl AppWindow {
         render_console(ui, &mut imgui.editor);
 
         imgui.platform.prepare_render(ui, &self.window)?;
-        let pending = frame_token.try_render(imgui.renderer.renderer_consumer()?)?;
+        let pending = frame_token
+            .try_render(imgui.renderer.renderer_consumer()?)
+            .map_err(|(_frame, error)| error)?;
         let prepared = imgui.renderer.reconcile_frame(pending)?;
 
         let (surface_frame, reconfigure_after_present) = match self.surface.get_current_texture() {
@@ -504,17 +509,18 @@ impl AppWindow {
             &mut encoder,
             &imgui.scene_renderer,
             &self.queue,
-            imgui.editor.camera_view,
-            imgui.editor.camera_proj,
+            imgui.editor.camera_proj * imgui.editor.camera_view,
             &models,
             imgui.editor.show_grid,
         );
+        let game_view = rh::view::look_at_mat4(Vec3::new(4.0, 3.2, 4.0), Vec3::ZERO, Vec3::Y);
+        let game_projection =
+            rh::proj::directx::perspective(45.0_f32.to_radians(), 16.0 / 9.0, 0.1, 100.0);
         imgui.game_target.render_into(
             &mut encoder,
             &imgui.scene_renderer,
             &self.queue,
-            rh::view::look_at_mat4(Vec3::new(4.0, 3.2, 4.0), Vec3::ZERO, Vec3::Y),
-            rh::proj::directx::perspective(45.0_f32.to_radians(), 16.0 / 9.0, 0.1, 100.0),
+            game_projection * game_view,
             &models,
             true,
         );
@@ -664,12 +670,12 @@ fn render_inspector(ui: &Ui, editor: &mut EditorState) {
 fn render_assets(ui: &Ui, editor: &mut EditorState) {
     ui.window(&editor_window("Assets")).build(|| {
         ui.set_next_item_width(-1.0);
-        ui.input_text_imstr("##asset-filter", &mut editor.asset_filter)
+        ui.input_text("##asset-filter", &mut editor.asset_filter)
             .hint("Filter assets")
             .build();
         ui.separator();
 
-        let query = editor.asset_filter.to_str().to_ascii_lowercase();
+        let query = editor.asset_filter.to_ascii_lowercase();
         let button_size = [96.0, 58.0];
         let columns = (ui.content_region_avail()[0] / (button_size[0] + 8.0))
             .floor()
@@ -706,7 +712,7 @@ fn render_console(ui: &Ui, editor: &mut EditorState) {
 
         ui.child_window("console-output")
             .size([0.0, -32.0])
-            .build(ui, || {
+            .build(|| {
                 for line in &editor.console_lines {
                     let color = if line.starts_with("[error]") {
                         [1.0, 0.45, 0.45, 1.0]
@@ -722,7 +728,7 @@ fn render_console(ui: &Ui, editor: &mut EditorState) {
 
         ui.set_next_item_width(-1.0);
         if ui
-            .input_text_imstr("##console-input", &mut editor.console_input)
+            .input_text("##console-input", &mut editor.console_input)
             .hint("Enter a command")
             .enter_returns_true(true)
             .build()

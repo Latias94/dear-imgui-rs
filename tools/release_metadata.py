@@ -20,6 +20,7 @@ PUBLISH_ORDER = [
     ("dear-imgui-build-support", "tools/build-support"),
     ("dear-imgui-sys", "dear-imgui-sys"),
     ("dear-imgui-rs", "dear-imgui"),
+    ("dear-imgui-backend-support", "backends/dear-imgui-backend-support"),
     ("dear-imgui-winit", "backends/dear-imgui-winit"),
     ("dear-imgui-sdl3", "backends/dear-imgui-sdl3"),
     ("dear-imgui-wgpu", "backends/dear-imgui-wgpu"),

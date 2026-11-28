@@ -174,7 +174,8 @@ impl crate::NodeEditor<'_> {
         )
     }
 
-    /// Pushes a temporary style value. The padding and minimap offset variables take a vector.
+    /// Pushes a temporary style value. Padding and minimap offset require finite vectors.
+    /// Grid spacing and link tessellation use the same bounds as the persistent setters.
     pub fn push_style_var(&self, var: crate::StyleVar, value: StyleVarValue) -> StyleVarToken<'_> {
         use crate::StyleVar;
         let takes_vec2 = matches!(
@@ -186,19 +187,23 @@ impl crate::NodeEditor<'_> {
             matches!(value, StyleVarValue::Vec2(_)),
             "dear-imnodes: incorrect value type for {var:?}"
         );
-        StyleVarToken(self.styles.vars.push(|| unsafe {
-            match value {
-                StyleVarValue::Float(value) => {
-                    if var == StyleVar::GridSpacing {
-                        validate_grid_spacing(value);
-                    }
-                    sys::imnodes_PushStyleVar_Float(var as i32, value);
+        let stack = &self.styles.vars;
+        StyleVarToken(match value {
+            StyleVarValue::Float(value) => {
+                match var {
+                    StyleVar::GridSpacing => validate_grid_spacing(value),
+                    StyleVar::LinkLineSegmentsPerLength => validate_link_density(value),
+                    _ => {}
                 }
-                StyleVarValue::Vec2([x, y]) => {
-                    sys::imnodes_PushStyleVar_Vec2(var as i32, sys::ImVec2_c { x, y })
-                }
+                stack.push(|| unsafe { sys::imnodes_PushStyleVar_Float(var as i32, value) })
             }
-        }))
+            StyleVarValue::Vec2(value @ [x, y]) => {
+                validate_finite_pair("vector style value", value);
+                stack.push(|| unsafe {
+                    sys::imnodes_PushStyleVar_Vec2(var as i32, sys::ImVec2_c { x, y })
+                })
+            }
+        })
     }
 
     pub fn push_style_var_f32(&self, var: crate::StyleVar, value: f32) -> StyleVarToken<'_> {
@@ -217,13 +222,27 @@ pub(crate) fn validate_grid_spacing(spacing: f32) {
     );
 }
 
-/// Convert RGBA floats [0,1] to ImGui-packed ABGR (u32)
+pub(crate) fn validate_link_density(density: f32) {
+    assert!(
+        density.is_finite() && density >= 0.0,
+        "dear-imnodes: link tessellation density must be finite and non-negative"
+    );
+}
+
+pub(crate) fn validate_finite_pair(name: &str, value: [f32; 2]) {
+    assert!(
+        value.into_iter().all(f32::is_finite),
+        "dear-imnodes: {name} must contain only finite values"
+    );
+}
+
+/// Convert RGBA floats in `0.0..=1.0` to ImGui-packed ABGR (`u32`).
 pub fn rgba_to_abgr_u32(rgba: [f32; 4]) -> u32 {
     let [r, g, b, a] = rgba.map(|component| (component.clamp(0.0, 1.0) * 255.0 + 0.5) as u32);
     r | (g << 8) | (b << 16) | (a << 24)
 }
 
-/// Convert ImGui-packed ABGR (u32) to RGBA floats [0,1]
+/// Convert ImGui-packed ABGR (`u32`) to RGBA floats in `0.0..=1.0`.
 pub fn abgr_u32_to_rgba(col: u32) -> [f32; 4] {
     const SCALE: f32 = 1.0 / 255.0;
     [

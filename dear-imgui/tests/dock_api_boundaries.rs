@@ -45,9 +45,9 @@ struct TestDockspaceConfig {
 }
 
 impl TestDockspaceConfig {
-    fn new(root_id: imgui::Id) -> Result<Self, imgui::DockspaceError> {
+    fn new(root_id: imgui::Id) -> Result<Self, imgui::ContextError> {
         if root_id.raw() == 0 {
-            return Err(imgui::DockspaceError::ZeroRootId);
+            return Err(imgui::ContextError::ZeroRootId);
         }
         Ok(Self {
             root_id,
@@ -80,7 +80,7 @@ fn submit_main_layout(
     config: &TestDockspaceConfig,
     layout: &imgui::DockLayout,
     apply: imgui::DockLayoutApply,
-) -> Result<imgui::Id, imgui::DockspaceError> {
+) -> Result<imgui::Id, imgui::ContextError> {
     config.builder(ui).layout(layout, apply).build()
 }
 
@@ -90,7 +90,7 @@ fn submit_current_layout(
     size: [f32; 2],
     layout: &imgui::DockLayout,
     apply: imgui::DockLayoutApply,
-) -> Result<imgui::Id, imgui::DockspaceError> {
+) -> Result<imgui::Id, imgui::ContextError> {
     config
         .builder(ui)
         .current_window(size)
@@ -206,14 +206,14 @@ fn current_window_builder_requires_an_explicit_root_id() {
     prepare_context(&mut ctx);
 
     let ui = ctx.frame();
-    assert_eq!(
+    assert!(matches!(
         ui.dockspace().current_window([100.0, 100.0]).build(),
-        Err(imgui::DockspaceError::MissingRootId)
-    );
-    assert_eq!(
+        Err(imgui::ContextError::MissingRootId)
+    ));
+    assert!(matches!(
         ui.dockspace().root_id(imgui::Id::from(0)).build(),
-        Err(imgui::DockspaceError::ZeroRootId)
-    );
+        Err(imgui::ContextError::ZeroRootId)
+    ));
 }
 
 #[test]
@@ -370,15 +370,15 @@ fn ordinary_docking_submission_rejects_disabled_docking_before_ffi() {
         }))
         .is_err()
     );
-    assert_eq!(
+    assert!(matches!(
         submit_main_layout(
             ui,
             &options,
             &imgui::DockLayout::tabs(std::iter::empty::<imgui::WindowKey>()),
             imgui::DockLayoutApply::IfMissing,
         ),
-        Err(imgui::DockspaceError::DockingDisabled)
-    );
+        Err(imgui::ContextError::DockingDisabled)
+    ));
 
     let _ = ctx.render_legacy();
 }
@@ -695,15 +695,15 @@ fn duplicate_declarative_submission_preserves_the_first_layout() {
     );
 
     submit_main_layout(ui, &options, &first, imgui::DockLayoutApply::Replace).unwrap();
-    assert_eq!(
+    assert!(matches!(
         submit_main_layout(
             ui,
             &options,
             &imgui::DockLayout::tabs([window_key("Replacement")]),
             imgui::DockLayoutApply::Replace,
         ),
-        Err(imgui::DockspaceError::DuplicateDockspaceSubmission { root_id })
-    );
+        Err(imgui::ContextError::DuplicateDockspaceSubmission { root_id: actual }) if actual == root_id
+    ));
 
     let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
     assert!(!root.is_null());
@@ -746,15 +746,15 @@ fn skipped_main_host_still_allows_only_one_layout_application() {
         imgui::DockLayout::tabs([window_key("Skipped right")]),
     );
     submit_main_layout(ui, &options, &first, imgui::DockLayoutApply::Replace).unwrap();
-    assert_eq!(
+    assert!(matches!(
         submit_main_layout(
             ui,
             &options,
             &imgui::DockLayout::tabs([window_key("Replacement")]),
             imgui::DockLayoutApply::Replace,
         ),
-        Err(imgui::DockspaceError::DuplicateDockspaceSubmission { root_id })
-    );
+        Err(imgui::ContextError::DuplicateDockspaceSubmission { root_id: actual }) if actual == root_id
+    ));
 
     let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
     assert!(!root.is_null());
@@ -821,7 +821,7 @@ fn invalid_declarative_layout_returns_before_dockspace_submission() {
 
     assert!(matches!(
         submit_main_layout(ui, &options, &invalid, imgui::DockLayoutApply::Replace,),
-        Err(imgui::DockspaceError::InvalidSplitRatio { ratio: 1.0 })
+        Err(imgui::ContextError::InvalidSplitRatio { ratio: 1.0 })
     ));
     assert!(unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()).is_null() });
 }
@@ -880,10 +880,10 @@ fn invalid_replace_preserves_and_keeps_the_existing_layout_alive() {
             imgui::DockLayout::tabs([window_key("Replacement")]),
             imgui::DockLayout::tabs([window_key("Discarded")]),
         );
-        assert_eq!(
+        assert!(matches!(
             submit_main_layout(ui, &options, &invalid, imgui::DockLayoutApply::Replace,),
-            Err(imgui::DockspaceError::InvalidSplitRatio { ratio: 1.0 })
-        );
+            Err(imgui::ContextError::InvalidSplitRatio { ratio: 1.0 })
+        ));
         ui.window(&window_key("Transactional left"))
             .build(|| ui.text("left"));
         ui.window(&window_key("Transactional right"))
@@ -910,15 +910,15 @@ fn layout_rejects_a_declared_window_already_submitted_on_a_new_root() {
     ui.window(&window_key("Already submitted replacement"))
         .build(|| ui.text("submitted first"));
     let options = TestDockspaceConfig::new(root_id).unwrap();
-    assert_eq!(
+    assert!(matches!(
         submit_main_layout(
             ui,
             &options,
             &imgui::DockLayout::tabs([window_key("Already submitted replacement")]),
             imgui::DockLayoutApply::Replace,
         ),
-        Err(imgui::DockspaceError::WindowSubmittedBeforeDockspace { root_id })
-    );
+        Err(imgui::ContextError::WindowSubmittedBeforeDockspace { root_id: actual }) if actual == root_id
+    ));
     assert!(unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()).is_null() });
     let _ = ctx.render_legacy();
 }
@@ -965,14 +965,14 @@ fn every_recoverable_preflight_error_keeps_the_existing_layout_alive() {
         let ui = ctx.frame();
         let invalid_class = imgui::WindowClass::new(ui.get_id("Invalid preflight class"))
             .dock_node_flags_override_set(imgui::WindowClassDockNodeFlags::from_bits_retain(
-                imgui::sys::ImGuiDockNodeFlags_KeepAliveOnly as i32,
+                imgui::sys::ImGuiDockNodeFlags_KeepAliveOnly,
             ));
         let options = TestDockspaceConfig::new(root_id)
             .unwrap()
             .window_class(invalid_class);
         assert!(matches!(
             submit_main_layout(ui, &options, &layout, imgui::DockLayoutApply::Replace,),
-            Err(imgui::DockspaceError::InvalidWindowClass(_))
+            Err(imgui::ContextError::InvalidWindowClass(_))
         ));
         ui.window(&window_key("Preflight left"))
             .build(|| ui.text("left"));
@@ -986,7 +986,7 @@ fn every_recoverable_preflight_error_keeps_the_existing_layout_alive() {
     {
         let ui = ctx.frame();
         let options = TestDockspaceConfig::new(root_id).unwrap();
-        assert_eq!(
+        assert!(matches!(
             submit_current_layout(
                 ui,
                 &options,
@@ -994,8 +994,8 @@ fn every_recoverable_preflight_error_keeps_the_existing_layout_alive() {
                 &layout,
                 imgui::DockLayoutApply::Replace,
             ),
-            Err(imgui::DockspaceError::InvalidHostSize { size: [0.0, 100.0] })
-        );
+            Err(imgui::ContextError::InvalidHostSize { size: [0.0, 100.0] })
+        ));
         ui.window(&window_key("Preflight left"))
             .build(|| ui.text("left"));
         ui.window(&window_key("Preflight right"))
@@ -1012,7 +1012,7 @@ fn every_recoverable_preflight_error_keeps_the_existing_layout_alive() {
         ui.window(&long_name)
             .flags(imgui::WindowFlags::NO_SAVED_SETTINGS)
             .build(|| {
-                assert_eq!(
+                assert!(matches!(
                     submit_current_layout(
                         ui,
                         &options,
@@ -1020,11 +1020,11 @@ fn every_recoverable_preflight_error_keeps_the_existing_layout_alive() {
                         &layout,
                         imgui::DockLayoutApply::Replace,
                     ),
-                    Err(imgui::DockspaceError::HostWindowNameTooLong {
+                    Err(imgui::ContextError::HostWindowNameTooLong {
                         bytes: 237,
                         max_bytes: 236,
                     })
-                );
+                ));
             });
         ui.window(&window_key("Preflight left"))
             .build(|| ui.text("left"));
@@ -1077,15 +1077,15 @@ fn replacement_is_rejected_after_a_hosted_window_was_submitted() {
         ui.window(&window_key("Ordered left"))
             .build(|| ui.text("left"));
 
-        assert_eq!(
+        assert!(matches!(
             submit_main_layout(
                 ui,
                 &keep_alive,
                 &imgui::DockLayout::tabs([window_key("Replacement")]),
                 imgui::DockLayoutApply::Replace,
             ),
-            Err(imgui::DockspaceError::WindowSubmittedBeforeDockspace { root_id })
-        );
+            Err(imgui::ContextError::WindowSubmittedBeforeDockspace { root_id: actual }) if actual == root_id
+        ));
         ui.window(&window_key("Ordered right"))
             .build(|| ui.text("right"));
 
@@ -1149,15 +1149,15 @@ fn declarative_root_id_cannot_alias_an_existing_child_node() {
     {
         let ui = ctx.frame();
         let colliding_options = TestDockspaceConfig::new(child_id).unwrap();
-        assert_eq!(
+        assert!(matches!(
             submit_main_layout(
                 ui,
                 &colliding_options,
                 &imgui::DockLayout::tabs([window_key("Replacement")]),
                 imgui::DockLayoutApply::Replace,
             ),
-            Err(imgui::DockspaceError::ExistingNodeIsNotDockspaceRoot { id: child_id })
-        );
+            Err(imgui::ContextError::ExistingNodeIsNotDockspaceRoot { id }) if id == child_id
+        ));
 
         let correct_options = TestDockspaceConfig::new(root_id).unwrap();
         submit_main_layout(
@@ -1580,7 +1580,7 @@ fn window_class_rejects_invalid_flag_overrides_before_ffi() {
     );
 
     let private_tab_button =
-        imgui::TabItemFlags::from_bits_retain(imgui::sys::ImGuiTabItemFlags_Button as i32);
+        imgui::TabItemFlags::from_bits_retain(imgui::sys::ImGuiTabItemFlags_Button);
     let invalid_tab_class = imgui::WindowClass::new(imgui::Id::from(3u32))
         .tab_item_flags_override_set(private_tab_button);
     assert!(
@@ -1591,10 +1591,10 @@ fn window_class_rejects_invalid_flag_overrides_before_ffi() {
     );
 
     for (index, bits) in [
-        imgui::sys::ImGuiDockNodeFlags_KeepAliveOnly as i32,
-        imgui::sys::ImGuiDockNodeFlags_PassthruCentralNode as i32,
-        imgui::sys::ImGuiDockNodeFlags_DockSpace as i32,
-        imgui::sys::ImGuiDockNodeFlags_CentralNode as i32,
+        imgui::sys::ImGuiDockNodeFlags_KeepAliveOnly,
+        imgui::sys::ImGuiDockNodeFlags_PassthruCentralNode,
+        imgui::sys::ImGuiDockNodeFlags_DockSpace,
+        imgui::sys::ImGuiDockNodeFlags_CentralNode,
         1 << 30,
     ]
     .into_iter()
@@ -1602,33 +1602,33 @@ fn window_class_rejects_invalid_flag_overrides_before_ffi() {
     {
         let invalid = imgui::WindowClass::new(imgui::Id::from(10 + index as u32))
             .dock_node_flags_override_set(imgui::WindowClassDockNodeFlags::from_bits_retain(bits));
-        assert_eq!(
+        assert!(matches!(
             invalid.validate(),
-            Err(imgui::WindowClassError::UnsupportedDockNodeFlags { bits })
-        );
+            Err(imgui::ContextError::InvalidWindowClass(imgui::error::context::WindowClassKind::UnsupportedDockNodeFlags { bits: actual })) if actual == bits
+        ));
     }
 
     let invalid_layout_class = imgui::WindowClass::new(imgui::Id::from(20u32))
         .dock_node_flags_override_set(imgui::WindowClassDockNodeFlags::from_bits_retain(
-            imgui::sys::ImGuiDockNodeFlags_KeepAliveOnly as i32,
+            imgui::sys::ImGuiDockNodeFlags_KeepAliveOnly,
         ));
     let invalid_layout_root = ui.get_id("Invalid declarative window class");
     let invalid_options = TestDockspaceConfig::new(invalid_layout_root)
         .unwrap()
         .window_class(invalid_layout_class);
-    assert_eq!(
+    assert!(matches!(
         submit_main_layout(
             ui,
             &invalid_options,
             &imgui::DockLayout::tabs(std::iter::empty::<imgui::WindowKey>()),
             imgui::DockLayoutApply::Replace,
         ),
-        Err(imgui::DockspaceError::InvalidWindowClass(
-            imgui::WindowClassError::UnsupportedDockNodeFlags {
-                bits: imgui::sys::ImGuiDockNodeFlags_KeepAliveOnly as i32,
+        Err(imgui::ContextError::InvalidWindowClass(
+            imgui::error::context::WindowClassKind::UnsupportedDockNodeFlags {
+                bits: imgui::sys::ImGuiDockNodeFlags_KeepAliveOnly,
             },
         ))
-    );
+    ));
     assert!(unsafe { imgui::sys::igDockBuilderGetNode(invalid_layout_root.raw()).is_null() });
 
     let dockspace_id = ui.get_id("Window class boundaries");

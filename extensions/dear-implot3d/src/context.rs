@@ -19,7 +19,7 @@ use std::cell::{RefCell, RefMut};
 ///
 /// // In your main loop:
 /// let ui = imgui_ctx.frame();
-/// let plot_ui = plot3d_ctx.get_plot_ui(ui);
+/// let plot_ui = ui.implot3d(&plot3d_ctx);
 /// ```
 pub struct Plot3DContext {
     pub(crate) raw: *mut sys::ImPlot3DContext,
@@ -50,9 +50,10 @@ impl Plot3DContext {
             ctx
         });
         if ctx.is_null() {
-            return Err(dear_imgui_rs::ImGuiError::context_creation(
-                "ImPlot3D_CreateContext returned null",
-            ));
+            return Err(dear_imgui_rs::ContextError::Creation {
+                reason: "ImPlot3D_CreateContext returned null".into(),
+            }
+            .into());
         }
 
         Ok(Self {
@@ -106,6 +107,7 @@ impl Plot3DContext {
 
 impl Drop for Plot3DContext {
     fn drop(&mut self) {
+        self.invalidate_saved_binding();
         // DestroyContext frees the plot's own allocations and clears GImPlot3D only if current.
         let raw = self.raw;
         if self
@@ -237,14 +239,16 @@ mod tests {
         unsafe { sys::ImPlot3D_SetCurrentContext(plot.raw) };
         drop(imgui);
 
-        assert_eq!(
+        assert!(matches!(
             plot.imgui_binding.try_with_bound_context(|| ()),
-            Err(dear_imgui_rs::ContextBindingError::NativeDestroyed)
-        );
+            Err(dear_imgui_rs::ContextError::Binding(
+                dear_imgui_rs::error::context::BindingKind::NativeDestroyed
+            ))
+        ));
         std::thread::spawn(|| {
             assert!(matches!(
                 dear_imgui_rs::ContextThreadLease::acquire(),
-                Err(dear_imgui_rs::ImGuiError::ContextThreadConflict)
+                Err(dear_imgui_rs::ContextError::ThreadConflict)
             ))
         })
         .join()
@@ -274,13 +278,42 @@ mod tests {
     }
 
     #[test]
+    fn nested_plot_bindings_do_not_restore_a_destroyed_generation() {
+        let _guard = test_guard();
+        let imgui = Context::create();
+        let previous = Plot3DContext::create(&imgui);
+        let outer = Plot3DContext::create(&imgui);
+        let inner = Plot3DContext::create(&imgui);
+        unsafe { sys::ImPlot3D_SetCurrentContext(previous.raw) };
+
+        let replacement = outer.with_bound_context(|| {
+            let replacement = inner.with_bound_context(|| {
+                drop(previous);
+                Plot3DContext::create(&imgui)
+            });
+            assert_eq!(unsafe { sys::ImPlot3D_GetCurrentContext() }, outer.raw);
+            replacement
+        });
+        let restored = unsafe { sys::ImPlot3D_GetCurrentContext() };
+        unsafe { sys::ImPlot3D_SetCurrentContext(std::ptr::null_mut()) };
+        assert!(restored.is_null());
+
+        replacement.with_bound_context(|| {
+            assert_eq!(
+                unsafe { sys::ImPlot3D_GetCurrentContext() },
+                replacement.raw
+            );
+        });
+    }
+
+    #[test]
     fn plot3d_ui_binds_owner_context() {
         let _guard = test_guard();
         let imgui_a = Context::create();
         let plot_a = Plot3DContext::create(&imgui_a);
         let imgui_a_raw = imgui_a.as_raw();
-        let suspended_a = imgui_a.suspend_or_panic();
         let imgui_b = Context::create();
+        unsafe { dear_imgui_rs::sys::igSetCurrentContext(imgui_b.as_raw()) };
 
         assert_eq!(
             unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
@@ -296,7 +329,7 @@ mod tests {
             unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
             imgui_b.as_raw()
         );
-        drop(suspended_a);
+        drop(imgui_a);
         drop(plot_a);
         drop(imgui_b);
     }

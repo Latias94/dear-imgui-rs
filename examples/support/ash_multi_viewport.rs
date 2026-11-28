@@ -1,4 +1,4 @@
-//! Shared Ash/Winit multi-viewport lifecycle for the interactive example.
+//! Shared Ash/Winit multi-viewport lifecycle for the interactive and validation examples.
 //!
 //! The module owns the native order: Winit event forwarding, ImGui frame preparation,
 //! secondary viewport submission, main-surface acquire/submit/present, and GPU-aware
@@ -17,7 +17,7 @@ use ash::{
 #[cfg(feature = "ash-dynamic-rendering")]
 use dear_imgui_ash::DynamicRendering;
 use dear_imgui_ash::{
-    AshRenderer, AshRendererConfig, Options as AshOptions, multi_viewport as ash_mvp,
+    AshRenderer, AshRendererConfig, Options as AshOptions, RendererError, multi_viewport as ash_mvp,
 };
 use dear_imgui_rs::{ConfigFlags, Context, FrameToken, Ui};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
@@ -43,8 +43,9 @@ mod ash_frame_sync;
 #[path = "ash_portability.rs"]
 mod ash_portability;
 use ash_frame_sync::{
-    FrameSync, clear_fence_references, create_frame_syncs, create_present_semaphores,
-    destroy_frame_syncs, destroy_present_semaphores, replace_frame_sync,
+    FrameSync, MainCommandTarget, clear_fence_references, create_frame_syncs,
+    create_present_semaphores, destroy_frame_syncs, destroy_present_semaphores,
+    record_command_buffer, replace_frame_sync,
 };
 
 #[cfg(feature = "ash-validation-smoke")]
@@ -66,9 +67,6 @@ pub struct VulkanAdapterInfo {
 pub type ExampleResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 /// Renderer and platform values exposed while a scenario composes one ImGui frame.
-// The package-level validation feature also compiles this interactive facade into the private
-// validation binary, where it is intentionally not constructed.
-#[cfg_attr(feature = "ash-validation-smoke", allow(dead_code))]
 pub struct AshFrameUi<'a> {
     pub ui: &'a Ui,
     pub viewport_count: usize,
@@ -79,7 +77,6 @@ pub struct AshFrameUi<'a> {
 }
 
 /// Interactive UI policy layered over the shared native Ash lifecycle.
-#[cfg_attr(feature = "ash-validation-smoke", allow(dead_code))]
 pub trait AshViewportScenario: 'static {
     fn requires_dynamic_rendering(&self) -> bool {
         false
@@ -141,7 +138,6 @@ impl RuntimeCallbacks {
     }
 }
 
-#[cfg_attr(feature = "ash-validation-smoke", allow(dead_code))]
 struct RuntimeFrameUi<'a> {
     ui: &'a Ui,
     viewport_count: usize,
@@ -152,7 +148,6 @@ struct RuntimeFrameUi<'a> {
     _callbacks: &'a RuntimeCallbacks,
 }
 
-#[cfg_attr(feature = "ash-validation-smoke", allow(dead_code))]
 impl<'a> RuntimeFrameUi<'a> {
     fn into_interactive(self) -> AshFrameUi<'a> {
         AshFrameUi {
@@ -247,7 +242,6 @@ trait RuntimeScenario: 'static {
     }
 }
 
-#[cfg_attr(feature = "ash-validation-smoke", allow(dead_code))]
 struct InteractiveScenarioAdapter<S>(S);
 
 impl<S: AshViewportScenario> RuntimeScenario for InteractiveScenarioAdapter<S> {
@@ -985,17 +979,36 @@ impl RendererRuntime {
         &mut self,
         event_loop: &ActiveEventLoop,
         frame: FrameToken<'ctx>,
-    ) -> Result<PreparedRendererFrame<'ctx>, Box<dyn std::error::Error>> {
-        Ok(match self {
+    ) -> Result<Option<PreparedRendererFrame<'ctx>>, Box<dyn std::error::Error>> {
+        let prepared = match self {
             Self::Single(renderer) => {
-                let pending_frame = frame.try_render(renderer.renderer_consumer()?)?;
-                let (frame, retirement) = renderer.prepare_frame(pending_frame)?;
-                PreparedRendererFrame::Single { frame, retirement }
+                let pending_frame = frame
+                    .try_render(renderer.renderer_consumer()?)
+                    .map_err(|(_frame, error)| error)?;
+                match renderer.prepare_frame(pending_frame) {
+                    Ok((frame, retirement)) => PreparedRendererFrame::Single { frame, retirement },
+                    Err(RendererError::Vulkan(vk::Result::NOT_READY)) => return Ok(None),
+                    Err(error) => return Err(error.into()),
+                }
             }
-            Self::Viewports(route) => {
-                PreparedRendererFrame::Viewports(route.prepare(event_loop, frame)?)
-            }
-        })
+            Self::Viewports(route) => match route.prepare(event_loop, frame) {
+                Ok(frame) => PreparedRendererFrame::Viewports(frame),
+                Err(error)
+                    if matches!(
+                        error.faults(),
+                        [ash_mvp::AshViewportRouteFault::Renderer(
+                            ash_mvp::AshViewportError::Renderer(RendererError::Vulkan(
+                                vk::Result::NOT_READY
+                            ),)
+                        )]
+                    ) =>
+                {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error.into()),
+            },
+        };
+        Ok(Some(prepared))
     }
 
     #[cfg(feature = "ash-validation-smoke")]
@@ -1733,7 +1746,9 @@ impl<S: RuntimeScenario> AppWindow<S> {
 
         platform.prepare_render(ui, window)?;
         let clear_color = *clear_color;
-        let prepared = renderer.prepare(event_loop, frame)?;
+        let Some(prepared) = renderer.prepare(event_loop, frame)? else {
+            return Ok(());
+        };
         #[cfg(feature = "ash-validation-smoke")]
         let callback_only_zero_geometry = directive.callback_only
             && prepared.draw_data().total_vtx_count() == 0
@@ -2135,9 +2150,8 @@ fn run_runtime<S: RuntimeScenario>(scenario: S) -> ExampleResult {
     }
 }
 
-#[cfg_attr(feature = "ash-validation-smoke", allow(dead_code))]
 pub fn run<S: AshViewportScenario>(scenario: S) -> ExampleResult {
-    dear_imgui_examples::init_tracing_with_filter("dear_imgui=debug,multi_viewport_ash=info");
+    crate::init_tracing_with_filter("dear_imgui=debug,multi_viewport_ash=info");
     info!("Starting Dear ImGui Multi-Viewport (ash) Example");
     run_runtime(InteractiveScenarioAdapter(scenario))
 }
@@ -2436,105 +2450,6 @@ fn destroy_framebuffers(device: &Device, framebuffers: Vec<vk::Framebuffer>) {
             device.destroy_framebuffer(framebuffer, None);
         }
     }
-}
-
-struct MainCommandTarget {
-    #[cfg(not(feature = "ash-dynamic-rendering"))]
-    render_pass: vk::RenderPass,
-    #[cfg(not(feature = "ash-dynamic-rendering"))]
-    framebuffer: vk::Framebuffer,
-    #[cfg(feature = "ash-dynamic-rendering")]
-    image: vk::Image,
-    #[cfg(feature = "ash-dynamic-rendering")]
-    image_view: vk::ImageView,
-    #[cfg(feature = "ash-dynamic-rendering")]
-    old_layout: vk::ImageLayout,
-    extent: vk::Extent2D,
-    clear_color: [f32; 4],
-}
-
-fn record_command_buffer<F, T>(
-    device: &Device,
-    cmd: vk::CommandBuffer,
-    target: MainCommandTarget,
-    record_draws: F,
-) -> Result<T, Box<dyn std::error::Error>>
-where
-    F: FnOnce(vk::CommandBuffer) -> Result<T, Box<dyn std::error::Error>>,
-{
-    let result = unsafe {
-        device.begin_command_buffer(
-            cmd,
-            &vk::CommandBufferBeginInfo::default()
-                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-        )?;
-
-        let clear_value = vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: target.clear_color,
-            },
-        };
-
-        #[cfg(not(feature = "ash-dynamic-rendering"))]
-        device.cmd_begin_render_pass(
-            cmd,
-            &vk::RenderPassBeginInfo::default()
-                .render_pass(target.render_pass)
-                .framebuffer(target.framebuffer)
-                .render_area(vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent: target.extent,
-                })
-                .clear_values(std::slice::from_ref(&clear_value)),
-            vk::SubpassContents::INLINE,
-        );
-
-        #[cfg(feature = "ash-dynamic-rendering")]
-        {
-            ash_frame_sync::transition_swapchain_image(
-                device,
-                cmd,
-                target.image,
-                target.old_layout,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            );
-            let color_attachment = vk::RenderingAttachmentInfo::default()
-                .image_view(target.image_view)
-                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                .load_op(vk::AttachmentLoadOp::CLEAR)
-                .store_op(vk::AttachmentStoreOp::STORE)
-                .clear_value(clear_value);
-            device.cmd_begin_rendering(
-                cmd,
-                &vk::RenderingInfo::default()
-                    .render_area(vk::Rect2D {
-                        offset: vk::Offset2D { x: 0, y: 0 },
-                        extent: target.extent,
-                    })
-                    .layer_count(1)
-                    .color_attachments(std::slice::from_ref(&color_attachment)),
-            );
-        }
-
-        let result = record_draws(cmd)?;
-
-        #[cfg(not(feature = "ash-dynamic-rendering"))]
-        device.cmd_end_render_pass(cmd);
-        #[cfg(feature = "ash-dynamic-rendering")]
-        {
-            device.cmd_end_rendering(cmd);
-            ash_frame_sync::transition_swapchain_image(
-                device,
-                cmd,
-                target.image,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                vk::ImageLayout::PRESENT_SRC_KHR,
-            );
-        }
-        device.end_command_buffer(cmd)?;
-        result
-    };
-    Ok(result)
 }
 
 fn is_srgb_format(format: vk::Format) -> bool {

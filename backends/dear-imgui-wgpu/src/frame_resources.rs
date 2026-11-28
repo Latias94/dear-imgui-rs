@@ -1,51 +1,102 @@
-//! Frame resources management for the WGPU renderer
-//!
-//! This module handles per-frame resources like vertex and index buffers,
-//! corresponding to the FrameResources struct in imgui_impl_wgpu.cpp
+//! Upload buffers and bindings for independently submitted render passes.
+
+use std::{mem, sync::Arc};
 
 use crate::{RenderResources, RendererError, RendererResult, UniformBuffer};
 use dear_imgui_rs::render::{DrawIdx, DrawVert};
 use wgpu::*;
 
-/// Memory alignment function (equivalent to MEMALIGN macro in C++)
-/// Aligns size to the specified alignment boundary
-fn align_size(size: usize, alignment: usize) -> usize {
-    (size + alignment - 1) & !(alignment - 1)
+const _: () = {
+    assert!(mem::size_of::<DrawVert>() == 20);
+    assert!(mem::offset_of!(DrawVert, pos) == 0);
+    assert!(mem::offset_of!(DrawVert, uv) == 8);
+    assert!(mem::offset_of!(DrawVert, col) == 16);
+    assert!(mem::size_of::<[f32; 2]>() == 8);
+    assert!(mem::size_of::<u32>() == 4);
+};
+
+fn vertex_bytes(vertices: &[DrawVert]) -> &[u8] {
+    // SAFETY: DrawVert is repr(C) and its two f32 arrays and u32 fill the asserted layout.
+    // All bytes are initialized, and the byte slice borrows the original vertex slice.
+    unsafe { std::slice::from_raw_parts(vertices.as_ptr().cast(), mem::size_of_val(vertices)) }
 }
 
-/// Per-frame resources
-///
-/// This corresponds to the FrameResources struct in the C++ implementation.
-/// Each render pass in the active Context epoch has its own upload buffers and bindings.
-pub struct FrameResources {
-    /// GPU vertex buffer
-    pub vertex_buffer: Option<Buffer>,
-    /// GPU index buffer  
-    pub index_buffer: Option<Buffer>,
-    /// Host-side vertex buffer (for staging)
-    pub vertex_buffer_host: Option<Vec<u8>>,
-    /// Host-side index buffer (for staging)
-    pub index_buffer_host: Option<Vec<u8>>,
-    /// Current vertex buffer size in vertices
-    pub vertex_buffer_size: usize,
-    /// Current index buffer size in indices
-    pub index_buffer_size: usize,
+#[derive(Default)]
+struct DrawBuffer {
+    buffer: Option<Buffer>,
+    staging: Vec<u8>,
+}
+
+impl DrawBuffer {
+    fn prepare<T>(
+        &mut self,
+        device: &Device,
+        count: usize,
+        kind: &'static str,
+        label: &'static str,
+        usage: BufferUsages,
+    ) -> RendererResult<()> {
+        self.staging.clear();
+        if count == 0 {
+            return Ok(());
+        }
+
+        let aligned_size = count
+            .checked_mul(mem::size_of::<T>())
+            .and_then(|size| size.checked_next_multiple_of(COPY_BUFFER_ALIGNMENT as usize))
+            .ok_or(RendererError::DrawBufferTooLarge { buffer: kind })?;
+        let required = aligned_size as BufferAddress;
+        let capacity = self.buffer.as_ref().map_or(0, Buffer::size);
+        if required > capacity {
+            let max_size = device.limits().max_buffer_size;
+            let max_aligned = max_size - max_size % COPY_BUFFER_ALIGNMENT;
+            if required > max_aligned {
+                return Err(RendererError::DrawBufferTooLarge { buffer: kind });
+            }
+            self.buffer = Some(device.create_buffer(&BufferDescriptor {
+                label: Some(label),
+                size: required.max(capacity.saturating_mul(2)).min(max_aligned),
+                usage: usage | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        self.staging.reserve(aligned_size);
+        Ok(())
+    }
+
+    fn upload(&mut self, queue: &Queue) {
+        let Some(buffer) = self.buffer.as_ref().filter(|_| !self.staging.is_empty()) else {
+            return;
+        };
+        let aligned_size = self
+            .staging
+            .len()
+            .next_multiple_of(COPY_BUFFER_ALIGNMENT as usize);
+        self.staging.resize(aligned_size, 0);
+        queue.write_buffer(buffer, 0, &self.staging);
+    }
+
+    fn active_buffer(&self) -> Option<&Buffer> {
+        self.buffer.as_ref().filter(|_| !self.staging.is_empty())
+    }
+}
+
+pub(crate) struct FrameResources {
+    vertices: DrawBuffer,
+    indices: DrawBuffer,
     uniform_buffer: Option<UniformBuffer>,
     nearest_common_bind_group: Option<BindGroup>,
+    recorded_pass: Arc<()>,
 }
 
 impl FrameResources {
-    /// Create new empty frame resources
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
-            vertex_buffer: None,
-            index_buffer: None,
-            vertex_buffer_host: None,
-            index_buffer_host: None,
-            vertex_buffer_size: 0,
-            index_buffer_size: 0,
+            vertices: DrawBuffer::default(),
+            indices: DrawBuffer::default(),
             uniform_buffer: None,
             nearest_common_bind_group: None,
+            recorded_pass: Arc::new(()),
         }
     }
 
@@ -62,144 +113,46 @@ impl FrameResources {
         Ok(())
     }
 
-    /// Ensure vertex buffer can hold the required number of vertices
-    pub fn ensure_vertex_buffer_capacity(
+    pub(crate) fn upload_draw_lists<'draw>(
         &mut self,
         device: &Device,
-        required_vertices: usize,
-    ) -> RendererResult<()> {
-        if self.vertex_buffer.is_none() || self.vertex_buffer_size < required_vertices {
-            // Add some extra capacity to avoid frequent reallocations
-            let new_size = (required_vertices + 5000).max(self.vertex_buffer_size * 2);
-
-            // Create new GPU buffer with proper alignment
-            let buffer_size = align_size(new_size * std::mem::size_of::<DrawVert>(), 4);
-            let buffer = device.create_buffer(&BufferDescriptor {
-                label: Some("Dear ImGui Vertex Buffer"),
-                size: buffer_size as u64,
-                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-
-            // Create new host buffer
-            let host_buffer = vec![0u8; new_size * std::mem::size_of::<DrawVert>()];
-
-            self.vertex_buffer = Some(buffer);
-            self.vertex_buffer_host = Some(host_buffer);
-            self.vertex_buffer_size = new_size;
-        }
-
-        Ok(())
-    }
-
-    /// Ensure index buffer can hold the required number of indices
-    pub fn ensure_index_buffer_capacity(
-        &mut self,
-        device: &Device,
-        required_indices: usize,
-    ) -> RendererResult<()> {
-        if self.index_buffer.is_none() || self.index_buffer_size < required_indices {
-            // Add some extra capacity to avoid frequent reallocations
-            let new_size = (required_indices + 10000).max(self.index_buffer_size * 2);
-
-            // Create new GPU buffer with proper alignment
-            let buffer_size = align_size(new_size * std::mem::size_of::<DrawIdx>(), 4);
-            let buffer = device.create_buffer(&BufferDescriptor {
-                label: Some("Dear ImGui Index Buffer"),
-                size: buffer_size as u64,
-                usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-
-            // Create new host buffer
-            let host_buffer = vec![0u8; new_size * std::mem::size_of::<DrawIdx>()];
-
-            self.index_buffer = Some(buffer);
-            self.index_buffer_host = Some(host_buffer);
-            self.index_buffer_size = new_size;
-        }
-
-        Ok(())
-    }
-
-    /// Upload vertex data to the GPU buffer
-    pub fn upload_vertex_data(
-        &mut self,
         queue: &Queue,
-        vertices: &[DrawVert],
+        [vertex_count, index_count]: [usize; 2],
+        lists: impl IntoIterator<Item = (&'draw [DrawVert], &'draw [DrawIdx])>,
     ) -> RendererResult<()> {
-        let vertex_buffer = self.vertex_buffer.as_ref().ok_or_else(|| {
-            RendererError::InvalidRenderState("Vertex buffer not initialized".to_string())
-        })?;
-
-        let required_bytes = std::mem::size_of_val(vertices);
-        let aligned_size = align_size(required_bytes, 4);
-
-        let host_buffer = self.vertex_buffer_host.as_mut().ok_or_else(|| {
-            RendererError::InvalidRenderState("Vertex host buffer not initialized".to_string())
-        })?;
-        if aligned_size > host_buffer.len() {
-            return Err(RendererError::InvalidRenderState(
-                "Vertex host buffer capacity is too small".to_string(),
-            ));
+        self.vertices.prepare::<DrawVert>(
+            device,
+            vertex_count,
+            "vertex",
+            "Dear ImGui Vertex Buffer",
+            BufferUsages::VERTEX,
+        )?;
+        self.indices.prepare::<DrawIdx>(
+            device,
+            index_count,
+            "index",
+            "Dear ImGui Index Buffer",
+            BufferUsages::INDEX,
+        )?;
+        for (vertices, indices) in lists {
+            self.vertices
+                .staging
+                .extend_from_slice(vertex_bytes(vertices));
+            self.indices
+                .staging
+                .extend_from_slice(bytemuck::cast_slice(indices));
         }
-
-        // Avoid reinterpreting `DrawVert` as bytes: that can read uninitialized padding bytes.
-        // Pack vertices explicitly in the same layout used by Dear ImGui (pos, uv, col).
-        host_buffer[..aligned_size].fill(0);
-        const VERT_STRIDE: usize = std::mem::size_of::<DrawVert>();
-        for (i, v) in vertices.iter().enumerate() {
-            let base = i * VERT_STRIDE;
-            host_buffer[base..base + 4].copy_from_slice(&v.pos[0].to_ne_bytes());
-            host_buffer[base + 4..base + 8].copy_from_slice(&v.pos[1].to_ne_bytes());
-            host_buffer[base + 8..base + 12].copy_from_slice(&v.uv[0].to_ne_bytes());
-            host_buffer[base + 12..base + 16].copy_from_slice(&v.uv[1].to_ne_bytes());
-            host_buffer[base + 16..base + 20].copy_from_slice(&v.col.to_ne_bytes());
-        }
-
-        // Upload to GPU with proper alignment
-        queue.write_buffer(vertex_buffer, 0, &host_buffer[..aligned_size]);
+        self.vertices.upload(queue);
+        self.indices.upload(queue);
         Ok(())
     }
 
-    /// Upload index data to the GPU buffer
-    pub fn upload_index_data(&mut self, queue: &Queue, indices: &[DrawIdx]) -> RendererResult<()> {
-        let index_buffer = self.index_buffer.as_ref().ok_or_else(|| {
-            RendererError::InvalidRenderState("Index buffer not initialized".to_string())
-        })?;
-
-        let required_bytes = std::mem::size_of_val(indices);
-        let aligned_size = align_size(required_bytes, 4);
-
-        let host_buffer = self.index_buffer_host.as_mut().ok_or_else(|| {
-            RendererError::InvalidRenderState("Index host buffer not initialized".to_string())
-        })?;
-        if aligned_size > host_buffer.len() {
-            return Err(RendererError::InvalidRenderState(
-                "Index host buffer capacity is too small".to_string(),
-            ));
-        }
-
-        host_buffer[..aligned_size].fill(0);
-        for (i, &idx) in indices.iter().enumerate() {
-            let bytes = idx.to_ne_bytes();
-            let base = i * std::mem::size_of::<DrawIdx>();
-            host_buffer[base..base + 2].copy_from_slice(&bytes);
-        }
-
-        // Upload to GPU with proper alignment
-        queue.write_buffer(index_buffer, 0, &host_buffer[..aligned_size]);
-        Ok(())
+    pub(crate) fn vertex_buffer(&self) -> Option<&Buffer> {
+        self.vertices.active_buffer()
     }
 
-    /// Get the vertex buffer for rendering
-    pub fn vertex_buffer(&self) -> Option<&Buffer> {
-        self.vertex_buffer.as_ref()
-    }
-
-    /// Get the index buffer for rendering
-    pub fn index_buffer(&self) -> Option<&Buffer> {
-        self.index_buffer.as_ref()
+    pub(crate) fn index_buffer(&self) -> Option<&Buffer> {
+        self.indices.active_buffer()
     }
 
     pub(crate) fn uniform_buffer(&self) -> RendererResult<&UniformBuffer> {
@@ -215,50 +168,99 @@ impl FrameResources {
             )
         })
     }
-}
 
-impl Default for FrameResources {
-    fn default() -> Self {
-        Self::new()
+    pub(crate) fn recording_lease(&self) -> Arc<()> {
+        Arc::clone(&self.recorded_pass)
     }
 }
 
 pub(crate) struct FrameResourceArena {
     passes: Vec<FrameResources>,
+    next_pass: usize,
 }
 
 impl FrameResourceArena {
     pub(crate) const fn new() -> Self {
-        Self { passes: Vec::new() }
+        Self {
+            passes: Vec::new(),
+            next_pass: 0,
+        }
     }
 
     pub(crate) fn begin_epoch(&mut self) {
-        self.passes.clear();
+        self.next_pass = 0;
     }
 
     pub(crate) fn acquire(&mut self) -> &mut FrameResources {
-        self.passes.push(FrameResources::new());
-        self.passes
-            .last_mut()
-            .expect("a frame-resource slot was just inserted")
+        // An epoch transition does not imply that the caller submitted its encoder. A pass
+        // keeps its slot reserved until its encoder is discarded or its GPU work completes.
+        if let Some(offset) = self.passes[self.next_pass..]
+            .iter_mut()
+            .position(|frame| Arc::get_mut(&mut frame.recorded_pass).is_some())
+        {
+            self.next_pass += offset + 1;
+        } else {
+            self.passes.push(FrameResources::new());
+            self.next_pass = self.passes.len();
+        }
+        &mut self.passes[self.next_pass - 1]
     }
 }
 
 #[cfg(test)]
-mod arena_tests {
-    use super::FrameResourceArena;
+mod tests {
+    use super::*;
 
     #[test]
-    fn frame_arena_never_reuses_upload_resources_across_epochs() {
+    fn index_upload_reuses_staging_and_pads_only_after_the_last_list() -> RendererResult<()> {
+        let Some((device, queue)) = crate::texture::request_test_device() else {
+            return Ok(());
+        };
+        let mut frame = FrameResources::new();
+        let initial = [DrawIdx::MAX; 4];
+        frame.upload_draw_lists(&device, &queue, [0, 4], [(&[][..], &initial[..])])?;
+        let buffer = frame.index_buffer().unwrap().clone();
+        let staging = frame.indices.staging.as_ptr();
+
+        let indices = [DrawIdx::MAX, 1, 2];
+        frame.upload_draw_lists(
+            &device,
+            &queue,
+            [0, indices.len()],
+            [(&[][..], &indices[..1]), (&[][..], &indices[1..])],
+        )?;
+
+        let host = &frame.indices.staging;
+        let expected: &[u8] = bytemuck::cast_slice(&indices);
+        assert_eq!(frame.index_buffer(), Some(&buffer));
+        assert_eq!(host.as_ptr(), staging);
+        assert_eq!(
+            host.len(),
+            expected
+                .len()
+                .next_multiple_of(COPY_BUFFER_ALIGNMENT as usize)
+        );
+        assert_eq!(&host[..expected.len()], expected);
+        assert!(host[expected.len()..].iter().all(|&byte| byte == 0));
+        Ok(())
+    }
+
+    #[test]
+    fn frame_arena_only_reuses_released_slots_across_epochs() {
         let mut arena = FrameResourceArena::new();
-        let _ = arena.acquire();
-        let _ = arena.acquire();
-        assert_eq!(arena.passes.len(), 2);
+        let first = arena.acquire().recording_lease();
+        let second = arena.acquire().recording_lease();
+        assert!(!Arc::ptr_eq(&first, &second));
 
         arena.begin_epoch();
-        assert!(arena.passes.is_empty());
+        let third = arena.acquire().recording_lease();
+        assert!(!Arc::ptr_eq(&first, &third));
+        assert!(!Arc::ptr_eq(&second, &third));
 
-        let _ = arena.acquire();
-        assert_eq!(arena.passes.len(), 1);
+        let released = Arc::as_ptr(&first);
+        drop(first);
+        arena.begin_epoch();
+        assert_eq!(Arc::as_ptr(&arena.acquire().recording_lease()), released);
+        assert_eq!(arena.passes.len(), 3);
     }
 }

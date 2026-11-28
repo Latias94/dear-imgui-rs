@@ -62,10 +62,6 @@ impl BackgroundSession {
         self.queue_capacity
     }
 
-    pub(super) fn close(&mut self) {
-        self.worker.close();
-    }
-
     pub(super) fn poll_batch(&self) -> Option<RuntimeBatch> {
         match self.receiver.try_recv() {
             Ok(batch) => Some(batch),
@@ -105,12 +101,6 @@ impl BackgroundSession {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         inner.current.as_ref().map(|scan| Arc::clone(&scan.cancel))
-    }
-}
-
-impl Drop for BackgroundSession {
-    fn drop(&mut self) {
-        self.close();
     }
 }
 

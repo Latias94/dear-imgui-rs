@@ -113,16 +113,57 @@ impl OwnedStateStorage {
         &mut self.raw
     }
 
-    pub fn as_ref(&self) -> &sys::ImGuiStorage {
-        &self.raw
-    }
-
     pub fn as_raw_mut(&mut self) -> *mut sys::ImGuiStorage {
         &mut self.raw as *mut sys::ImGuiStorage
     }
 
     pub fn as_raw(&self) -> *const sys::ImGuiStorage {
         &self.raw as *const sys::ImGuiStorage
+    }
+
+    /// Clears all entries.
+    pub fn clear(&mut self) {
+        self.view_mut().clear();
+    }
+
+    /// Reads an integer, returning `default` when the key is absent.
+    pub fn get_int(&self, key: Id, default: i32) -> i32 {
+        unsafe { sys::ImGuiStorage_GetInt(self.as_raw().cast_mut(), key.raw(), default) }
+    }
+
+    /// Inserts or replaces an integer entry.
+    pub fn set_int(&mut self, key: Id, value: i32) {
+        self.view_mut().set_int(key, value);
+    }
+
+    /// Reads a boolean, returning `default` when the key is absent.
+    pub fn get_bool(&self, key: Id, default: bool) -> bool {
+        unsafe { sys::ImGuiStorage_GetBool(self.as_raw().cast_mut(), key.raw(), default) }
+    }
+
+    /// Inserts or replaces a boolean entry.
+    pub fn set_bool(&mut self, key: Id, value: bool) {
+        self.view_mut().set_bool(key, value);
+    }
+
+    /// Reads a float, returning `default` when the key is absent.
+    pub fn get_float(&self, key: Id, default: f32) -> f32 {
+        unsafe { sys::ImGuiStorage_GetFloat(self.as_raw().cast_mut(), key.raw(), default) }
+    }
+
+    /// Inserts or replaces a float entry.
+    pub fn set_float(&mut self, key: Id, value: f32) {
+        self.view_mut().set_float(key, value);
+    }
+
+    fn view_mut(&mut self) -> StateStorage<'_> {
+        unsafe { StateStorage::from_raw(self.as_raw_mut()) }
+    }
+}
+
+impl AsRef<sys::ImGuiStorage> for OwnedStateStorage {
+    fn as_ref(&self) -> &sys::ImGuiStorage {
+        &self.raw
     }
 }
 
@@ -134,7 +175,7 @@ impl Default for OwnedStateStorage {
 
 impl Drop for OwnedStateStorage {
     fn drop(&mut self) {
-        unsafe { StateStorage::from_raw(self.as_raw_mut()) }.clear();
+        self.clear();
     }
 }
 

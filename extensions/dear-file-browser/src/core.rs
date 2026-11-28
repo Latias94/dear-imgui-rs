@@ -30,20 +30,15 @@ pub enum DialogMode {
 }
 
 /// Backend preference
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Backend {
-    /// Prefer native when available, fallback to ImGui
+    /// Use native for standalone opens. ImGui embedding is selected by the caller.
+    #[default]
     Auto,
     /// Force native (rfd) backend
     Native,
     /// Force ImGui UI backend
     ImGui,
-}
-
-impl Default for Backend {
-    fn default() -> Self {
-        Backend::Auto
-    }
 }
 
 /// File filter (e.g., "Images" -> ["png", "jpg"]).
@@ -58,8 +53,7 @@ impl Default for Backend {
 /// - Regex: tokens wrapped in `((` ... `))` are treated as regular expressions and matched
 ///   against the full base name (case-insensitive).
 ///
-/// The variants created from tuples will be normalized to lowercase
-/// automatically.
+/// Plain extensions created from tuples are normalized to lowercase automatically.
 #[derive(Clone, Debug, Default)]
 pub struct FileFilter {
     /// Filter display name
@@ -81,7 +75,7 @@ impl FileFilter {
         // Note: keep regex patterns verbatim; lowercasing can change regex meaning
         // (e.g. Unicode categories like `\\p{Lu}`).
         for token in &mut extensions {
-            if is_regex_token(token) {
+            if token.trim_start().starts_with("((") || token.contains(['*', '?']) {
                 continue;
             }
             *token = token.to_lowercase();
@@ -101,7 +95,7 @@ impl FileFilter {
     ///
     /// Notes:
     /// - Commas inside parentheses `(...)` do not split (IGFD rule 2).
-    /// - Regex tokens `((...))` are preserved verbatim.
+    /// - Regex tokens `((...))` are validated and preserved verbatim.
     /// - Whitespace around commas/tokens is ignored.
     pub fn parse_igfd(spec: &str) -> Result<Vec<FileFilter>, IgfdFilterParseError> {
         let spec = spec.trim();
@@ -147,7 +141,25 @@ impl FileFilter {
             ));
         }
 
+        for filter in &out {
+            filter.validate()?;
+        }
         Ok(out)
+    }
+
+    /// Checks the regular expressions in filters constructed programmatically.
+    pub fn validate(&self) -> Result<(), IgfdFilterParseError> {
+        for token in &self.extensions {
+            if token.trim_start().starts_with("((") {
+                let pattern = regex_token(token).ok_or_else(|| {
+                    IgfdFilterParseError::new(format!("unterminated regex token {token:?}"))
+                })?;
+                build_filter_regex(pattern).map_err(|error| {
+                    IgfdFilterParseError::new(format!("invalid regex {pattern:?}: {error}"))
+                })?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -159,7 +171,7 @@ impl From<(&str, &[&str])> for FileFilter {
                 .1
                 .iter()
                 .map(|s| {
-                    if is_regex_token(s) {
+                    if s.trim_start().starts_with("((") || s.contains(['*', '?']) {
                         (*s).to_string()
                     } else {
                         s.to_lowercase()
@@ -170,9 +182,14 @@ impl From<(&str, &[&str])> for FileFilter {
     }
 }
 
-fn is_regex_token(token: &str) -> bool {
-    let t = token.trim();
-    t.starts_with("((") && t.ends_with("))") && t.len() >= 4
+pub(crate) fn regex_token(token: &str) -> Option<&str> {
+    token.trim().strip_prefix("((")?.strip_suffix("))")
+}
+
+pub(crate) fn build_filter_regex(pattern: &str) -> Result<regex::Regex, regex::Error> {
+    regex::RegexBuilder::new(pattern)
+        .case_insensitive(true)
+        .build()
 }
 
 fn split_igfd_commas(input: &str) -> Vec<&str> {
@@ -352,6 +369,12 @@ pub enum FileDialogError {
     /// Requested operation unsupported by the chosen backend
     #[error("unsupported operation for backend")]
     Unsupported,
+    /// The selected ImGui backend must be drawn with a live ImGui UI.
+    #[error("the ImGui backend requires drawing an embedded FileDialogState")]
+    ImGuiBackendRequiresUi,
+    /// A configured filter contains an invalid regular expression.
+    #[error(transparent)]
+    InvalidFilter(#[from] IgfdFilterParseError),
     /// Background scanning is unavailable for the current target.
     #[error("background scanning is unsupported on this target")]
     BackgroundScanUnsupported,
@@ -441,24 +464,20 @@ pub enum SortBy {
 }
 
 /// String comparison mode used for sorting.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum SortMode {
     /// Natural ordering (e.g. `file2` < `file10`).
+    #[default]
     Natural,
     /// Simple lexicographic ordering on lowercased strings.
     Lexicographic,
-}
-
-impl Default for SortMode {
-    fn default() -> Self {
-        Self::Natural
-    }
 }
 
 /// Builder for launching file dialogs
 #[derive(Clone, Debug)]
 pub struct FileDialog {
     pub(crate) backend: Backend,
+    #[cfg(all(feature = "native-rfd", not(target_arch = "wasm32")))]
     pub(crate) mode: DialogMode,
     pub(crate) start_dir: Option<PathBuf>,
     pub(crate) default_name: Option<String>,
@@ -473,6 +492,7 @@ impl FileDialog {
     pub fn new(mode: DialogMode) -> Self {
         Self {
             backend: Backend::Auto,
+            #[cfg(all(feature = "native-rfd", not(target_arch = "wasm32")))]
             mode,
             start_dir: None,
             default_name: None,
@@ -571,15 +591,25 @@ impl FileDialog {
     }
 }
 
-// Default stubs when native feature is disabled
-#[cfg(not(feature = "native-rfd"))]
 impl FileDialog {
-    /// Open a dialog synchronously (blocking). Unsupported without `native-rfd`.
+    pub(crate) fn require_native_backend(&self) -> Result<(), FileDialogError> {
+        if matches!(self.backend, Backend::ImGui) {
+            return Err(FileDialogError::ImGuiBackendRequiresUi);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(any(not(feature = "native-rfd"), target_arch = "wasm32"))]
+impl FileDialog {
+    /// Returns a backend error when native desktop dialogs are unavailable.
     pub fn open_blocking(self) -> Result<Selection, FileDialogError> {
+        self.require_native_backend()?;
         Err(FileDialogError::Unsupported)
     }
-    /// Open a dialog asynchronously. Unsupported without `native-rfd`.
+    /// Returns a backend error when native desktop dialogs are unavailable.
     pub async fn open_async(self) -> Result<Selection, FileDialogError> {
+        self.require_native_backend()?;
         Err(FileDialogError::Unsupported)
     }
 }
@@ -587,6 +617,26 @@ impl FileDialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_imgui_backend_rejects_standalone_entry_points() {
+        let dialog = FileDialog::new(DialogMode::OpenFile).backend(Backend::ImGui);
+        assert!(matches!(
+            dialog.clone().open_blocking(),
+            Err(FileDialogError::ImGuiBackendRequiresUi)
+        ));
+        assert!(matches!(
+            pollster::block_on(dialog.open_async()),
+            Err(FileDialogError::ImGuiBackendRequiresUi)
+        ));
+    }
+
+    #[test]
+    fn parses_regex_filters_without_accepting_invalid_patterns() {
+        assert!(FileFilter::parse_igfd("Images{((.*\\.png$)),.jpg}").is_ok());
+        assert!(FileFilter::parse_igfd("Images{(([)),.jpg}").is_err());
+        assert!(FileFilter::parse_igfd("((unfinished").is_err());
+    }
 
     #[test]
     fn file_filter_new_normalizes_extensions_to_lowercase_but_preserves_regex() {

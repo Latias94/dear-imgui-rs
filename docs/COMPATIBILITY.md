@@ -2,6 +2,26 @@
 
 This document tracks compatibility across the workspace crates, upstream Dear ImGui, and key external dependencies. The root README shows the latest recommendations; this file keeps version history and compatibility policy.
 
+## 0.24 Development Workspace
+
+All workspace crates, including Bevy, require Rust 1.97.1. Development uses Rust 1.100.0.
+Canonical binding generation uses the separate Rust 1.95.0 formatter and LLVM 14.
+The release catalog contains 30 crates. `dear-imgui-backend-support` ships alongside the core and
+renderer crates. WGPU integrations use WGPU 30. Ash and WGPU accept both native multi-viewport
+platform features in one build and select a route for each Context.
+See the [0.24 migration guide](MIGRATING_0_24.md) for source changes.
+
+### Dear ImGui 1.93.1 upstream alignment
+
+Dear ImGui tagged `v1.93.1-docking` at `144727fad6ded3055d388dadc4072c9c25ee1891`.
+As of 2026-11-28, `cimgui/docking_inter` at `2a6a93fccd10f275ee9206167dc9698f6f00fac1`
+still embeds Dear ImGui 1.93.0 (`19300`) at `6d32174508fb8c518e7a832cc1d571fadd5cba76`.
+The 0.24 development workspace uses cimgui `5d7cc7e12de9a868bbecc00ce2ed74e58d266f1c`
+with Dear ImGui 1.93.1 WIP (`19301`) at `d88f238d1d363ef387382b2e29ad12cf96f826ac`.
+The Test Engine is pinned at `10a5c08e78619274e3c943d69a5765ac2132b7a4`.
+`UPG-01` tracks integration of the formal docking release after cimgui regenerates its wrapper for
+that release. [Dear ImGui tag](https://github.com/ocornut/imgui/tree/v1.93.1-docking) · [cimgui revision](https://github.com/cimgui/cimgui/commit/2a6a93fccd10f275ee9206167dc9698f6f00fac1)
+
 ## 0.23 Release Train
 
 All 29 publishable crates share version `0.23.0`. Upgrade their requirements to `"0.23"` together. Applications passing SDL windows or events to the backend should also use `sdl3 = "0.22.1"`. Its `sdl3-sys` 0.7.3 bindings target SDL 3.4.20. The 0.22.0 backend uses `sdl3` 0.20.

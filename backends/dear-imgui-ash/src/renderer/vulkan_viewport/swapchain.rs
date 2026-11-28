@@ -436,22 +436,22 @@ fn swapchain_image_barrier(
     vk::PipelineStageFlags,
     vk::ImageMemoryBarrier<'static>,
 ) {
-    let (src_access, dst_access, src_stage, dst_stage) =
-        if new_layout == vk::ImageLayout::PRESENT_SRC_KHR {
-            (
-                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                vk::AccessFlags::empty(),
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-            )
-        } else {
-            (
-                vk::AccessFlags::empty(),
-                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            )
-        };
+    let src_stage = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
+    let (src_access, dst_access, dst_stage) = if new_layout == vk::ImageLayout::PRESENT_SRC_KHR {
+        (
+            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            vk::AccessFlags::empty(),
+            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+        )
+    } else {
+        // Chain the layout transition to the image-available wait at COLOR_ATTACHMENT_OUTPUT.
+        // Blending reads the color attachment as well as writing it.
+        (
+            vk::AccessFlags::empty(),
+            vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+        )
+    };
     let barrier = vk::ImageMemoryBarrier::default()
         .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
@@ -497,12 +497,39 @@ mod dynamic_tests {
     use super::*;
 
     #[test]
-    fn swapchain_barriers_do_not_transfer_queue_family_ownership() {
-        let (_, _, barrier) = swapchain_image_barrier(
+    fn swapchain_acquire_wait_precedes_color_attachment_reads_and_writes() {
+        for old_layout in [vk::ImageLayout::UNDEFINED, vk::ImageLayout::PRESENT_SRC_KHR] {
+            let (src_stage, dst_stage, barrier) = swapchain_image_barrier(
+                vk::Image::null(),
+                old_layout,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            );
+            assert_eq!(src_stage, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT);
+            assert_eq!(dst_stage, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT);
+            assert!(barrier.src_access_mask.is_empty());
+            assert_eq!(
+                barrier.dst_access_mask,
+                vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            );
+            assert_eq!(barrier.src_queue_family_index, vk::QUEUE_FAMILY_IGNORED);
+            assert_eq!(barrier.dst_queue_family_index, vk::QUEUE_FAMILY_IGNORED);
+        }
+    }
+
+    #[test]
+    fn swapchain_present_waits_for_color_attachment_writes() {
+        let (src_stage, dst_stage, barrier) = swapchain_image_barrier(
             vk::Image::null(),
-            vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            vk::ImageLayout::PRESENT_SRC_KHR,
         );
+        assert_eq!(src_stage, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT);
+        assert_eq!(dst_stage, vk::PipelineStageFlags::BOTTOM_OF_PIPE);
+        assert_eq!(
+            barrier.src_access_mask,
+            vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+        );
+        assert!(barrier.dst_access_mask.is_empty());
         assert_eq!(barrier.src_queue_family_index, vk::QUEUE_FAMILY_IGNORED);
         assert_eq!(barrier.dst_queue_family_index, vk::QUEUE_FAMILY_IGNORED);
     }

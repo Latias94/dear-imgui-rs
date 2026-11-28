@@ -82,7 +82,8 @@ Every integration has this shape:
 ```rust,no_run
 use dear_imgui_rs::{
     Condition, Context,
-    render::{PendingFrame, RendererConsumerError, SynchronousRendererConsumer},
+    FrameError,
+    render::{PendingFrame, SynchronousRendererConsumer},
 };
 
 # struct MyPlatformBackend;
@@ -96,11 +97,11 @@ use dear_imgui_rs::{
 #     fn prepare_render(&mut self, _: &mut Context, _: &MyWindow) {}
 # }
 # impl MyRendererBackend {
-#     fn new(context: &mut Context) -> Result<Self, RendererConsumerError> {
+#     fn new(context: &mut Context) -> Result<Self, FrameError> {
 #         Ok(Self { consumer: context.create_synchronous_renderer_consumer()? })
 #     }
 #     fn consumer(&self) -> &SynchronousRendererConsumer { &self.consumer }
-#     fn render(&mut self, _frame: PendingFrame<'_>) -> Result<(), RendererConsumerError> {
+#     fn render(&mut self, _frame: PendingFrame<'_>) -> Result<(), FrameError> {
 #         // Implement the request/reconcile/draw sequence in the complete template below.
 #         todo!()
 #     }
@@ -281,6 +282,10 @@ A synchronous renderer must preserve these invariants:
 - During shutdown, call `Context::prepare_renderer_texture_reset` while the complete resource map
   still exists. Release resources only after preparation succeeds, then commit the permit and drop
   the consumer. A failed preparation must leave the renderer intact and retryable.
+- To release a renderer without borrowing its Context, retain the consumer's `reset_signal()`.
+  After releasing renderer-owned callbacks and GPU resources with the synchronization required by
+  the backend, call `mark_renderer_dropped()` and drop the consumer. The Context resets its
+  texture bindings after outstanding epochs drain, before a replacement renderer uses them.
 
 For a detached render thread or render graph, use the separate move-only snapshot example described
 below. Do not combine synchronous and detached consumer modes in one renderer instance.
@@ -308,7 +313,8 @@ The Bevy backend demonstrates the engine-owned form of this split: a main-thread
 One managed renderer must own one Context-local texture namespace. Multiple Contexts may share a
 `SharedFontAtlas` only while they use legacy rendering. Managed atlas rendering requires exactly
 one registered Context and a committed renderer reset before Context teardown; use a separate
-atlas for each independently managed renderer.
+atlas for each independently managed renderer. A confirmed release through `RendererResetSignal`
+also lets the Context commit that reset during teardown.
 
 ## Multi-viewport Policy
 
@@ -381,8 +387,8 @@ and call `commit()` only after cleanup succeeds. Dropping an uncommitted permit
 keeps the exact platform generation attached for a retry. Do not release native
 platform state first and then rely on `ContextAttachmentLease::detach()` to
 detect a dependency; that check is intentionally too late for transactional
-shutdown. `detach()` now returns `Result<bool, ContextAttachmentDetachError>`:
-an error means the attachment is still live, so native cleanup must not continue.
+shutdown. `detach()` returns `Result<bool, ContextError>`. On error, keep the attachment and its
+native resources live so shutdown can be retried.
 Context-owned teardown already applies renderer-before-platform order.
 
 An engine integration must not mutate ECS or a render world from `Drop`. Transfer the complete Context owner, callback backing storage, renderer consumer, in-flight mailbox, and release leases into an app-local retirement queue. The engine schedule then quiesces new frames, waits for render-world and viewport-entity acknowledgements, clears exact native fields, and finally destroys the Context. If the engine executor is already gone, retaining or intentionally leaking the complete owner is safer than releasing callback or GPU state early.

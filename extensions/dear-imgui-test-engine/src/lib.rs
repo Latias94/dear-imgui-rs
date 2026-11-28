@@ -23,11 +23,11 @@ mod tests;
 pub use config::CaptureFlags;
 pub use config::{CaptureOutput, InputMode, RunFlags, RunSpeed, TestGroup, VerboseLevel};
 pub use counts::{ScriptCount, ScriptLimit};
-pub use engine::TestEngine;
+pub use engine::{TestEngine, TestEngineUiExt};
 pub use error::{TestEngineError, TestEngineResult, TestEngineStatus};
 pub use frame_driver::{
-    CaptureProviderError, FrameDriveOutcome, FrameDriverError, FrameDriverPhase, MainRenderOutcome,
-    RunMode, TestFrameDriver,
+    CaptureProviderError, FrameDriveOutcome, FrameDriveResult, FrameDriverError, FrameDriverPhase,
+    MainRenderOutcome, RunMode, TestFrameDriver,
 };
 #[cfg(feature = "capture")]
 pub use frame_driver::{CaptureRequest, CapturingTestFrameDriver, Rgba8};
@@ -36,7 +36,8 @@ pub use results::{ResultSummary, RunOutcome, RunReport, RunTestResult, RunTestSt
 #[cfg(feature = "capture")]
 pub use runner::{CapturingDriverRunResult, CapturingRunnerError};
 pub use runner::{
-    HeadlessPrepareError, HeadlessRunnerError, RunnerControl, RunnerError, TestRunner,
+    DriverRunResult, HeadlessPrepareError, HeadlessRunnerError, RunnerControl, RunnerError,
+    TestRunner,
 };
 pub use script::ScriptTest;
 pub use state::{AttachmentState, RunState};

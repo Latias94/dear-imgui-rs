@@ -3,14 +3,16 @@
 use super::extract::{
     extract_imgui_bevy_textures, extract_imgui_render_frame, resolve_extracted_imgui_render_routes,
 };
+use super::lifecycle::{
+    commit_imgui_render_frame, initialize_imgui_gpu_resources, release_imgui_renderer_resources,
+};
 use super::pass::{ensure_presentable_window_outputs, render_imgui_overlay};
 use super::pipeline::queue_imgui_pipelines;
 use super::prepare::{
-    acknowledge_retired_bevy_image_textures, commit_imgui_render_frame,
-    initialize_imgui_gpu_resources, prepare_imgui_render_frame, prepare_imgui_texture_bind_groups,
-    prepare_imgui_uniform_bind_groups, release_imgui_renderer_resources, upload_imgui_buffers,
+    prepare_imgui_render_frame, prepare_imgui_uniform_bind_groups, upload_imgui_buffers,
 };
 use super::resources::{ImguiRenderDeviceState, ImguiRenderExtractionInstalled};
+use super::texture::{acknowledge_retired_bevy_image_textures, prepare_imgui_texture_bind_groups};
 use super::*;
 
 /// Stable render-world ordering points for passes that compose with Dear ImGui.

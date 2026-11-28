@@ -4,6 +4,21 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+/// Environment flag set for the one sys crate being packaged.
+pub fn package_crate_env(crate_name: &str) -> String {
+    format!(
+        "DEAR_IMGUI_RS_PACKAGE_{}",
+        crate_name.replace('-', "_").to_ascii_uppercase()
+    )
+}
+
+/// Whether the packager requested this crate's source archive metadata.
+pub fn is_packaging(crate_name: &str) -> bool {
+    let name = package_crate_env(crate_name);
+    println!("cargo:rerun-if-env-changed={name}");
+    crate::parse_bool_env(&name)
+}
+
 /// How a native core or extension obtains its library, independently of bindings.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum NativeBuildMode {
@@ -49,21 +64,13 @@ impl PrebuiltSource {
     ) -> Result<PathBuf, String> {
         let directory = match self {
             Self::LibraryDir(directory) => directory.clone(),
-            Self::Archive(source) => {
-                if !source.starts_with("http://") && !source.starts_with("https://") {
-                    println!(
-                        "cargo:rerun-if-changed={}",
-                        source.strip_prefix("file://").unwrap_or(source)
-                    );
-                }
-                crate::download_prebuilt(
-                    &explicit_cache_root(cache_root, source),
-                    source,
-                    library_name,
-                    target_env,
-                )
-                .map_err(|error| format!("explicit prebuilt {source:?}: {error}"))?
-            }
+            Self::Archive(source) => crate::download_prebuilt(
+                &explicit_cache_root(cache_root, source),
+                source,
+                library_name,
+                target_env,
+            )
+            .map_err(|error| format!("explicit prebuilt: {error}"))?,
             Self::PackageDir(directory) => {
                 println!("cargo:rerun-if-changed={}", directory.display());
                 let archive = archive_names.iter().map(|name| directory.join(name))
@@ -358,13 +365,13 @@ fn parse_flag(name: &str, value: Option<&str>) -> Result<bool, String> {
     }
 }
 
-fn explicit_cache_root(root: &Path, source: &str) -> PathBuf {
+pub(super) fn explicit_cache_root(root: &Path, source: &str) -> PathBuf {
     let hash = source
         .bytes()
         .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
             (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
         });
-    root.join(format!("explicit-{hash:016x}"))
+    root.join(format!("x-{hash:016x}"))
 }
 
 /// Diagnose an extraction root without silently changing the user's explicit selection.
@@ -395,10 +402,9 @@ mod tests {
 
     #[test]
     fn auto_is_source_capable_without_a_download_opt_in() {
-        assert_eq!(
-            options().resolve("IMGUI_SYS").unwrap().mode,
-            NativeBuildMode::Auto
-        );
+        let plan = options().resolve("IMGUI_SYS").unwrap();
+        assert_eq!(plan.mode(), NativeBuildMode::Auto);
+        assert!(!plan.finish_prebuilt_lookup(false).unwrap());
     }
 
     #[test]

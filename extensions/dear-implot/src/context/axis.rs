@@ -1,13 +1,14 @@
 use super::validation::{
     assert_axis_constraint_range, assert_axis_limit_range, assert_axis_zoom_range,
-    assert_finite_f64_slice, axis_tick_count_to_i32,
+    assert_finite_f64_slice, axis_tick_count_to_i32, is_valid_axis_range,
 };
 use super::{PlotSetup, PlotUi};
 use crate::{Axis, AxisFlags, AxisFormat, AxisScale, PlotCond, XAxis, YAxis, sys};
 use dear_imgui_rs::with_scratch_txt;
+use std::cell::Cell;
 use std::os::raw::c_char;
 
-impl PlotSetup<'_> {
+impl<'links> PlotSetup<'_, 'links> {
     /// Enable and label an X axis.
     pub fn setup_x_axis(&self, axis: XAxis, label: Option<&str>, flags: AxisFlags) {
         self.setup_axis(axis.into(), label, flags);
@@ -27,18 +28,17 @@ impl PlotSetup<'_> {
                 Some(label) => with_scratch_txt(label, configure),
                 None => configure(std::ptr::null()),
             }
-            // BeginPlot applies next settings before secondary axes can be enabled. Apply
-            // their pending links and range once, in the same order as ApplyNextPlotData.
+            // BeginPlot applies next settings before secondary axes can be enabled.
+            // Apply their pending range once when the axis is enabled.
             if enabling {
-                let next = &(*sys::ImPlot_GetCurrentContext()).NextPlotData;
-                sys::ImPlot_SetupAxisLinks(axis.to_sys(), next.LinkedMin[idx], next.LinkedMax[idx]);
-                if next.HasRange[idx] {
-                    let range = next.Range[idx];
+                let next = &raw const (*sys::ImPlot_GetCurrentContext()).NextPlotData;
+                if (*next).HasRange[idx] {
+                    let range = (*next).Range[idx];
                     sys::ImPlot_SetupAxisLimits(
                         axis.to_sys(),
                         range.Min,
                         range.Max,
-                        next.RangeCond[idx],
+                        (*next).RangeCond[idx],
                     );
                 }
             }
@@ -61,51 +61,59 @@ impl PlotSetup<'_> {
         })
     }
 
-    /// Link an enabled axis to external min/max values for the active plot.
+    /// Link an enabled axis to external min/max cells for this plot.
     ///
-    /// # Safety
+    /// The cells must outlive the entire [`PlotUi::with_plot_setup`] call. Their values are
+    /// read during setup and the final valid limits are written back after `EndPlot`, even
+    /// on unwind. ImPlot never receives the cells' addresses, so edits to the cells during
+    /// drawing do not affect the current plot and can be overwritten by writeback.
     ///
-    /// The axis must be enabled. Keep each value initialized at a stable, distinct address
-    /// until this plot ends, including unwinding. Do not otherwise access a linked value.
-    /// The plot writes its final limits and clears the cached pointers when it ends.
+    /// This replaces the axis's existing links, including any automatic subplot links.
+    /// `None` or a non-finite value leaves that endpoint unlinked. If the new limits would
+    /// not make an increasing range with finite width, neither endpoint is linked and the
+    /// current limits are unchanged.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the axis is not enabled.
     ///
     /// ```compile_fail
-    /// use dear_implot::{Axis, PlotSetup};
-    /// fn link(plot_ui: &PlotSetup<'_>, min: &mut f64, max: &mut f64) {
-    ///     plot_ui.setup_axis_links(Axis::Y1, Some(min), Some(max));
+    /// use dear_implot::{Axis, PlotUi};
+    /// use std::cell::Cell;
+    ///
+    /// fn link_local(plots: &PlotUi<'_>) {
+    ///     plots.with_plot_setup("linked", [240.0, 180.0], |setup| {
+    ///         let min = Cell::new(0.0);
+    ///         setup.setup_axis_links(Axis::X1, Some(&min), None);
+    ///     }, |_| ());
     /// }
     /// ```
-    pub unsafe fn setup_axis_links(
-        &self,
+    pub fn setup_axis_links(
+        &mut self,
         axis: Axis,
-        link_min: Option<&mut f64>,
-        link_max: Option<&mut f64>,
+        link_min: Option<&'links Cell<f64>>,
+        link_max: Option<&'links Cell<f64>>,
     ) {
-        let pmin = link_min.map_or(std::ptr::null_mut(), |r| r as *mut f64);
-        let pmax = link_max.map_or(std::ptr::null_mut(), |r| r as *mut f64);
-        self.plot.with_axes(&[axis.to_sys()], || unsafe {
-            sys::ImPlot_SetupAxisLinks(axis.to_sys(), pmin, pmax)
-        })
-    }
+        let index = axis as usize;
+        let link_min = link_min.filter(|cell| cell.get().is_finite());
+        let link_max = link_max.filter(|cell| cell.get().is_finite());
+        self.axis_links[index] = self.plot.with_axes(&[axis.to_sys()], || unsafe {
+            sys::ImPlot_SetupAxisLinks(axis.to_sys(), std::ptr::null_mut(), std::ptr::null_mut());
+            if link_min.is_none() && link_max.is_none() {
+                return (None, None);
+            }
 
-    /// Link a raw axis to external min/max values (live binding).
-    ///
-    /// # Safety
-    ///
-    /// `axis` must be a valid ImPlot `ImAxis` value for the active plot. Passing an
-    /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
-    /// The axis must be enabled. The storage and access requirements of [`Self::setup_axis_links`] apply.
-    pub unsafe fn setup_axis_links_unchecked(
-        &self,
-        axis: sys::ImAxis,
-        link_min: Option<&mut f64>,
-        link_max: Option<&mut f64>,
-    ) {
-        let pmin = link_min.map_or(std::ptr::null_mut(), |r| r as *mut f64);
-        let pmax = link_max.map_or(std::ptr::null_mut(), |r| r as *mut f64);
-        self.plot.with_axes(&[axis], || unsafe {
-            sys::ImPlot_SetupAxisLinks(axis, pmin, pmax)
-        })
+            let native_axis = &raw mut (*sys::ImPlot_GetCurrentPlot()).Axes[index];
+            let range = (*native_axis).Range;
+            let min = link_min.map_or(range.Min, Cell::get);
+            let max = link_max.map_or(range.Max, Cell::get);
+            if !is_valid_axis_range(min, max) {
+                return (None, None);
+            }
+
+            sys::ImPlotAxis_SetRange_double(native_axis, min, max);
+            (link_min, link_max)
+        });
     }
 
     /// Setup both axes labels/flags at once
@@ -374,53 +382,6 @@ impl PlotUi<'_> {
         self.with_bound_context(|| unsafe {
             sys::ImPlot_SetNextAxisLimits(axis as sys::ImAxis, min, max, cond as sys::ImPlotCond)
         })
-    }
-
-    /// Link an axis to external min/max values for the next plot.
-    ///
-    /// # Safety
-    ///
-    /// Primary axes consume these links at `BeginPlot`. Enable a secondary axis in the setup
-    /// closure to apply its pending links.
-    /// Keep values initialized, stable, distinct and otherwise inaccessible until the plot
-    /// that consumes these settings has ended, the pending links are cleared, or the context
-    /// is destroyed. A skipped call or a frame boundary is insufficient to establish this.
-    ///
-    /// ```compile_fail
-    /// use dear_implot::{Axis, PlotUi};
-    /// fn link(plot_ui: &PlotUi<'_>, min: &mut f64, max: &mut f64) {
-    ///     plot_ui.set_next_axis_links(Axis::Y1, Some(min), Some(max));
-    /// }
-    /// ```
-    pub unsafe fn set_next_axis_links(
-        &self,
-        axis: Axis,
-        link_min: Option<&mut f64>,
-        link_max: Option<&mut f64>,
-    ) {
-        let pmin = link_min.map_or(std::ptr::null_mut(), |r| r as *mut f64);
-        let pmax = link_max.map_or(std::ptr::null_mut(), |r| r as *mut f64);
-        self.with_bound_context(|| unsafe {
-            sys::ImPlot_SetNextAxisLinks(axis.to_sys(), pmin, pmax)
-        })
-    }
-
-    /// Link a raw axis to external min/max values for the next plot.
-    ///
-    /// # Safety
-    ///
-    /// `axis` must be a valid ImPlot `ImAxis` value. Passing an out-of-range
-    /// value lets ImPlot index internal next-plot arrays out of bounds.
-    /// The storage and access requirements of [`Self::set_next_axis_links`] apply.
-    pub unsafe fn set_next_axis_links_unchecked(
-        &self,
-        axis: sys::ImAxis,
-        link_min: Option<&mut f64>,
-        link_max: Option<&mut f64>,
-    ) {
-        let pmin = link_min.map_or(std::ptr::null_mut(), |r| r as *mut f64);
-        let pmax = link_max.map_or(std::ptr::null_mut(), |r| r as *mut f64);
-        self.with_bound_context(|| unsafe { sys::ImPlot_SetNextAxisLinks(axis, pmin, pmax) })
     }
 
     /// Set limits for both axes on the next plot

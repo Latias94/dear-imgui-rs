@@ -143,6 +143,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
+name = "dear-imgui-backend-support"
+version = "0.23.0"
+dependencies = [
+ "dear-imgui-rs",
+ "thiserror",
+]
+
+[[package]]
 name = "dear-imgui-build-support"
 version = "0.23.0"
 dependencies = [
@@ -170,8 +178,10 @@ version = "0.23.0"
 dependencies = [
  "bitflags",
  "dear-imgui-sys",
+ "mint",
  "parking_lot 0.13.0",
  "thiserror",
+ "ttf-parser",
 ]
 
 [[package]]
@@ -201,6 +211,7 @@ name = "dear-imgui-wgpu"
 version = "0.23.0"
 dependencies = [
  "bytemuck",
+ "dear-imgui-backend-support",
  "dear-imgui-rs",
  "thiserror",
  "wgpu",
@@ -1087,6 +1098,12 @@ checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
  "pin-project-lite",
 ]
+
+[[package]]
+name = "ttf-parser"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
 name = "unicode-ident"

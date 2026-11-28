@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import shlex
 import subprocess
 import sys
 import tomllib
@@ -67,54 +66,6 @@ SYS_CRATES = (
     "dear-imgui-test-engine-sys",
 )
 
-RENDERER_FEATURE_CONFLICTS = (
-    (
-        "wgpu-dual-major",
-        "Features `wgpu-27`, `wgpu-28`, `wgpu-29`, and `wgpu-30` are "
-        "mutually exclusive; enable only one.",
-        (
-            "cargo",
-            "check",
-            "-p",
-            "dear-imgui-wgpu",
-            "--lib",
-            "--no-default-features",
-            "--features",
-            "wgpu-29,wgpu-30",
-        ),
-    ),
-    (
-        "wgpu-dual-platform",
-        "Features `multi-viewport-winit` and `multi-viewport-sdl3` are mutually "
-        "exclusive; enable only one.",
-        (
-            "cargo",
-            "check",
-            "-p",
-            "dear-imgui-wgpu",
-            "--lib",
-            "--no-default-features",
-            "--features",
-            "wgpu-30,multi-viewport-winit,multi-viewport-sdl3",
-        ),
-    ),
-    (
-        "ash-dual-platform",
-        "dear-imgui-ash cannot enable both `multi-viewport-winit` and "
-        "`multi-viewport-sdl3`; select one platform surface adapter",
-        (
-            "cargo",
-            "check",
-            "-p",
-            "dear-imgui-ash",
-            "--lib",
-            "--no-default-features",
-            "--features",
-            "multi-viewport-winit,multi-viewport-sdl3,render-pass",
-        ),
-    ),
-)
-
 
 def _command_arguments(arguments: Sequence[str]) -> list[str]:
     command = list(arguments)
@@ -152,13 +103,6 @@ def expect_failure(
             f"command: {rendered}\n{details}\n{output.rstrip()}"
         )
     print(f"Verified expected failure: {label}")
-
-
-def check_renderer_feature_conflicts() -> None:
-    """Verify every renderer feature exclusivity contract."""
-    for label, expected, command in RENDERER_FEATURE_CONFLICTS:
-        with github_group(label):
-            expect_failure(label, (expected,), command)
 
 
 def check_unified_prebuilt_test_engine() -> None:
@@ -218,21 +162,12 @@ def check_no_default_bindgen() -> None:
 
 
 def run_clippy(cargo_arguments: Sequence[str]) -> None:
-    """Run Clippy with the repository's explicit historical lint baseline."""
+    """Run Clippy with every warning denied."""
     arguments = _command_arguments(cargo_arguments)
     if "--" in arguments:
         raise VerificationError("run_contract.py owns the Clippy -- delimiter")
-    raw_lints = os.environ.get("CLIPPY_HISTORICAL_LINTS", "")
-    historical_lints = shlex.split(raw_lints)
-    if not historical_lints or len(historical_lints) % 2 != 0:
-        raise VerificationError("CLIPPY_HISTORICAL_LINTS must contain flag/value pairs")
-    if any(
-        historical_lints[index] != "-A"
-        for index in range(0, len(historical_lints), 2)
-    ):
-        raise VerificationError("CLIPPY_HISTORICAL_LINTS may contain only -A allowances")
     run(
-        ("cargo", "clippy", *arguments, "--", "-D", "warnings", *historical_lints),
+        ("cargo", "clippy", *arguments, "--", "-D", "warnings"),
         cwd=WORKSPACE_ROOT,
     )
 
@@ -546,14 +481,10 @@ def _build_parser() -> argparse.ArgumentParser:
     expected_failure.add_argument("command", nargs=argparse.REMAINDER)
 
     clippy = commands.add_parser(
-        "clippy", help="Run Clippy with the historical lint baseline"
+        "clippy", help="Run strict Clippy"
     )
     clippy.add_argument("cargo_arguments", nargs=argparse.REMAINDER)
 
-    commands.add_parser(
-        "renderer-feature-conflicts",
-        help="Reject mutually exclusive renderer feature combinations",
-    )
     commands.add_parser(
         "prebuilt-test-engine",
         help="Verify source-only test-engine wins over prebuilt selection",
@@ -703,8 +634,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif args.contract == "clippy":
             run_clippy(args.cargo_arguments)
-        elif args.contract == "renderer-feature-conflicts":
-            check_renderer_feature_conflicts()
         elif args.contract == "prebuilt-test-engine":
             check_unified_prebuilt_test_engine()
         elif args.contract == "no-default-bindgen":

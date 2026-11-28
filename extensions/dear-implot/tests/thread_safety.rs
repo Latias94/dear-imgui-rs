@@ -8,6 +8,6 @@ fn thread_safety_implot_context_not_send_sync() {
 
 #[test]
 fn plot_capabilities_stay_on_the_owner_thread() {
-    assert_not_impl_any!(dear_implot::PlotSetup<'static>: Send, Sync);
+    assert_not_impl_any!(dear_implot::PlotSetup<'static, 'static>: Send, Sync);
     assert_not_impl_any!(dear_implot::PlotScope<'static>: Send, Sync);
 }

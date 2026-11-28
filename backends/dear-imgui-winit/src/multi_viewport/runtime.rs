@@ -10,10 +10,8 @@ use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 use web_time::Instant;
 
-use dear_imgui_rs::{
-    Context, ContextAttachmentTeardownError, ContextBinding, ContextBindingError, ContextDestroyed,
-    ContextTeardown,
-};
+use dear_imgui_rs::error::context::BindingKind;
+use dear_imgui_rs::{Context, ContextBinding, ContextDestroyed, ContextError, ContextTeardown};
 #[cfg(test)]
 use winit::event::Event;
 use winit::event_loop::ActiveEventLoop;
@@ -638,7 +636,7 @@ impl RuntimeControl {
             });
         match shutdown_result {
             Ok(result) => result,
-            Err(ContextBindingError::Dropping | ContextBindingError::NativeDestroyed) => {
+            Err(ContextError::Binding(BindingKind::Dropping | BindingKind::NativeDestroyed)) => {
                 // Context-owned teardown either has taken over or has already completed.
                 Ok(())
             }
@@ -1024,7 +1022,7 @@ impl RuntimeControl {
     pub(crate) fn release_from_platform_teardown(
         &self,
         context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         if !matches!(self.state.get(), RuntimeState::ShuttingDown) {
             return Ok(());
         }
@@ -1040,7 +1038,7 @@ impl RuntimeControl {
             .map_err(|error| {
                 let message = error.to_string();
                 self.record_fault(error);
-                ContextAttachmentTeardownError::new(message)
+                ContextError::attachment_teardown(message)
             })
     }
 

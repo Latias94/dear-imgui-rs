@@ -23,7 +23,7 @@ struct ImguiState {
     context: Context,
     platform: WinitPlatform,
     renderer: WgpuRenderer,
-    nodes_context: imnodes::Context,
+    nodes_context: imnodes::ImNodesContext,
     editor_context: imnodes::EditorContext,
     editor_context_b: imnodes::EditorContext,
     editor_context_shader: imnodes::EditorContext,
@@ -132,9 +132,12 @@ struct App {
 
 impl AppWindow {
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
+        let descriptor = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
+            event_loop.owned_display_handle(),
+        ));
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
+            ..descriptor
         });
 
         let window = {
@@ -207,7 +210,7 @@ impl AppWindow {
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
 
         // Setup ImNodes
-        let nodes_context = imnodes::Context::create(&context);
+        let nodes_context = imnodes::ImNodesContext::create(&context);
         let editor_context = nodes_context.create_editor_context();
         let editor_context_b = nodes_context.create_editor_context();
         let editor_context_shader = nodes_context.create_editor_context();
@@ -798,7 +801,7 @@ impl AppWindow {
                         ui.child_window("advanced_style_controls")
                             .size([controls_w, avail[1]])
                             .border(true)
-                            .build(&ui, || {
+                            .build(|| {
                                 ui.text("Style Flags");
                                 ui.checkbox("Grid Lines", &mut self.node_options.show_grid);
                                 ui.checkbox("Primary Lines", &mut self.node_options.primary_lines);
@@ -911,7 +914,7 @@ impl AppWindow {
                         ui.child_window("advanced_style_preview")
                             .size([0.0, avail[1]])
                             .border(true)
-                            .build(&ui, || {
+                            .build(|| {
                                 ui.text("Preview");
 
                                 let editor = ui.imnodes_editor(

@@ -3,7 +3,7 @@ use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
 use dear_imgui_rs::{Condition, Context};
-use dear_implot3d::{Axis3D, Axis3DFlags, Colormap, Plot3DContext};
+use dear_implot3d::{Axis3D, Axis3DFlags, Colormap, ImPlot3DExt, Plot3DContext};
 
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
     static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
@@ -44,20 +44,15 @@ fn plot3d_ui_rejects_a_ui_from_another_context_by_identity() {
     let _guard = test_guard();
     let imgui_a = Context::create();
     let plot_a = Plot3DContext::create(&imgui_a);
-    let suspended_a = imgui_a.suspend_or_panic();
 
     let mut imgui_b = Context::create();
     prepare_imgui(&mut imgui_b);
     {
         let frame = imgui_b.begin_frame();
-        let result = catch_unwind(AssertUnwindSafe(|| plot_a.get_plot_ui(frame.ui())));
-        assert!(result.is_err());
+        assert_rejected("owning ImGui context", || frame.ui().implot3d(&plot_a));
     }
     drop(imgui_b);
 
-    let imgui_a = suspended_a
-        .activate()
-        .unwrap_or_else(|_| panic!("context A should reactivate after context B is dropped"));
     drop(plot_a);
     drop(imgui_a);
 }
@@ -260,6 +255,150 @@ fn tick_counts_are_checked_and_temporary_labels_are_consumed_during_setup() {
             },
             |plot| assert!(plot.get_frame_size()[0] > 0.0),
         )
+        .unwrap();
+}
+
+#[test]
+fn axis_ranges_and_log_domains_are_checked_before_native_setup() {
+    use dear_implot3d::Plot3DCond;
+
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let context = Plot3DContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    frame
+        .ui()
+        .implot3d(&context)
+        .begin_plot("Validated axes")
+        .build_with_setup(
+            |setup| {
+                for (min, max) in [
+                    (f64::NAN, 1.0),
+                    (0.0, f64::INFINITY),
+                    (1.0, 1.0),
+                    (2.0, 1.0),
+                    (f64::MIN, f64::MAX),
+                ] {
+                    assert_rejected("axis limits", || {
+                        setup.setup_axis_limits(Axis3D::X, min, max, Plot3DCond::Always);
+                    });
+                }
+                assert_rejected("Z axis limits", || {
+                    setup.setup_axes_limits(0.0, 1.0, 0.0, 1.0, 2.0, 1.0, Plot3DCond::Always);
+                });
+                assert_rejected("axis limit constraints", || {
+                    setup.setup_axis_limits_constraints(Axis3D::Z, 10.0, 1.0);
+                });
+                assert_rejected("axis zoom constraints", || {
+                    setup.setup_axis_zoom_constraints(Axis3D::Z, 0.0, 10.0);
+                });
+                assert_rejected("axis tick range", || {
+                    setup.setup_axis_ticks_range(Axis3D::Y, 1.0, 0.0, 2, None, true);
+                });
+                assert_rejected("axis ticks must be finite", || {
+                    setup.setup_axis_ticks_values(Axis3D::Y, &[f64::NAN], None, true);
+                });
+                assert_rejected("logarithmic axis limits", || {
+                    setup.setup_axis_log_limits(Axis3D::X, 0.0, 100.0);
+                });
+
+                setup.setup_axis_ticks_values(
+                    Axis3D::X,
+                    &[0.0, 100.0],
+                    Some(&["invalid\0tick", "valid tick"]),
+                    true,
+                );
+                setup.setup_axis_log_limits(Axis3D::X, 1.0, 100.0);
+                assert_rejected("logarithmic axis limits", || {
+                    setup.setup_axis_limits(Axis3D::X, -1.0, 100.0, Plot3DCond::Always);
+                });
+                assert_rejected("logarithmic axis limit constraints", || {
+                    setup.setup_axis_limits_constraints(Axis3D::X, 0.0, 100.0);
+                });
+                assert_rejected("logarithmic axis ticks", || {
+                    setup.setup_axis_ticks_range(Axis3D::X, 0.0, 100.0, 2, None, true);
+                });
+                setup.setup_axis_ticks_values(Axis3D::X, &[1.0, 10.0, 100.0], None, true);
+
+                setup.setup_axis_limits_constraints(Axis3D::Y, -10.0, 10.0);
+                assert_rejected("logarithmic axis limit constraints", || {
+                    setup.setup_axis_log_limits(Axis3D::Y, 1.0, 10.0);
+                });
+                setup.setup_axis_ticks_values(Axis3D::Z, &[0.0, 1.0], None, true);
+                assert_rejected("logarithmic axis ticks", || {
+                    setup.setup_axis_log_limits(Axis3D::Z, 1.0, 10.0);
+                });
+            },
+            |plot| {
+                let [start, midpoint, end] =
+                    [1.0, 10.0, 100.0].map(|value| plot.plot_to_pixels([value, 0.5, 0.5]));
+                assert!((end[0] - start[0]).abs() > 1.0);
+                for coordinate in 0..2 {
+                    let expected = (start[coordinate] + end[coordinate]) * 0.5;
+                    assert!((midpoint[coordinate] - expected).abs() < 0.001);
+                }
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn embedded_nul_rejects_plot_titles_colormap_names_and_item_labels() {
+    use dear_imgui_rs::TextureId;
+    use dear_implot3d::{
+        Image3DByAxes, Image3DByCorners, Line3D, Mesh3D, Plot3D, Plot3DError, Quads3D, Scatter3D,
+        Triangles3D,
+    };
+
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let context = Plot3DContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    let plot_ui = frame.ui().implot3d(&context);
+    assert!(
+        plot_ui
+            .begin_plot("title\0suffix")
+            .build(|_| panic!("invalid title was submitted"))
+            .is_none()
+    );
+    assert!(
+        plot_ui
+            .with_colormap_name("Deep\0suffix", || panic!("invalid name was looked up"))
+            .is_none()
+    );
+
+    plot_ui
+        .begin_plot("valid title")
+        .build(|plot| {
+            let label = "item\0suffix";
+            let coords = [0.2, 0.4, 0.6, 0.8];
+            let points = [[0.2, 0.2, 0.0], [0.6, 0.2, 0.0], [0.2, 0.6, 0.0]];
+            let texture = TextureId::new(1);
+            for result in [
+                Line3D::f32(label, &coords, &coords, &coords).try_plot(plot),
+                Scatter3D::f32(label, &coords, &coords, &coords).try_plot(plot),
+                Triangles3D::points_f32(label, &points).try_plot(plot),
+                Quads3D::f32(label, &coords, &coords, &coords).try_plot(plot),
+                Mesh3D::new(label, &points, &[0, 1, 2]).try_plot(plot),
+                Image3DByAxes::new(label, texture, points[0], points[1], points[2]).try_plot(plot),
+                Image3DByCorners::new(
+                    label,
+                    texture,
+                    points[0],
+                    points[1],
+                    points[2],
+                    [0.6, 0.6, 0.0],
+                )
+                .try_plot(plot),
+            ] {
+                assert!(matches!(result, Err(Plot3DError::StringConversion(_))));
+            }
+            Line3D::f32("valid label", &coords, &coords, &coords)
+                .try_plot(plot)
+                .unwrap();
+        })
         .unwrap();
 }
 

@@ -137,18 +137,18 @@ bitflags::bitflags! {
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Marker3D {
-    Auto = sys::ImPlot3DMarker_Auto as i32,
-    None = sys::ImPlot3DMarker_None as i32,
-    Circle = sys::ImPlot3DMarker_Circle as i32,
-    Square = sys::ImPlot3DMarker_Square as i32,
-    Diamond = sys::ImPlot3DMarker_Diamond as i32,
-    Up = sys::ImPlot3DMarker_Up as i32,
-    Down = sys::ImPlot3DMarker_Down as i32,
-    Left = sys::ImPlot3DMarker_Left as i32,
-    Right = sys::ImPlot3DMarker_Right as i32,
-    Cross = sys::ImPlot3DMarker_Cross as i32,
-    Plus = sys::ImPlot3DMarker_Plus as i32,
-    Asterisk = sys::ImPlot3DMarker_Asterisk as i32,
+    Auto = sys::ImPlot3DMarker_Auto,
+    None = sys::ImPlot3DMarker_None,
+    Circle = sys::ImPlot3DMarker_Circle,
+    Square = sys::ImPlot3DMarker_Square,
+    Diamond = sys::ImPlot3DMarker_Diamond,
+    Up = sys::ImPlot3DMarker_Up,
+    Down = sys::ImPlot3DMarker_Down,
+    Left = sys::ImPlot3DMarker_Left,
+    Right = sys::ImPlot3DMarker_Right,
+    Cross = sys::ImPlot3DMarker_Cross,
+    Plus = sys::ImPlot3DMarker_Plus,
+    Asterisk = sys::ImPlot3DMarker_Asterisk,
 }
 /// 3D axis selector (X/Y/Z)
 #[repr(i32)]
@@ -163,9 +163,8 @@ pub enum Axis3D {
 /// Condition for setup calls (match ImGuiCond)
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-#[allow(clippy::unnecessary_cast)] // Cast is necessary on some platforms where bindgen generates u32
 pub enum Plot3DCond {
-    None = sys::ImPlot3DCond_None as i32,
-    Always = sys::ImPlot3DCond_Always as i32,
-    Once = sys::ImPlot3DCond_Once as i32,
+    None = sys::ImPlot3DCond_None as _,
+    Always = sys::ImPlot3DCond_Always as _,
+    Once = sys::ImPlot3DCond_Once as _,
 }

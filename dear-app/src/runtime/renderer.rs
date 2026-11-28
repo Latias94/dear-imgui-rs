@@ -3,7 +3,7 @@
 use crate::{ExternalTextureError, RunError};
 
 pub(crate) enum AppRenderer {
-    Single(dear_imgui_wgpu::WgpuRenderer),
+    Single(Box<dear_imgui_wgpu::WgpuRenderer>),
     #[cfg(feature = "multi-viewport")]
     Multi(dear_imgui_wgpu::multi_viewport::WinitViewportRoute),
 }
@@ -11,7 +11,7 @@ pub(crate) enum AppRenderer {
 impl AppRenderer {
     pub(crate) fn single_mut(&mut self) -> Result<&mut dear_imgui_wgpu::WgpuRenderer, RunError> {
         match self {
-            Self::Single(renderer) => Ok(renderer),
+            Self::Single(renderer) => Ok(renderer.as_mut()),
             #[cfg(feature = "multi-viewport")]
             Self::Multi(_) => Err(RunError::Recovery {
                 message: "single-window frame used a native viewport route".to_owned(),

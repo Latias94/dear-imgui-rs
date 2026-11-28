@@ -13,8 +13,8 @@ use web_time::Instant;
 use dear_imgui_rs::ContextPlatformWindowTeardown;
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentHandle, ContextAttachmentLease,
-    ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextDestroyed,
-    ContextId, ContextTeardown, NativeWindowInstanceId, NativeWindowTarget,
+    ContextAttachmentRole, ContextBinding, ContextDestroyed, ContextError, ContextId,
+    ContextTeardown, NativeWindowInstanceId, NativeWindowTarget,
 };
 use winit::dpi::PhysicalPosition;
 use winit::window::Window;
@@ -578,7 +578,7 @@ impl ContextAttachment for WinitPlatformControl {
     fn begin_platform_window_teardown(
         &self,
         context: &ContextPlatformWindowTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         let runtime = self.runtime.borrow().clone();
         context
             .with_bound_context(|| -> Result<(), WinitPlatformError> {
@@ -598,14 +598,14 @@ impl ContextAttachment for WinitPlatformControl {
                 }
                 Ok(())
             })
-            .map_err(|error| ContextAttachmentTeardownError::new(error.to_string()))
+            .map_err(|error| ContextError::attachment_teardown(error.to_string()))
     }
 
     #[cfg(feature = "multi-viewport")]
     fn end_platform_window_teardown(
         &self,
         context: &ContextPlatformWindowTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         let runtime = self.runtime.borrow().clone();
         let Some(runtime) = runtime else {
             return Ok(());
@@ -618,13 +618,10 @@ impl ContextAttachment for WinitPlatformControl {
         if runtime.is_released() {
             self.clear_runtime_by_control(&runtime);
         }
-        result.map_err(|error| ContextAttachmentTeardownError::new(error.to_string()))
+        result.map_err(|error| ContextError::attachment_teardown(error.to_string()))
     }
 
-    fn quiesce(
-        &self,
-        _context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn quiesce(&self, _context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         self.binding.clear_ime_preedit();
         self.state.set(PlatformState::ShuttingDown);
         #[cfg(feature = "multi-viewport")]
@@ -637,10 +634,7 @@ impl ContextAttachment for WinitPlatformControl {
         Ok(())
     }
 
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         #[cfg(feature = "multi-viewport")]
         {
             let runtime = self.runtime.borrow().clone();
@@ -650,7 +644,7 @@ impl ContextAttachment for WinitPlatformControl {
         }
         context
             .with_bound_context(|| self.release_base_in_current_context())
-            .map_err(|error| ContextAttachmentTeardownError::new(error.to_string()))
+            .map_err(|error| ContextError::attachment_teardown(error.to_string()))
     }
 
     fn context_destroyed(&self, _context: ContextDestroyed) {
@@ -953,7 +947,7 @@ mod tests {
         drop(platform);
         assert!(context.ime_preedit().is_none());
         assert!(control.attachment_handle().unwrap().is_attached());
-        assert_eq!(renderer.detach(), Ok(true));
+        assert!(renderer.detach().unwrap());
     }
 
     #[test]
@@ -971,12 +965,11 @@ mod tests {
             .unwrap();
         assert!(matches!(
             platform.shutdown(&mut context),
-            Err(WinitPlatformError::PlatformAttachmentRelease(
-                dear_imgui_rs::ContextPlatformAttachmentReleaseError::RendererActive
-            ))
+            Err(WinitPlatformError::Context(error))
+                if matches!(error.context_error(), dear_imgui_rs::ContextError::RendererAttachmentActive)
         ));
         assert!(context.ime_preedit().is_some());
-        assert_eq!(renderer.detach(), Ok(true));
+        assert!(renderer.detach().unwrap());
         platform.shutdown(&mut context).unwrap();
         assert!(context.ime_preedit().is_none());
     }

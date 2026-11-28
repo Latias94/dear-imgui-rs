@@ -468,8 +468,10 @@ mod tests {
 
     #[test]
     fn config_rejects_multi_viewport_before_runtime_initialization() {
-        let mut config = AppConfig::default();
-        config.io_config_flags = Some(ConfigFlags::VIEWPORTS_ENABLE);
+        let config = AppConfig {
+            io_config_flags: Some(ConfigFlags::VIEWPORTS_ENABLE),
+            ..Default::default()
+        };
 
         assert!(matches!(
             validate_config(&config),

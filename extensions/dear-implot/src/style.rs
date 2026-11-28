@@ -16,26 +16,26 @@ const DEFAULT_COLORMAP_SLIDER_FORMAT: &str = "";
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum StyleVar {
-    PlotDefaultSize = sys::ImPlotStyleVar_PlotDefaultSize as i32,
-    PlotMinSize = sys::ImPlotStyleVar_PlotMinSize as i32,
-    PlotBorderSize = sys::ImPlotStyleVar_PlotBorderSize as i32,
-    MinorAlpha = sys::ImPlotStyleVar_MinorAlpha as i32,
-    MajorTickLen = sys::ImPlotStyleVar_MajorTickLen as i32,
-    MinorTickLen = sys::ImPlotStyleVar_MinorTickLen as i32,
-    MajorTickSize = sys::ImPlotStyleVar_MajorTickSize as i32,
-    MinorTickSize = sys::ImPlotStyleVar_MinorTickSize as i32,
-    MajorGridSize = sys::ImPlotStyleVar_MajorGridSize as i32,
-    MinorGridSize = sys::ImPlotStyleVar_MinorGridSize as i32,
-    PlotPadding = sys::ImPlotStyleVar_PlotPadding as i32,
-    LabelPadding = sys::ImPlotStyleVar_LabelPadding as i32,
-    LegendPadding = sys::ImPlotStyleVar_LegendPadding as i32,
-    LegendInnerPadding = sys::ImPlotStyleVar_LegendInnerPadding as i32,
-    LegendSpacing = sys::ImPlotStyleVar_LegendSpacing as i32,
-    MousePosPadding = sys::ImPlotStyleVar_MousePosPadding as i32,
-    AnnotationPadding = sys::ImPlotStyleVar_AnnotationPadding as i32,
-    FitPadding = sys::ImPlotStyleVar_FitPadding as i32,
-    DigitalPadding = sys::ImPlotStyleVar_DigitalPadding as i32,
-    DigitalSpacing = sys::ImPlotStyleVar_DigitalSpacing as i32,
+    PlotDefaultSize = sys::ImPlotStyleVar_PlotDefaultSize as _,
+    PlotMinSize = sys::ImPlotStyleVar_PlotMinSize as _,
+    PlotBorderSize = sys::ImPlotStyleVar_PlotBorderSize as _,
+    MinorAlpha = sys::ImPlotStyleVar_MinorAlpha as _,
+    MajorTickLen = sys::ImPlotStyleVar_MajorTickLen as _,
+    MinorTickLen = sys::ImPlotStyleVar_MinorTickLen as _,
+    MajorTickSize = sys::ImPlotStyleVar_MajorTickSize as _,
+    MinorTickSize = sys::ImPlotStyleVar_MinorTickSize as _,
+    MajorGridSize = sys::ImPlotStyleVar_MajorGridSize as _,
+    MinorGridSize = sys::ImPlotStyleVar_MinorGridSize as _,
+    PlotPadding = sys::ImPlotStyleVar_PlotPadding as _,
+    LabelPadding = sys::ImPlotStyleVar_LabelPadding as _,
+    LegendPadding = sys::ImPlotStyleVar_LegendPadding as _,
+    LegendInnerPadding = sys::ImPlotStyleVar_LegendInnerPadding as _,
+    LegendSpacing = sys::ImPlotStyleVar_LegendSpacing as _,
+    MousePosPadding = sys::ImPlotStyleVar_MousePosPadding as _,
+    AnnotationPadding = sys::ImPlotStyleVar_AnnotationPadding as _,
+    FitPadding = sys::ImPlotStyleVar_FitPadding as _,
+    DigitalPadding = sys::ImPlotStyleVar_DigitalPadding as _,
+    DigitalSpacing = sys::ImPlotStyleVar_DigitalSpacing as _,
 }
 
 /// Runtime ImPlot colormap index.
@@ -477,12 +477,18 @@ impl PlotContext {
 
     /// Return a colormap name, or an empty string if the index is invalid for this context.
     pub fn colormap_name(&self, index: impl Into<ColormapIndex>) -> String {
+        let index = index.into().raw();
         self.with_bound_context("dear-implot: PlotContext::colormap_name()", || unsafe {
-            let p = sys::ImPlot_GetColormapName(index.into().raw());
-            if p.is_null() {
+            if !(0..sys::ImPlot_GetColormapCount()).contains(&index) {
                 return String::new();
             }
-            std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
+            let name = sys::ImPlot_GetColormapName(index);
+            if name.is_null() {
+                return String::new();
+            }
+            std::ffi::CStr::from_ptr(name)
+                .to_string_lossy()
+                .into_owned()
         })
     }
 

@@ -18,31 +18,15 @@
 use crate::sys;
 use crate::texture::TextureRef;
 use crate::ui::Ui;
-use crate::{StyleColor, StyleVar};
+use crate::validation::{assert_finite_vec2, assert_finite_vec4};
+use crate::{Color, StyleColor, StyleVar};
 use std::borrow::Cow;
 
 fn assert_non_negative_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
-    assert!(
-        value[0].is_finite() && value[1].is_finite(),
-        "{caller} {name} must contain finite values"
-    );
+    assert_finite_vec2(caller, name, value);
     assert!(
         value[0] >= 0.0 && value[1] >= 0.0,
         "{caller} {name} must contain non-negative values"
-    );
-}
-
-fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
-    assert!(
-        value[0].is_finite() && value[1].is_finite(),
-        "{caller} {name} must contain finite values"
-    );
-}
-
-fn assert_finite_vec4(caller: &str, name: &str, value: [f32; 4]) {
-    assert!(
-        value.iter().all(|component| component.is_finite()),
-        "{caller} {name} must contain finite values"
     );
 }
 
@@ -52,15 +36,6 @@ fn is_default_tint_color(color: [f32; 4]) -> bool {
 
 fn is_transparent_color(color: [f32; 4]) -> bool {
     color == [0.0, 0.0, 0.0, 0.0]
-}
-
-fn im_vec4(value: [f32; 4]) -> sys::ImVec4 {
-    sys::ImVec4 {
-        x: value[0],
-        y: value[1],
-        z: value[2],
-        w: value[3],
-    }
 }
 
 /// # Image Widgets
@@ -77,7 +52,7 @@ fn im_vec4(value: [f32; 4]) -> sys::ImVec4 {
 /// - Using an ImGui-managed texture:
 /// ```no_run
 /// # use dear_imgui_rs::*;
-/// # fn demo(context: &mut Context) -> Result<(), texture::TextureDataError> {
+/// # fn demo(context: &mut Context) -> Result<(), texture::TextureError> {
 /// let tex = texture::OwnedTextureData::from_pixels(
 ///     texture::TextureFormat::RGBA32,
 ///     64,
@@ -93,8 +68,21 @@ fn im_vec4(value: [f32; 4]) -> sys::ImVec4 {
 impl Ui {
     /// Creates an image widget
     #[doc(alias = "Image")]
-    pub fn image<'tex>(&self, texture: impl Into<TextureRef<'tex>>, size: [f32; 2]) {
+    pub fn image<'tex>(&self, texture: impl Into<TextureRef<'tex>>, size: impl Into<[f32; 2]>) {
         self.image_config(texture, size).build()
+    }
+
+    /// Draws an image with a background and tint.
+    #[doc(alias = "ImageWithBg")]
+    pub fn image_with_bg<'tex>(
+        &self,
+        texture: impl Into<TextureRef<'tex>>,
+        size: impl Into<[f32; 2]>,
+        bg_color: impl Into<Color>,
+        tint_color: impl Into<Color>,
+    ) {
+        self.image_config(texture, size)
+            .build_with_bg(bg_color, tint_color)
     }
 
     /// Creates an image button widget
@@ -103,7 +91,7 @@ impl Ui {
         &self,
         str_id: impl AsRef<str>,
         texture: impl Into<TextureRef<'tex>>,
-        size: [f32; 2],
+        size: impl Into<[f32; 2]>,
     ) -> bool {
         self.image_button_config(str_id.as_ref(), texture, size)
             .build()
@@ -113,7 +101,7 @@ impl Ui {
     pub fn image_config<'ui, 'tex>(
         &'ui self,
         texture: impl Into<TextureRef<'tex>>,
-        size: [f32; 2],
+        size: impl Into<[f32; 2]>,
     ) -> Image<'ui, 'tex> {
         Image::new(self, texture, size)
     }
@@ -123,7 +111,7 @@ impl Ui {
         &'ui self,
         str_id: impl Into<Cow<'ui, str>>,
         texture: impl Into<TextureRef<'tex>>,
-        size: [f32; 2],
+        size: impl Into<[f32; 2]>,
     ) -> ImageButton<'ui, 'tex> {
         ImageButton::new(self, str_id, texture, size)
     }
@@ -133,7 +121,7 @@ impl Ui {
 #[derive(Debug)]
 #[must_use]
 pub struct Image<'ui, 'tex> {
-    _ui: &'ui Ui,
+    ui: &'ui Ui,
     texture: TextureRef<'tex>,
     size: [f32; 2],
     uv0: [f32; 2],
@@ -144,11 +132,15 @@ pub struct Image<'ui, 'tex> {
 
 impl<'ui, 'tex> Image<'ui, 'tex> {
     /// Creates a new image builder
-    pub fn new(ui: &'ui Ui, texture: impl Into<TextureRef<'tex>>, size: [f32; 2]) -> Self {
+    pub fn new(
+        ui: &'ui Ui,
+        texture: impl Into<TextureRef<'tex>>,
+        size: impl Into<[f32; 2]>,
+    ) -> Self {
         Self {
-            _ui: ui,
+            ui,
             texture: texture.into(),
-            size,
+            size: size.into(),
             uv0: [0.0, 0.0],
             uv1: [1.0, 1.0],
             tint_color: [1.0, 1.0, 1.0, 1.0],
@@ -157,14 +149,14 @@ impl<'ui, 'tex> Image<'ui, 'tex> {
     }
 
     /// Sets the UV coordinates for the top-left corner (default: [0.0, 0.0])
-    pub fn uv0(mut self, uv0: [f32; 2]) -> Self {
-        self.uv0 = uv0;
+    pub fn uv0(mut self, uv0: impl Into<[f32; 2]>) -> Self {
+        self.uv0 = uv0.into();
         self
     }
 
     /// Sets the UV coordinates for the bottom-right corner (default: [1.0, 1.0])
-    pub fn uv1(mut self, uv1: [f32; 2]) -> Self {
-        self.uv1 = uv1;
+    pub fn uv1(mut self, uv1: impl Into<[f32; 2]>) -> Self {
+        self.uv1 = uv1.into();
         self
     }
 
@@ -173,8 +165,8 @@ impl<'ui, 'tex> Image<'ui, 'tex> {
     /// Dear ImGui 1.91.9 moved image tinting from `Image()` to `ImageWithBg()`.
     /// If this is set, [`build`](Self::build) will call the tinted path while
     /// keeping a transparent background.
-    pub fn tint_color(mut self, tint_color: [f32; 4]) -> Self {
-        self.tint_color = tint_color;
+    pub fn tint_color(mut self, tint_color: impl Into<Color>) -> Self {
+        self.tint_color = tint_color.into().to_array();
         self
     }
 
@@ -183,97 +175,67 @@ impl<'ui, 'tex> Image<'ui, 'tex> {
     /// Dear ImGui 1.91.9 moved image border thickness to `Style::ImageBorderSize`
     /// and border color to `StyleColor::Border`; this builder applies matching
     /// temporary style overrides around [`build`](Self::build).
-    pub fn border_color(mut self, border_color: [f32; 4]) -> Self {
-        self.border_color = border_color;
+    pub fn border_color(mut self, border_color: impl Into<Color>) -> Self {
+        self.border_color = border_color.into().to_array();
         self
     }
 
     /// Builds the image widget
     pub fn build(self) {
-        assert_non_negative_finite_vec2("Image::build()", "size", self.size);
-        assert_finite_vec2("Image::build()", "uv0", self.uv0);
-        assert_finite_vec2("Image::build()", "uv1", self.uv1);
-        assert_finite_vec4("Image::build()", "tint_color", self.tint_color);
-        assert_finite_vec4("Image::build()", "border_color", self.border_color);
-
-        let size_vec: sys::ImVec2 = self.size.into();
-        let uv0_vec: sys::ImVec2 = self.uv0.into();
-        let uv1_vec: sys::ImVec2 = self.uv1.into();
-
-        let _border_size_token = (self.border_color[3] > 0.0).then(|| {
-            let current_size = self
-                ._ui
-                .run_with_bound_context(|| unsafe { self._ui.style().image_border_size() });
-            self._ui
-                .push_style_var(StyleVar::ImageBorderSize(current_size.max(1.0)))
-        });
-        let _border_color_token = (self.border_color[3] > 0.0).then(|| {
-            self._ui
-                .push_style_color(StyleColor::Border, self.border_color)
-        });
-        let texture = self._ui.run_with_bound_context(|| {
-            self._ui
-                .resolve_texture_ref(self.texture)
-                .unwrap_or_else(|error| panic!("Image::build() rejected texture: {error}"))
-        });
-
-        if is_default_tint_color(self.tint_color) && is_transparent_color(self.border_color) {
-            self._ui.run_with_bound_context(|| unsafe {
-                sys::igImage(texture, size_vec, uv0_vec, uv1_vec)
-            })
-        } else {
-            self._ui.run_with_bound_context(|| unsafe {
-                sys::igImageWithBg(
-                    texture,
-                    size_vec,
-                    uv0_vec,
-                    uv1_vec,
-                    im_vec4([0.0, 0.0, 0.0, 0.0]),
-                    im_vec4(self.tint_color),
-                )
-            })
-        }
+        let tint = self.tint_color;
+        self.submit("Image::build()", None, tint);
     }
 
     /// Builds the image widget with background color and tint (v1.92+)
-    pub fn build_with_bg(self, bg_color: [f32; 4], tint_color: [f32; 4]) {
-        assert_non_negative_finite_vec2("Image::build_with_bg()", "size", self.size);
-        assert_finite_vec2("Image::build_with_bg()", "uv0", self.uv0);
-        assert_finite_vec2("Image::build_with_bg()", "uv1", self.uv1);
-        assert_finite_vec4("Image::build_with_bg()", "bg_color", bg_color);
-        assert_finite_vec4("Image::build_with_bg()", "tint_color", tint_color);
-        assert_finite_vec4("Image::build_with_bg()", "border_color", self.border_color);
+    pub fn build_with_bg(self, bg_color: impl Into<Color>, tint_color: impl Into<Color>) {
+        self.submit(
+            "Image::build_with_bg()",
+            Some(bg_color.into().to_array()),
+            tint_color.into().to_array(),
+        );
+    }
 
-        let size_vec: sys::ImVec2 = self.size.into();
-        let uv0_vec: sys::ImVec2 = self.uv0.into();
-        let uv1_vec: sys::ImVec2 = self.uv1.into();
+    fn submit(self, caller: &str, background: Option<[f32; 4]>, tint: [f32; 4]) {
+        assert_non_negative_finite_vec2(caller, "size", self.size);
+        assert_finite_vec2(caller, "uv0", self.uv0);
+        assert_finite_vec2(caller, "uv1", self.uv1);
+        assert_finite_vec4(caller, "tint_color", tint);
+        assert_finite_vec4(caller, "border_color", self.border_color);
+        if let Some(background) = background {
+            assert_finite_vec4(caller, "bg_color", background);
+        }
 
-        let _border_size_token = (self.border_color[3] > 0.0).then(|| {
-            let current_size = self
-                ._ui
-                .run_with_bound_context(|| unsafe { self._ui.style().image_border_size() });
-            self._ui
-                .push_style_var(StyleVar::ImageBorderSize(current_size.max(1.0)))
-        });
-        let _border_color_token = (self.border_color[3] > 0.0).then(|| {
-            self._ui
-                .push_style_color(StyleColor::Border, self.border_color)
-        });
-        let texture = self._ui.run_with_bound_context(|| {
-            self._ui
+        let ui = self.ui;
+        ui.run_with_bound_context(|| {
+            let texture = ui
                 .resolve_texture_ref(self.texture)
-                .unwrap_or_else(|error| panic!("Image::build_with_bg() rejected texture: {error}"))
-        });
-
-        self._ui.run_with_bound_context(|| unsafe {
-            sys::igImageWithBg(
-                texture,
-                size_vec,
-                uv0_vec,
-                uv1_vec,
-                im_vec4(bg_color),
-                im_vec4(tint_color),
-            )
+                .unwrap_or_else(|error| panic!("{caller} rejected texture: {error}"));
+            let _border_size = (self.border_color[3] > 0.0).then(|| {
+                let current_size = ui.style().image_border_size();
+                ui.push_style_var(StyleVar::ImageBorderSize(current_size.max(1.0)))
+            });
+            let _border_color = (self.border_color[3] > 0.0)
+                .then(|| ui.push_style_color(StyleColor::Border, self.border_color));
+            let size = self.size.into();
+            let uv0 = self.uv0.into();
+            let uv1 = self.uv1.into();
+            unsafe {
+                if background.is_none()
+                    && is_default_tint_color(tint)
+                    && is_transparent_color(self.border_color)
+                {
+                    sys::igImage(texture, size, uv0, uv1);
+                } else {
+                    sys::igImageWithBg(
+                        texture,
+                        size,
+                        uv0,
+                        uv1,
+                        background.unwrap_or_default().into(),
+                        tint.into(),
+                    );
+                }
+            }
         });
     }
 }
@@ -298,13 +260,13 @@ impl<'ui, 'tex> ImageButton<'ui, 'tex> {
         ui: &'ui Ui,
         str_id: impl Into<Cow<'ui, str>>,
         texture: impl Into<TextureRef<'tex>>,
-        size: [f32; 2],
+        size: impl Into<[f32; 2]>,
     ) -> Self {
         Self {
             ui,
             str_id: str_id.into(),
             texture: texture.into(),
-            size,
+            size: size.into(),
             uv0: [0.0, 0.0],
             uv1: [1.0, 1.0],
             bg_color: [0.0, 0.0, 0.0, 0.0],
@@ -313,26 +275,26 @@ impl<'ui, 'tex> ImageButton<'ui, 'tex> {
     }
 
     /// Sets the UV coordinates for the top-left corner (default: [0.0, 0.0])
-    pub fn uv0(mut self, uv0: [f32; 2]) -> Self {
-        self.uv0 = uv0;
+    pub fn uv0(mut self, uv0: impl Into<[f32; 2]>) -> Self {
+        self.uv0 = uv0.into();
         self
     }
 
     /// Sets the UV coordinates for the bottom-right corner (default: [1.0, 1.0])
-    pub fn uv1(mut self, uv1: [f32; 2]) -> Self {
-        self.uv1 = uv1;
+    pub fn uv1(mut self, uv1: impl Into<[f32; 2]>) -> Self {
+        self.uv1 = uv1.into();
         self
     }
 
     /// Sets the background color (default: transparent)
-    pub fn bg_color(mut self, bg_color: [f32; 4]) -> Self {
-        self.bg_color = bg_color;
+    pub fn bg_color(mut self, bg_color: impl Into<Color>) -> Self {
+        self.bg_color = bg_color.into().to_array();
         self
     }
 
     /// Sets the tint color (default: white, no tint)
-    pub fn tint_color(mut self, tint_color: [f32; 4]) -> Self {
-        self.tint_color = tint_color;
+    pub fn tint_color(mut self, tint_color: impl Into<Color>) -> Self {
+        self.tint_color = tint_color.into().to_array();
         self
     }
 
@@ -344,27 +306,29 @@ impl<'ui, 'tex> ImageButton<'ui, 'tex> {
         assert_finite_vec4("ImageButton::build()", "bg_color", self.bg_color);
         assert_finite_vec4("ImageButton::build()", "tint_color", self.tint_color);
 
-        let str_id_ptr = self.ui.scratch_txt(self.str_id.as_ref());
         let size_vec: sys::ImVec2 = self.size.into();
         let uv0_vec: sys::ImVec2 = self.uv0.into();
         let uv1_vec: sys::ImVec2 = self.uv1.into();
 
-        self.ui.run_with_bound_context(|| {
-            let texture = self
-                .ui
-                .resolve_texture_ref(self.texture)
-                .unwrap_or_else(|error| panic!("ImageButton::build() rejected texture: {error}"));
-            unsafe {
-                sys::igImageButton(
-                    str_id_ptr,
-                    texture,
-                    size_vec,
-                    uv0_vec,
-                    uv1_vec,
-                    im_vec4(self.bg_color),
-                    im_vec4(self.tint_color),
-                )
-            }
-        })
+        self.ui
+            .with_scratch_txt(self.str_id.as_ref(), |str_id_ptr| {
+                let texture = self
+                    .ui
+                    .resolve_texture_ref(self.texture)
+                    .unwrap_or_else(|error| {
+                        panic!("ImageButton::build() rejected texture: {error}")
+                    });
+                unsafe {
+                    sys::igImageButton(
+                        str_id_ptr,
+                        texture,
+                        size_vec,
+                        uv0_vec,
+                        uv1_vec,
+                        self.bg_color.into(),
+                        self.tint_color.into(),
+                    )
+                }
+            })
     }
 }

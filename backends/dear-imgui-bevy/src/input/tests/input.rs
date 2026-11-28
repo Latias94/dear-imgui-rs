@@ -132,10 +132,12 @@ fn app_with_primary_window() -> (App, Entity) {
 }
 
 fn app_with_primary_window_plugin(plugin: ImguiPlugin) -> (App, Entity) {
-    app_with_primary_window_in(App::new(), plugin)
+    let mut app = App::new();
+    let primary = install_primary_window(&mut app, plugin);
+    (app, primary)
 }
 
-fn app_with_primary_window_in(mut app: App, plugin: ImguiPlugin) -> (App, Entity) {
+fn install_primary_window(app: &mut App, plugin: ImguiPlugin) -> Entity {
     app.add_plugins(plugin);
 
     let mut window = Window {
@@ -164,13 +166,13 @@ fn app_with_primary_window_in(mut app: App, plugin: ImguiPlugin) -> (App, Entity
             .spawn(ImguiInputRoute::logical(primary_context, primary, region));
         app.world_mut().run_schedule(PostUpdate);
     }
-    prepare_imgui_context(&mut app);
-    (app, primary)
+    prepare_imgui_context(app);
+    primary
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-fn app_with_primary_window_and_native_viewports() -> (App, Entity) {
-    let mut app = App::new();
+fn app_with_primary_window_and_native_viewports() -> (crate::test_util::RenderTestApp, Entity) {
+    let mut app = crate::test_util::RenderTestApp::new();
     app.insert_resource(
         crate::viewport::native_window::DesktopPositionSupportOverride(
             crate::viewport::native_window::DesktopPositionSupport::Available,
@@ -178,10 +180,11 @@ fn app_with_primary_window_and_native_viewports() -> (App, Entity) {
     );
     app.add_plugins(crate::test_util::render_extraction_plugin());
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
-    app_with_primary_window_in(
-        app,
+    let primary = install_primary_window(
+        &mut app,
         ImguiPlugin::new(ImguiPluginConfig::default().with_multi_viewport(true)),
-    )
+    );
+    (app, primary)
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -383,8 +386,8 @@ fn begin_frame_for_context(
     });
 }
 
-fn current_frame_input_chars() -> Vec<u32> {
-    unsafe {
+fn current_frame_input_chars(ui: &imgui::Ui) -> Vec<u32> {
+    ui.with_bound_context(|| unsafe {
         let io = imgui::sys::igGetIO_Nil();
         let legacy_queue = &(*io).InputQueueCharacters;
         let mut chars = Vec::new();
@@ -396,7 +399,7 @@ fn current_frame_input_chars() -> Vec<u32> {
             );
         }
         chars
-    }
+    })
 }
 
 fn begin_frame_and_assert(app: &mut App, assert_ui: impl FnOnce(&imgui::Ui)) {
@@ -654,7 +657,7 @@ fn input_keyboard_and_ime_messages_update_imgui_keys_modifiers_and_text_queue() 
     run_input_systems(&mut app);
 
     begin_frame_and_assert(&mut app, |ui| {
-        let chars = current_frame_input_chars();
+        let chars = current_frame_input_chars(ui);
         assert!(chars.contains(&('a' as u32)));
         assert!(chars.contains(&('好' as u32)));
         assert!(chars.contains(&('!' as u32)));
@@ -684,8 +687,8 @@ fn input_ime_enable_commit_and_disable_preserves_explicit_ime_state() {
         app.world().resource::<ImguiInputState>().ime_enabled(),
         "committed text should not imply that the platform IME was disabled"
     );
-    begin_frame_and_assert(&mut app, |_ui| {
-        assert!(current_frame_input_chars().contains(&('好' as u32)));
+    begin_frame_and_assert(&mut app, |ui| {
+        assert!(current_frame_input_chars(ui).contains(&('好' as u32)));
     });
 
     app.world_mut()
@@ -1905,7 +1908,7 @@ fn input_non_primary_window_messages_are_ignored() {
     run_input_systems(&mut app);
 
     begin_frame_and_assert(&mut app, |ui| {
-        assert!(current_frame_input_chars().is_empty());
+        assert!(current_frame_input_chars(ui).is_empty());
         assert!(!ui.is_key_down(imgui::Key::X));
         assert_ne!(ui.mouse_pos(), [300.0, 400.0]);
     });
@@ -2146,7 +2149,7 @@ fn input_secondary_viewport_window_messages_use_imgui_platform_coordinates_when_
         assert_eq!(ui.io().mouse_wheel(), 1.0);
         assert!(ui.is_key_down(imgui::Key::X));
 
-        let chars = current_frame_input_chars();
+        let chars = current_frame_input_chars(ui);
         assert!(chars.contains(&('x' as u32)));
         assert!(chars.contains(&('界' as u32)));
     });
@@ -2587,11 +2590,13 @@ fn primary_capture_queries_follow_legacy_primary_input_without_render_routes() {
         .primary_id()
         .expect("Context registry must be active")
         .expect("ImguiPlugin should install a primary Context");
-    configure_primary(&mut app, |_| unsafe {
-        let io = imgui::sys::igGetIO_Nil();
-        (*io).WantCaptureMouse = true;
-        (*io).WantCaptureKeyboard = true;
-        (*io).WantTextInput = true;
+    configure_primary(&mut app, |context| {
+        context.binding().with_bound_context(|| unsafe {
+            let io = imgui::sys::igGetIO_Nil();
+            (*io).WantCaptureMouse = true;
+            (*io).WantCaptureKeyboard = true;
+            (*io).WantTextInput = true;
+        });
     });
 
     run_input_systems(&mut app);
@@ -2711,7 +2716,7 @@ fn input_routes_isolate_contexts_windows_focus_and_sticky_releases() {
         assert_eq!(ui.mouse_pos(), [20.0, 30.0]);
         assert!(ui.is_key_down(imgui::Key::A));
         assert!(ui.is_mouse_down(imgui::MouseButton::Left));
-        assert!(current_frame_input_chars().contains(&('A' as u32)));
+        assert!(current_frame_input_chars(ui).contains(&('A' as u32)));
     });
     begin_frame_for_context(&mut app, secondary_context, |ui| {
         assert!(!ui.is_key_down(imgui::Key::A));
@@ -2770,7 +2775,7 @@ fn input_routes_isolate_contexts_windows_focus_and_sticky_releases() {
         assert_eq!(ui.mouse_pos(), [50.0, 60.0]);
         assert!(ui.is_key_down(imgui::Key::B));
         assert!(ui.is_mouse_down(imgui::MouseButton::Right));
-        assert!(current_frame_input_chars().contains(&('界' as u32)));
+        assert!(current_frame_input_chars(ui).contains(&('界' as u32)));
     });
 
     app.world_mut().despawn(primary_window);
@@ -3318,13 +3323,15 @@ fn scoped_capture_queries_update_before_update_and_clear_when_a_window_disappear
         count_scoped_capture.run_if(imgui_context_wants_keyboard_input(primary_context)),
     );
 
-    configure_context(&mut app, primary_context, |_| unsafe {
-        let io = imgui::sys::igGetIO_Nil();
-        (*io).WantCaptureKeyboard = true;
+    configure_context(&mut app, primary_context, |context| {
+        context.binding().with_bound_context(|| unsafe {
+            (*imgui::sys::igGetIO_Nil()).WantCaptureKeyboard = true;
+        });
     });
-    configure_context(&mut app, secondary_context, |_| unsafe {
-        let io = imgui::sys::igGetIO_Nil();
-        (*io).WantCaptureMouse = true;
+    configure_context(&mut app, secondary_context, |context| {
+        context.binding().with_bound_context(|| unsafe {
+            (*imgui::sys::igGetIO_Nil()).WantCaptureMouse = true;
+        });
     });
     assert!(!run_condition_once(
         &mut app,

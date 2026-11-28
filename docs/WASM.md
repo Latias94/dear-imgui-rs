@@ -90,7 +90,7 @@ cargo check -p dear-imgui-sys --target wasm32-unknown-unknown \
   --features wasm,prebuilt
 cargo check -p dear-imgui-sys --target wasm32-unknown-unknown \
   --features wasm,test-engine
-cargo check -p dear-imgui-sys --features test-engine,package-bin
+cargo run -p xtask -- package dear-imgui-sys --features test-engine
 ```
 
 The following paths remain native-only:
@@ -104,8 +104,8 @@ The following paths remain native-only:
 These features may coexist with the `wasm` feature when Cargo unifies features
 for a native target; the build selects behavior from the actual target, not the
 feature name. On `wasm32-unknown-unknown`, `stack-layout`, `test-engine`, and
-`prebuilt` are rejected. `test-engine + package-bin` is rejected on every
-target because Test Engine artifacts are never part of prebuilt packaging. Use
+`prebuilt` are rejected. Test Engine artifacts are source-only on every native
+target. Use
 `dear-imnodes` for the current WASM-capable node editor. Browser integrations
 render one main canvas and do not install native platform-window callbacks.
 
@@ -144,10 +144,11 @@ cargo run -p xtask -- wasm-bindgen-implot3d
 cargo run -p xtask -- wasm-bindgen-imnodes
 cargo run -p xtask -- wasm-bindgen-imguizmo
 cargo run -p xtask -- wasm-bindgen-imguizmo-quat
+cargo run -p xtask -- wasm-bindgen-cte
 ```
 
-CTE's native and WASM profiles are maintained by the repository-wide
-`verify-bindings` command; there is no separate `wasm-bindgen-cte` contract.
+The repository-wide `verify-bindings` command checks both the native and WASM
+profiles for each maintained extension.
 
 ## Local demo
 

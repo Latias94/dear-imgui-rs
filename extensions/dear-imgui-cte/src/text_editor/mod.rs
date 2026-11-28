@@ -78,9 +78,9 @@ impl TextEditor {
     /// Replaces the entire document.
     pub fn set_text(&mut self, text: &str) -> CteResult<()> {
         let text = c_string("TextEditor::set_text", text)?;
-        self.with_context("TextEditor::set_text", |raw| unsafe {
+        self.try_with_context("TextEditor::set_text", |raw| unsafe {
             sys::TextEditor_SetText_std_string_view(raw, text.as_ptr())
-        });
+        })?;
         self.invalidate_layout();
         Ok(())
     }
@@ -90,7 +90,7 @@ impl TextEditor {
     /// Preserves existing trailing newlines without adding the terminal newline
     /// synthesized by upstream's file-oriented `GetText` serialization.
     pub fn text(&self) -> CteResult<String> {
-        self.with_context("TextEditor::text", |raw| unsafe {
+        self.try_with_context("TextEditor::text", |raw| unsafe {
             // Upstream normalizes an out-of-range line to the document end.
             let end = Position::new(sys::TextEditor_GetLineCount(raw), 0);
             copy_c_string(
@@ -101,46 +101,46 @@ impl TextEditor {
                     end.into_raw(),
                 ),
             )
-        })
+        })?
     }
 
     /// Returns an owned copy of the selected text for one cursor.
     pub fn cursor_text(&self, cursor: usize) -> CteResult<String> {
-        self.with_context("TextEditor::cursor_text", |raw| unsafe {
+        self.try_with_context("TextEditor::cursor_text", |raw| unsafe {
             validate_cursor(raw, "TextEditor::cursor_text", cursor)?;
             copy_c_string(
                 "TextEditor::cursor_text",
                 sys::TextEditor_GetCursorText(raw, cursor),
             )
-        })
+        })?
     }
 
     /// Returns an owned copy of one document line.
     pub fn line_text(&self, line: usize) -> CteResult<String> {
-        self.with_context("TextEditor::line_text", |raw| unsafe {
+        self.try_with_context("TextEditor::line_text", |raw| unsafe {
             validate_line(raw, "TextEditor::line_text", line)?;
             copy_c_string(
                 "TextEditor::line_text",
                 sys::TextEditor_GetLineText(raw, line),
             )
-        })
+        })?
     }
 
     /// Returns an owned copy of a document selection.
     pub fn section_text(&self, selection: Selection) -> CteResult<String> {
-        self.with_context("TextEditor::section_text", |raw| unsafe {
+        self.try_with_context("TextEditor::section_text", |raw| unsafe {
             validate_selection(raw, "TextEditor::section_text", selection)?;
             copy_c_string(
                 "TextEditor::section_text",
                 sys::TextEditor_GetSectionText_DocSelection(raw, selection.into_raw()),
             )
-        })
+        })?
     }
 
     /// Replaces a document selection.
     pub fn replace_section(&mut self, selection: Selection, text: &str) -> CteResult<()> {
         let text = c_string("TextEditor::replace_section", text)?;
-        self.with_context("TextEditor::replace_section", |raw| unsafe {
+        self.try_with_context("TextEditor::replace_section", |raw| unsafe {
             validate_selection(raw, "TextEditor::replace_section", selection)?;
             sys::TextEditor_ReplaceSectionText_DocSelection(
                 raw,
@@ -148,7 +148,7 @@ impl TextEditor {
                 text.as_ptr(),
             );
             Ok(())
-        })
+        })?
         .map(|_| self.invalidate_layout())
     }
 
@@ -196,19 +196,19 @@ impl TextEditor {
 
     /// Returns an owned copy of the current language name.
     pub fn language_name(&self) -> CteResult<String> {
-        self.with_context("TextEditor::language_name", |raw| unsafe {
+        self.try_with_context("TextEditor::language_name", |raw| unsafe {
             copy_c_string(
                 "TextEditor::language_name",
                 sys::TextEditor_GetLanguageName(raw),
             )
-        })
+        })?
     }
 
     /// Copies a Rust palette into the editor.
     pub fn set_palette(&mut self, palette: &Palette) -> CteResult<()> {
-        self.with_context("TextEditor::set_palette", |raw| {
+        self.try_with_context("TextEditor::set_palette", |raw| {
             palette.with_native(|native| unsafe { sys::TextEditor_SetPalette(raw, native) })
-        })?;
+        })??;
         self.invalidate_layout();
         Ok(())
     }
@@ -260,10 +260,17 @@ impl Drop for TextEditor {
                 sys::TrieAutoComplete_Disconnect(trie.as_ptr());
                 sys::TrieAutoComplete_destroy(trie.as_ptr());
             }
-            let _ = sys::dear_imgui_cte_text_editor_clear_callbacks(raw.as_ptr());
-            let owned = callbacks.take_owned();
-            callback_panic = catch_unwind(AssertUnwindSafe(|| drop(owned))).err();
+            let cleared = sys::dear_imgui_cte_text_editor_clear_callbacks(raw.as_ptr())
+                == sys::DearImGuiCteStatus_Ok;
+            let mut release_callbacks =
+                || catch_unwind(AssertUnwindSafe(|| callbacks.clear_owned())).err();
+            if cleared {
+                callback_panic = release_callbacks();
+            }
             sys::dear_imgui_cte_text_editor_destroy(raw.as_ptr());
+            if !cleared {
+                callback_panic = release_callbacks();
+            }
         });
         if let Some(payload) = callback_panic {
             resume_unwind(payload);

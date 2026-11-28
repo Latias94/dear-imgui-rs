@@ -18,33 +18,23 @@ use std::sync::Arc;
 // ---------------------------------------------------------------------------
 
 /// Quality setting with custom display names
-#[derive(ImGuiReflect)]
+#[derive(ImGuiReflect, Default)]
 enum Quality {
     #[imgui(name = "Low (Fast)")]
     Low,
+    #[default]
     Medium,
     High,
 }
 
-impl Default for Quality {
-    fn default() -> Self {
-        Quality::Medium
-    }
-}
-
 /// Render mode shown as a radio-button style enum
-#[derive(ImGuiReflect)]
+#[derive(ImGuiReflect, Default)]
 #[imgui(enum_style = "radio")]
 enum RenderMode {
+    #[default]
     Forward,
     Deferred,
     PathTracing,
-}
-
-impl Default for RenderMode {
-    fn default() -> Self {
-        RenderMode::Forward
-    }
 }
 
 /// Primitive numeric + bool showcase
@@ -295,63 +285,63 @@ impl Application for ReflectApp {
                             match event {
                                 reflect::ReflectEvent::VecInserted { path, index } => {
                                     let path = path.as_deref().unwrap_or("<unknown field>");
-                                    ui.bullet_text(&format!(
+                                    ui.bullet_text(format!(
                                         "VecInserted at index {} (field: {})",
                                         index, path
                                     ));
                                 }
                                 reflect::ReflectEvent::VecRemoved { path, index } => {
                                     let path = path.as_deref().unwrap_or("<unknown field>");
-                                    ui.bullet_text(&format!(
+                                    ui.bullet_text(format!(
                                         "VecRemoved at index {} (field: {})",
                                         index, path
                                     ));
                                 }
                                 reflect::ReflectEvent::VecReordered { path, from, to } => {
                                     let path = path.as_deref().unwrap_or("<unknown field>");
-                                    ui.bullet_text(&format!(
+                                    ui.bullet_text(format!(
                                         "VecReordered {} -> {} (field: {})",
                                         from, to, path
                                     ));
                                 }
                                 reflect::ReflectEvent::VecCleared { path, previous_len } => {
                                     let path = path.as_deref().unwrap_or("<unknown field>");
-                                    ui.bullet_text(&format!(
+                                    ui.bullet_text(format!(
                                         "VecCleared ({} entries removed) (field: {})",
                                         previous_len, path
                                     ));
                                 }
                                 reflect::ReflectEvent::ArrayReordered { path, from, to } => {
                                     let path = path.as_deref().unwrap_or("<unknown field>");
-                                    ui.bullet_text(&format!(
+                                    ui.bullet_text(format!(
                                         "ArrayReordered {} <-> {} (field: {})",
                                         from, to, path
                                     ));
                                 }
                                 reflect::ReflectEvent::MapInserted { path, key } => {
                                     let path = path.as_deref().unwrap_or("<unknown field>");
-                                    ui.bullet_text(&format!(
+                                    ui.bullet_text(format!(
                                         "MapInserted key \"{}\" (field: {})",
                                         key, path
                                     ));
                                 }
                                 reflect::ReflectEvent::MapRemoved { path, key } => {
                                     let path = path.as_deref().unwrap_or("<unknown field>");
-                                    ui.bullet_text(&format!(
+                                    ui.bullet_text(format!(
                                         "MapRemoved key \"{}\" (field: {})",
                                         key, path
                                     ));
                                 }
                                 reflect::ReflectEvent::MapRenamed { path, from, to } => {
                                     let path = path.as_deref().unwrap_or("<unknown field>");
-                                    ui.bullet_text(&format!(
+                                    ui.bullet_text(format!(
                                         "MapRenamed \"{}\" -> \"{}\" (field: {})",
                                         from, to, path
                                     ));
                                 }
                                 reflect::ReflectEvent::MapCleared { path, previous_len } => {
                                     let path = path.as_deref().unwrap_or("<unknown field>");
-                                    ui.bullet_text(&format!(
+                                    ui.bullet_text(format!(
                                         "MapCleared ({} entries removed) (field: {})",
                                         previous_len, path
                                     ));

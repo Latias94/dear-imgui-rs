@@ -129,13 +129,24 @@ impl std::fmt::Display for Plot3DError {
 
 impl std::error::Error for Plot3DError {}
 
-/// Common trait for 3D plot elements
+/// Common trait for 3D plot elements.
 pub trait Plot3D {
     fn label(&self) -> &str;
+    /// Submits this item. Built-in items reject labels containing NUL with
+    /// [`Plot3DError::StringConversion`].
     fn try_plot(&self, ui: &crate::Plot3DScope<'_>) -> Result<(), Plot3DError>;
     fn plot(&self, ui: &crate::Plot3DScope<'_>) {
         let _ = self.try_plot(ui);
     }
+}
+
+pub(crate) fn validate_item_label(label: &str) -> Result<(), Plot3DError> {
+    if label.contains('\0') {
+        return Err(Plot3DError::StringConversion(
+            "plot item label contains NUL",
+        ));
+    }
+    Ok(())
 }
 
 #[inline]

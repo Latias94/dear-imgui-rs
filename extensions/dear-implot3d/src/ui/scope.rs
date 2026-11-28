@@ -1,6 +1,8 @@
 use crate::Plot3DUi;
+use crate::axis::AxisDomain;
 use crate::layout::NextItemStyle;
 use dear_imgui_rs::{DrawListMut, NativeWindowScope};
+use std::cell::Cell;
 
 /// Axis and box configuration, borrowed before the plot locks setup.
 ///
@@ -12,6 +14,7 @@ use dear_imgui_rs::{DrawListMut, NativeWindowScope};
 /// ```
 pub struct Plot3DSetup<'plot> {
     pub(crate) plot: &'plot Plot3DScope<'plot>,
+    pub(crate) axes: [Cell<AxisDomain>; 3],
 }
 
 impl Plot3DSetup<'_> {
@@ -48,10 +51,8 @@ impl Plot3DScope<'_> {
         self.ui.with_bound_context(f)
     }
 
-    /// Borrows the draw list of the window hosting this plot.
-    pub fn plot_draw_list(&self) -> DrawListMut<'_> {
-        // Upstream GetPlotDrawList returns exactly ImGui::GetWindowDrawList(). The core wrapper
-        // also remembers the window Begin instance for subsequent draw-list operations.
-        self.with_bound_context(|| self.ui.imgui.get_window_draw_list())
+    /// Draw with the draw list of the window hosting this plot.
+    pub fn with_plot_draw_list<R>(&self, draw: impl FnOnce(&DrawListMut<'_>) -> R) -> R {
+        self.with_bound_context(|| self.ui.imgui.with_window_draw_list(draw))
     }
 }

@@ -63,19 +63,17 @@ impl TextDiff {
         const OPERATION: &str = "TextDiff::set_text";
         let left = c_string(OPERATION, left)?;
         let right = c_string(OPERATION, right)?;
-        self.with_context(OPERATION, |raw| unsafe {
+        self.try_with_context(OPERATION, |raw| unsafe {
             sys::TextDiff_SetText(raw, left.as_ptr(), right.as_ptr())
-        });
-        Ok(())
+        })
     }
 
     /// Sets the tab width in columns, in `1..=255` to fit upstream glyph storage.
     pub fn set_tab_size(&mut self, value: usize) -> CteResult<()> {
         validate_tab_size("TextDiff::set_tab_size", "value", value)?;
-        self.with_context("TextDiff::set_tab_size", |raw| unsafe {
+        self.try_with_context("TextDiff::set_tab_size", |raw| unsafe {
             sys::TextDiff_SetTabSize(raw, value)
-        });
-        Ok(())
+        })
     }
 
     pub fn tab_size(&self) -> usize {
@@ -87,10 +85,9 @@ impl TextDiff {
     /// Sets line spacing. The native widget clamps finite values to `1.0..=2.0`.
     pub fn set_line_spacing(&mut self, value: f32) -> CteResult<()> {
         validate_finite_f32("TextDiff::set_line_spacing", "value", value)?;
-        self.with_context("TextDiff::set_line_spacing", |raw| unsafe {
+        self.try_with_context("TextDiff::set_line_spacing", |raw| unsafe {
             sys::TextDiff_SetLineSpacing(raw, value)
-        });
-        Ok(())
+        })
     }
 
     pub fn line_spacing(&self) -> f32 {
@@ -121,9 +118,9 @@ impl TextDiff {
 
     /// Copies a Rust palette into the text diff.
     pub fn set_palette(&mut self, palette: &Palette) -> CteResult<()> {
-        self.with_context("TextDiff::set_palette", |raw| {
+        self.try_with_context("TextDiff::set_palette", |raw| {
             palette.with_native(|native| unsafe { sys::TextDiff_SetPalette(raw, native) })
-        })
+        })?
     }
 
     /// Returns an owned copy of the text-diff palette.

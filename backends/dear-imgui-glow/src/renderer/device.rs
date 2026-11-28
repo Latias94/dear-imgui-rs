@@ -1,3 +1,5 @@
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use dear_imgui_rs::Context as ImGuiContext;
 use glow::{Context, HasContext};
 
@@ -112,10 +114,10 @@ impl Drop for PendingDeviceObjects<'_> {
 }
 
 impl GlowRenderer {
-    /// Shut down an owned-context renderer and free its OpenGL resources.
+    /// Shut down a renderer with a retained Glow function table and free its resources.
     ///
-    /// The native context for the retained Glow function table, or a compatible share-group
-    /// context, must be current on this thread.
+    /// A renderer created with [`Self::with_owned_context`] activates its context. For other
+    /// native renderers, make the context or a compatible share-group context current first.
     ///
     /// A renderer consumed by `GlowViewportRuntime` must be shut down through that owning runtime.
     pub fn shutdown(&mut self, imgui_context: &mut ImGuiContext) -> RenderResult<()> {
@@ -130,7 +132,8 @@ impl GlowRenderer {
     ///
     /// `gl` must be the live function table used to create this renderer, and its corresponding
     /// OpenGL context must be current on this thread. Resources shared with another context must
-    /// remain valid until this call succeeds.
+    /// remain valid until this call succeeds. A renderer with a native context owner activates
+    /// the context and checks that `gl` is its retained function table.
     pub fn shutdown_with_context(
         &mut self,
         gl: &Context,
@@ -144,7 +147,6 @@ impl GlowRenderer {
         gl: &Context,
         imgui_context: &mut ImGuiContext,
     ) -> RenderResult<()> {
-        self.ensure_context_matches(imgui_context)?;
         self.destroy_resources_and_reset(gl, imgui_context)?;
         self.unconfigure_imgui_context(imgui_context);
         Ok(())
@@ -159,53 +161,7 @@ impl GlowRenderer {
         gl: &Context,
         imgui_context: &mut ImGuiContext,
     ) -> RenderResult<()> {
-        self.ensure_context_matches(imgui_context)?;
-        let consumer = self
-            .renderer_consumer
-            .take()
-            .ok_or(RenderError::RendererNotAttached)?;
-        let reset = match imgui_context.prepare_renderer_texture_reset(&consumer) {
-            Ok(reset) => reset,
-            Err(error) => {
-                self.renderer_consumer = Some(consumer);
-                return Err(error.into());
-            }
-        };
-        self.destroy_gpu_resources_only(gl);
-        reset.commit();
-        self.destroyed_managed_textures.clear();
-        Ok(())
-    }
-
-    /// Releases GPU resources during a Context-owned renderer-reset transaction.
-    ///
-    /// The attachment retains the renderer consumer while this method runs and commits the native
-    /// reset only after this release succeeds.
-    #[cfg(feature = "multi-viewport")]
-    pub(super) fn destroy_for_context_teardown(&mut self, gl: &Context) -> RenderResult<()> {
-        self.destroy_gpu_resources_only(gl);
-        self.destroyed_managed_textures.clear();
-        // The Context is bound for this attachment phase. Clear exact owned raw state before the
-        // attachment commits the matching native texture reset.
-        unsafe { self.clear_owned_renderer_state_bound() };
-        self.context_binding.take();
-        self.gl_context.take();
-        Ok(())
-    }
-
-    /// Best-effort release after the native Dear ImGui Context has already gone away.
-    ///
-    /// This fallback cannot touch native state or commit a texture-reset permit. Normal Context
-    /// teardown must use [`Self::destroy_for_context_teardown`] during the renderer-resource
-    /// phase instead.
-    #[cfg(feature = "multi-viewport")]
-    pub(super) fn destroy_after_context_destroyed(&mut self, gl: &Context) -> RenderResult<()> {
-        self.destroy_gpu_resources_only(gl);
-        self.destroyed_managed_textures.clear();
-        self.renderer_consumer.take();
-        self.context_binding.take();
-        self.gl_context.take();
-        Ok(())
+        self.reset_device_objects(gl, imgui_context, TextureRelease::Final)
     }
 
     /// Returns the retained Glow function table, if this renderer was constructed with one.
@@ -226,8 +182,9 @@ impl GlowRenderer {
     }
 
     /// Override the color gamma applied to ImGui vertex colors.
-    /// Pass `Some(gamma)` to force a value (e.g., 2.2 or 1.0), or `None` to use auto:
-    /// auto = 2.2 when sRGB is enabled, otherwise 1.0.
+    /// Pass `Some(gamma)` to select a custom power curve, or `Some(1.0)` to pass colors through.
+    /// The default `None` uses IEC 61966-2-1 sRGB decoding when framebuffer sRGB is enabled and
+    /// passes vertex colors through otherwise. The shader applies the curve to interpolated RGB.
     pub fn set_color_gamma_override(&mut self, gamma: Option<f32>) {
         self.color_gamma_override = gamma;
     }
@@ -262,14 +219,14 @@ impl GlowRenderer {
     ///
     /// The renderer remains attached. The next render recreates the device objects
     /// transactionally before it processes managed textures or reads draw commands.
-    /// The native context for the retained function table, or a compatible share-group context,
-    /// must be current on this thread.
+    /// A renderer with a native context owner activates its context. For other native renderers,
+    /// make the context or a compatible share-group context current first.
     pub fn destroy_device_objects(&mut self, imgui_context: &mut ImGuiContext) -> RenderResult<()> {
         let gl = self
             .gl_context
             .clone()
             .ok_or(RenderError::MissingGlContext)?;
-        self.destroy_device_objects_with_context_inner(&gl, imgui_context)
+        self.reset_device_objects(&gl, imgui_context, TextureRelease::PreserveExternal)
     }
 
     /// Destroy OpenGL device objects using an externally managed context.
@@ -282,31 +239,31 @@ impl GlowRenderer {
         gl: &Context,
         imgui_context: &mut ImGuiContext,
     ) -> RenderResult<()> {
-        self.destroy_device_objects_with_context_inner(gl, imgui_context)
+        self.reset_device_objects(gl, imgui_context, TextureRelease::PreserveExternal)
     }
 
-    fn destroy_device_objects_with_context_inner(
+    fn reset_device_objects(
         &mut self,
         gl: &Context,
         imgui_context: &mut ImGuiContext,
+        release: TextureRelease,
     ) -> RenderResult<()> {
         self.ensure_context_matches(imgui_context)?;
         let consumer = self
             .renderer_consumer
             .take()
             .ok_or(RenderError::RendererNotAttached)?;
-        let reset = match imgui_context.prepare_renderer_texture_reset(&consumer) {
-            Ok(reset) => reset,
-            Err(error) => {
-                self.renderer_consumer = Some(consumer);
-                return Err(error.into());
-            }
-        };
-        self.destroy_device_objects_only(gl, TextureRelease::PreserveExternal);
-        reset.commit();
-        self.destroyed_managed_textures.clear();
-        self.renderer_consumer = Some(consumer);
-        Ok(())
+        let result = (|| {
+            let reset = imgui_context.prepare_renderer_texture_reset(&consumer)?;
+            self.activate_gl_context(gl)?;
+            self.destroy_device_objects_only(gl, release);
+            reset.commit();
+            Ok(())
+        })();
+        if result.is_err() || release == TextureRelease::PreserveExternal {
+            self.renderer_consumer = Some(consumer);
+        }
+        result
     }
 
     fn destroy_device_objects_only(&mut self, gl: &Context, release: TextureRelease) {
@@ -325,14 +282,48 @@ impl GlowRenderer {
         for texture in self.texture_registry.take_renderer_owned() {
             unsafe { gl.delete_texture(texture) };
         }
-        self.managed_textures.clear();
+        self.managed_textures = Default::default();
         if release == TextureRelease::Final {
             self.texture_registry.clear();
         }
     }
 
-    pub(super) fn destroy_gpu_resources_only(&mut self, gl: &Context) {
+    /// # Safety
+    ///
+    /// Establish a current native context in the renderer's share group or supply the retained
+    /// browser WebGL context.
+    pub(super) unsafe fn destroy_gpu_resources_only(&mut self, gl: &Context) {
         self.destroy_device_objects_only(gl, TextureRelease::Final);
+    }
+
+    fn release_owned_gl_on_drop(&mut self) -> bool {
+        if self.vbo_handle.is_none()
+            && self.ebo_handle.is_none()
+            && self.shaders.program.is_none()
+            && self.samplers.is_none()
+            && !self.texture_registry.has_renderer_owned()
+        {
+            return true;
+        }
+        if !self.has_owned_gl_cleanup() {
+            return false;
+        }
+        let Some(gl) = self.gl_context.clone() else {
+            return false;
+        };
+        match catch_unwind(AssertUnwindSafe(|| self.activate_gl_context(&gl))) {
+            Ok(Ok(())) => {
+                // SAFETY: activation succeeded, or `gl` is the retained browser WebGL context.
+                unsafe { self.destroy_gpu_resources_only(&gl) };
+                true
+            }
+            Ok(Err(_)) => false,
+            Err(payload) => {
+                // A panic payload can panic on drop, including while the caller is unwinding.
+                std::mem::forget(payload);
+                false
+            }
+        }
     }
 
     pub(super) fn ensure_context_matches(&self, imgui_context: &ImGuiContext) -> RenderResult<()> {
@@ -352,25 +343,25 @@ impl GlowRenderer {
 
 impl Drop for GlowRenderer {
     fn drop(&mut self) {
-        // `Drop` has no mutable Context, so it cannot prove the consumer is idle or commit the
-        // Context texture-reset transaction. Fail closed by withdrawing only our exact raw
-        // publication; explicit shutdown remains the resource-release path.
-        if let Some(binding) = self.context_binding.clone() {
-            let _ = binding.try_with_bound_context(|| unsafe {
-                self.clear_owned_renderer_state_bound();
-            });
+        self.withdraw_publication();
+        if self.release_owned_gl_on_drop()
+            && let Some(consumer) = self.renderer_consumer.take()
+        {
+            consumer.reset_signal().mark_renderer_dropped();
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::ffi::c_void;
     use std::num::NonZeroU32;
     use std::rc::Rc;
 
     use dear_imgui_rs::{
-        BackendFlags, Context as ImGuiContext, FramePrepareOptions, TextureFormat, TextureId, sys,
+        BackendFlags, Context as ImGuiContext, FramePrepareOptions, OwnedTextureData,
+        TextureFormat, TextureId, TextureStatus, sys,
     };
 
     use super::{GlowRenderer, PendingDeviceObjects};
@@ -391,6 +382,7 @@ mod tests {
                 program: None,
                 attrib_location_tex: None,
                 attrib_location_proj_mtx: None,
+                attrib_location_decode_vertex_srgb: None,
                 attrib_location_color_gamma: None,
                 attrib_location_vtx_pos: 0,
                 attrib_location_vtx_uv: 0,
@@ -408,16 +400,15 @@ mod tests {
             clip_origin: super::super::core::GlowClipOrigin::default(),
             has_separate_polygon_modes: false,
             has_sampler_object_support: true,
+            bind_program_pipeline: None,
             gl_context: None,
+            context_owner: None,
             context_binding: None,
-            backend_user_data: Box::default(),
-            renderer_name_ptr: std::ptr::null(),
-            renderer_texture_max: [0, 0],
+            publication: None,
             renderer_state_fault: None,
             synthetic_test_renderer: true,
             texture_registry: crate::texture::TextureRegistry::default(),
-            managed_textures: std::collections::HashMap::new(),
-            destroyed_managed_textures: std::collections::HashMap::new(),
+            managed_textures: Default::default(),
             renderer_consumer: None,
             framebuffer_srgb: false,
             color_gamma_override: None,
@@ -691,6 +682,142 @@ mod tests {
         replacement
             .shutdown_with_context(&gl, &mut context)
             .unwrap();
+    }
+
+    #[test]
+    fn owned_drop_releases_gpu_resources_and_allows_managed_texture_reupload() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset(FakeFailure::None);
+        let gl = Rc::new(fake_gl());
+        let activations = Rc::new(Cell::new(0));
+        let mut context = ImGuiContext::create();
+        // SAFETY: these stub entry points use a single simulated context.
+        let mut renderer = unsafe {
+            let activations = Rc::clone(&activations);
+            GlowRenderer::with_owned_context(
+                Rc::clone(&gl),
+                move || {
+                    activations.set(activations.get() + 1);
+                    Ok(())
+                },
+                &mut context,
+            )
+        }
+        .unwrap();
+        renderer
+            .register_texture(1, 1, TextureFormat::RGBA32, &[255; 4])
+            .unwrap();
+        renderer
+            .register_external_texture(glow::NativeTexture(NonZeroU32::new(900).unwrap()))
+            .unwrap();
+        let texture = context.register_texture(
+            OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[255; 4]).unwrap(),
+        );
+        let upload = |context: &mut ImGuiContext, renderer: &mut GlowRenderer| {
+            context.prepare_frame(FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0));
+            let frame = context.begin_frame();
+            frame.ui().get_background_draw_list().add_image(
+                texture,
+                [1.0, 1.0],
+                [4.0, 4.0],
+                [0.0, 0.0],
+                [1.0, 1.0],
+                [1.0; 4],
+            );
+            let pending = frame.render(renderer.renderer_consumer().unwrap());
+            drop(renderer.reconcile_frame(pending).unwrap());
+            context
+                .with_texture(texture, |texture| {
+                    assert_eq!(texture.status(), TextureStatus::OK);
+                    texture.texture_id()
+                })
+                .unwrap()
+        };
+        let first_id = upload(&mut context, &mut renderer);
+        let activation_count = activations.get();
+        drop(renderer);
+
+        let released = snapshot();
+        assert_eq!(activations.get(), activation_count + 1);
+        assert!(context.io().backend_renderer_user_data().is_null());
+        assert_eq!(released.deleted_programs, 1);
+        assert_eq!(released.deleted_buffers, released.generated_buffers);
+        assert_eq!(released.deleted_samplers, released.generated_samplers);
+        assert_eq!(released.deleted_textures, released.generated_textures);
+        assert!(released.deleted_textures >= 2);
+
+        context.poll_snapshot_completions().unwrap();
+        assert_eq!(
+            context
+                .with_texture(texture, |texture| texture.status())
+                .unwrap(),
+            TextureStatus::WantCreate
+        );
+        let mut replacement =
+            GlowRenderer::with_shared_context(Rc::clone(&gl), &mut context).unwrap();
+        assert_ne!(upload(&mut context, &mut replacement), first_id);
+        replacement.shutdown(&mut context).unwrap();
+    }
+
+    #[test]
+    fn failed_activation_neither_deletes_gl_resources_nor_commits_explicit_shutdown() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset(FakeFailure::None);
+        let gl = Rc::new(fake_gl());
+        let foreign_table = fake_gl();
+        let can_activate = Rc::new(Cell::new(true));
+        let mut context = ImGuiContext::create();
+        // SAFETY: the fake owner either selects its simulated context or returns an error.
+        let mut renderer = unsafe {
+            let can_activate = Rc::clone(&can_activate);
+            GlowRenderer::with_owned_context(
+                Rc::clone(&gl),
+                move || {
+                    can_activate
+                        .get()
+                        .then_some(())
+                        .ok_or_else(|| "native context unavailable".to_owned())
+                },
+                &mut context,
+            )
+        }
+        .unwrap();
+        let publication = context.io().backend_renderer_user_data();
+        let before = snapshot();
+        assert!(matches!(
+            renderer.shutdown_with_context(&foreign_table, &mut context),
+            Err(RenderError::GlContextMismatch)
+        ));
+        can_activate.set(false);
+        assert!(matches!(
+            renderer.shutdown(&mut context),
+            Err(RenderError::ActivateGlContext(_))
+        ));
+        assert_eq!(context.io().backend_renderer_user_data(), publication);
+        assert!(renderer.renderer_consumer().is_ok());
+        assert_eq!(snapshot(), before);
+
+        drop(renderer);
+        assert!(context.io().backend_renderer_user_data().is_null());
+        assert_eq!(snapshot(), before);
+    }
+
+    #[test]
+    fn context_first_withdraws_publication_before_releasing_owned_gl() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset(FakeFailure::None);
+        let gl = Rc::new(fake_gl());
+        let mut context = ImGuiContext::create();
+        // SAFETY: these stub entry points use a single simulated context.
+        let renderer =
+            unsafe { GlowRenderer::with_owned_context(gl, || Ok(()), &mut context) }.unwrap();
+        let before = snapshot();
+        drop(context);
+        assert_eq!(snapshot(), before);
+        drop(renderer);
+        assert_eq!(snapshot().deleted_programs, 1);
+        assert_eq!(snapshot().deleted_buffers, before.generated_buffers);
+        assert_eq!(snapshot().deleted_samplers, before.generated_samplers);
     }
 
     #[test]

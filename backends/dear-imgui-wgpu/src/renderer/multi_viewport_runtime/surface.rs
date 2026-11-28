@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use super::platform_adapter;
+use super::platform::ViewportSurface;
 use super::registry::GlobalHandles;
 use super::runtime::WgpuViewportError;
 use crate::WgpuViewportSurfaceConfig;
@@ -11,7 +11,7 @@ use dear_imgui_rs::platform_io::Viewport;
 
 pub(super) struct ViewportWgpuData {
     pub(super) native_target: dear_imgui_rs::NativeWindowTarget,
-    pub(super) surface: Option<Rc<wgpu::Surface<'static>>>,
+    pub(super) surface: Option<Rc<ViewportSurface>>,
     pub(super) targets: Option<ViewportRenderTargets>,
     pub(super) size: [u32; 2],
     pub(super) pending_reconfigure: bool,
@@ -74,7 +74,6 @@ pub(super) fn resolve_alpha_mode(
     }
 }
 
-#[cfg(feature = "wgpu-30")]
 pub(super) fn supports_surface_format(
     capabilities: &wgpu::SurfaceCapabilities,
     format: wgpu::TextureFormat,
@@ -82,14 +81,6 @@ pub(super) fn supports_surface_format(
     capabilities
         .color_spaces(format)
         .contains(wgpu::SurfaceColorSpaces::SRGB)
-}
-
-#[cfg(not(feature = "wgpu-30"))]
-pub(super) fn supports_surface_format(
-    capabilities: &wgpu::SurfaceCapabilities,
-    format: wgpu::TextureFormat,
-) -> bool {
-    capabilities.formats.contains(&format)
 }
 
 pub(super) fn surface_config_from_capabilities(
@@ -102,10 +93,7 @@ pub(super) fn surface_config_from_capabilities(
     if !format_supported {
         return Err(WgpuViewportError::UnsupportedSurfaceFormat {
             format: render_target_format,
-            #[cfg(feature = "wgpu-30")]
             color_space: "the required sRGB color space",
-            #[cfg(not(feature = "wgpu-30"))]
-            color_space: "the surface's automatic color space",
         });
     }
     let present_mode = resolve_present_mode(
@@ -122,7 +110,6 @@ pub(super) fn surface_config_from_capabilities(
     Ok(Some(wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format: render_target_format,
-        #[cfg(feature = "wgpu-30")]
         color_space: wgpu::SurfaceColorSpace::Srgb,
         width: size[0],
         height: size[1],
@@ -222,7 +209,10 @@ pub(super) unsafe fn create_viewport_data(
     viewport: &Viewport,
     globals: &GlobalHandles,
 ) -> Result<ViewportWgpuData, WgpuViewportError> {
-    let (surface, size, native_target) = create_native_surface(globals, viewport, None)?;
+    let (surface, size, native_target) =
+        globals
+            .platform
+            .create_surface(&globals.instance, viewport.id(), None)?;
     let targets = configure_surface(globals, &surface, size)?;
     Ok(ViewportWgpuData {
         native_target,
@@ -231,33 +221,6 @@ pub(super) unsafe fn create_viewport_data(
         size,
         pending_reconfigure: false,
     })
-}
-
-fn create_native_surface(
-    globals: &GlobalHandles,
-    viewport: &Viewport,
-    expected: Option<dear_imgui_rs::NativeWindowInstanceId>,
-) -> Result<
-    (
-        wgpu::Surface<'static>,
-        [u32; 2],
-        dear_imgui_rs::NativeWindowTarget,
-    ),
-    WgpuViewportError,
-> {
-    #[cfg(feature = "multi-viewport-winit")]
-    return platform_adapter::create_surface(
-        &globals.instance,
-        &globals.platform,
-        viewport,
-        expected,
-    );
-    #[cfg(all(not(feature = "multi-viewport-winit"), feature = "multi-viewport-sdl3"))]
-    // SAFETY: renderer resources are released before SDL platform-window teardown. The exact
-    // captured owner validates the registration before lending the native pointer.
-    unsafe {
-        platform_adapter::create_surface(&globals.instance, &globals.platform, viewport, expected)
-    }
 }
 
 pub(super) fn reconfigure_surface(
@@ -300,8 +263,11 @@ unsafe fn recreate_surface(
     globals: &GlobalHandles,
 ) -> Result<(), WgpuViewportError> {
     data.release_surface_bundle();
-    let (surface, size, native_target) =
-        create_native_surface(globals, viewport, Some(data.native_target.instance_id))?;
+    let (surface, size, native_target) = globals.platform.create_surface(
+        &globals.instance,
+        viewport.id(),
+        Some(data.native_target.instance_id),
+    )?;
     let targets = configure_surface(globals, &surface, size)?;
     data.surface = Some(Rc::new(surface));
     data.native_target = native_target;
@@ -317,14 +283,8 @@ pub(super) enum SurfaceEvent {
     Outdated,
     Lost,
     Timeout,
-    #[cfg(any(feature = "wgpu-29", feature = "wgpu-30", test))]
     Occluded,
-    #[cfg(any(feature = "wgpu-29", feature = "wgpu-30", test))]
     Validation,
-    #[cfg(any(feature = "wgpu-27", feature = "wgpu-28", test))]
-    OutOfMemory,
-    #[cfg(any(feature = "wgpu-27", feature = "wgpu-28", test))]
-    Other,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -344,12 +304,8 @@ pub(super) const fn surface_action(event: SurfaceEvent) -> SurfaceAction {
         SurfaceEvent::Outdated => SurfaceAction::Reconfigure,
         SurfaceEvent::Lost => SurfaceAction::Recreate,
         SurfaceEvent::Timeout => SurfaceAction::Skip,
-        #[cfg(any(feature = "wgpu-29", feature = "wgpu-30", test))]
         SurfaceEvent::Occluded => SurfaceAction::Skip,
-        #[cfg(any(feature = "wgpu-29", feature = "wgpu-30", test))]
         SurfaceEvent::Validation => SurfaceAction::Reject,
-        #[cfg(any(feature = "wgpu-27", feature = "wgpu-28", test))]
-        SurfaceEvent::OutOfMemory | SurfaceEvent::Other => SurfaceAction::Reject,
     }
 }
 
@@ -361,14 +317,8 @@ impl SurfaceEvent {
             Self::Outdated => "outdated",
             Self::Lost => "lost",
             Self::Timeout => "timeout",
-            #[cfg(any(feature = "wgpu-29", feature = "wgpu-30", test))]
             Self::Occluded => "occluded",
-            #[cfg(any(feature = "wgpu-29", feature = "wgpu-30", test))]
             Self::Validation => "validation",
-            #[cfg(any(feature = "wgpu-27", feature = "wgpu-28", test))]
-            Self::OutOfMemory => "out of memory",
-            #[cfg(any(feature = "wgpu-27", feature = "wgpu-28", test))]
-            Self::Other => "other",
         }
     }
 }
@@ -381,10 +331,9 @@ pub(super) unsafe fn handle_non_renderable_surface_event(
 ) -> Result<(), WgpuViewportError> {
     match surface_action(event) {
         SurfaceAction::Reconfigure => {
-            let size = platform_adapter::framebuffer_size(
-                &globals.platform,
-                data.native_target.instance_id,
-            )?;
+            let size = globals
+                .platform
+                .framebuffer_size(data.native_target.instance_id)?;
             reconfigure_surface(data, globals, size)
         }
         SurfaceAction::Recreate => {

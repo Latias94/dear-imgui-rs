@@ -1,8 +1,14 @@
 use std::cell::Cell;
 use std::ffi::{c_char, c_void};
+use std::rc::Rc;
 
+use dear_imgui_rs::error::context::BindingKind;
 use dear_imgui_rs::platform_io::PlatformIo;
-use dear_imgui_rs::{BackendFlags, Context, ContextBinding, ContextLifecycle, sys};
+use dear_imgui_rs::render::RendererResetSignal;
+use dear_imgui_rs::{
+    BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
+    ContextBinding, ContextError, ContextTeardown, sys,
+};
 
 use super::{
     RendererError, RendererResult, draw_callback_reset_render_state,
@@ -58,7 +64,10 @@ pub(super) struct RendererContextState {
     name_ptr: Cell<*const c_char>,
     published: Cell<bool>,
     fault: Cell<Option<&'static str>>,
+    released_on_unpublish: Cell<Option<RendererResetSignal>>,
 }
+
+struct AshPublicationAttachment;
 
 impl RendererContextState {
     pub(super) fn binding(&self) -> ContextBinding {
@@ -73,7 +82,20 @@ impl RendererContextState {
             name_ptr: Cell::new(std::ptr::null()),
             published: Cell::new(false),
             fault: Cell::new(None),
+            released_on_unpublish: Cell::new(None),
         })
+    }
+
+    pub(super) fn register_publication_attachment(
+        self: &Rc<Self>,
+        context: &mut Context,
+    ) -> RendererResult<ContextAttachmentLease> {
+        context
+            .register_attachment::<AshPublicationAttachment>(
+                ContextAttachmentRole::Extension,
+                Rc::clone(self) as Rc<dyn ContextAttachment>,
+            )
+            .map_err(|error| RendererError::Init(error.to_string()))
     }
 
     pub(super) fn preflight(context: &Context) -> RendererResult<()> {
@@ -252,20 +274,14 @@ impl RendererContextState {
             )
     }
 
-    /// Returns whether the native Context is already gone, without entering or inspecting any
-    /// current Context state.
-    pub(super) fn native_context_is_destroyed(&self) -> bool {
-        matches!(self.binding.lifecycle(), ContextLifecycle::NativeDestroyed)
-    }
-
     /// Discards bookkeeping for a Context whose native state was already destroyed.
     ///
     /// No native pointer is dereferenced here. The renderer may need this terminal path after a
     /// prior device-wait failure is retried from the owner once Context teardown has completed.
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub(super) fn forget_destroyed_context(&self) {
-        self.published.set(false);
         self.name_ptr.set(std::ptr::null());
+        self.finish_unpublish();
     }
 
     fn revoke_owned_capabilities_bound(&self) {
@@ -315,7 +331,7 @@ impl RendererContextState {
     }
 
     pub(super) fn unpublish_bound(&self) -> bool {
-        if !self.published.replace(false) {
+        if !self.published.get() {
             return false;
         }
         let io = unsafe { sys::igGetIO_Nil() };
@@ -369,26 +385,65 @@ impl RendererContextState {
         ) {
             unsafe { platform_io.set_draw_callback_set_sampler_nearest_raw(None) };
         }
+        self.finish_unpublish();
         name_is_ours
     }
 
     pub(super) fn unpublish(&self, context: &mut Context) {
-        let name_was_ours = self.unpublish_bound();
+        let name_was_ours = context
+            .binding()
+            .with_bound_context(|| self.unpublish_bound());
         if name_was_ours {
             let _ = context.set_renderer_name(None::<String>);
         }
+    }
+
+    pub(super) fn unpublish_for_drop(&self) -> bool {
+        if self.published.get() {
+            let result = self
+                .binding
+                .try_with_bound_context(|| self.unpublish_bound());
+            if matches!(
+                result,
+                Err(ContextError::Binding(BindingKind::NativeDestroyed))
+            ) {
+                self.finish_unpublish();
+            }
+        }
+        !self.published.get()
+    }
+
+    pub(super) fn mark_resources_released(&self, signal: RendererResetSignal) {
+        if self.published.get() {
+            // If the Context is already dropping, its publication hook will mark the signal.
+            self.released_on_unpublish.set(Some(signal));
+        } else {
+            signal.mark_renderer_dropped();
+        }
+    }
+
+    fn finish_unpublish(&self) {
+        self.published.set(false);
+        if let Some(signal) = self.released_on_unpublish.take() {
+            signal.mark_renderer_dropped();
+        }
+    }
+}
+
+impl ContextAttachment for RendererContextState {
+    fn release_renderer_resources(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), ContextError> {
+        // Viewport quiescence runs before this phase. Only the core publication is owned here.
+        context.with_bound_context(|| self.unpublish_bound());
+        Ok(())
     }
 }
 
 impl Drop for RendererContextState {
     fn drop(&mut self) {
-        if !self.published.get() {
-            return;
-        }
-        let binding = self.binding.clone();
-        let _ = binding.try_with_bound_context(|| {
-            self.unpublish_bound();
-        });
+        self.unpublish_for_drop();
     }
 }
 
@@ -543,8 +598,7 @@ mod tests {
         first
             .io_mut()
             .set_backend_flags(flags & !core_renderer_flags());
-        let suspended = first.suspend_or_panic();
-        drop(suspended);
+        drop(first);
 
         let mut later = Context::create();
         let token = state.token_ptr();

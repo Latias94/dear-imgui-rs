@@ -185,16 +185,8 @@ dear-imgui-wgpu = "0.23"  # or dear-imgui-glow / dear-imgui-ash
 dear-imgui-winit = "0.23" # or dear-imgui-sdl3
 ```
 
-`dear-imgui-wgpu` 0.23 defaults to WGPU 30. WGPU 29, 28, and 27 remain available as separate, mutually exclusive compatibility features:
-
-```toml
-[dependencies]
-dear-imgui-rs = "0.23"
-dear-imgui-wgpu = { version = "0.23", default-features = false, features = ["wgpu-29"] }
-dear-imgui-winit = "0.23"
-```
-
-Replace `wgpu-29` with `wgpu-28` or `wgpu-27` when integrating an older WGPU application.
+The 0.24 development workspace uses WGPU 30 for every renderer configuration. See the
+[0.23 compatibility matrix](docs/COMPATIBILITY.md#023-release-train) for older release options.
 
 ### Application Runtime (Recommended for Quick Start)
 
@@ -362,13 +354,13 @@ Test engine hooks (important):
 Common env-var shapes used by `-sys` crates (consult each crate README for its exact contract):
 - `<CRATE>_SYS_BUILD_MODE` — `auto` (default), `source`, `prebuilt` (no core/extension source fallback), or `bindings-only`; see the [native build policy](dear-imgui-sys/README.md#native-build-policy). Supported by the core and prebuilt-capable extension sys crates, not the source-only Test Engine.
 - `<CRATE>_SYS_LIB_DIR` — explicit matching artifact directory, not a generic system-library search path; core `IMGUI_SYS_LIB_DIR` also requires the strict matching `manifest.txt` in that directory or its parent artifact root
-- `<CRATE>_SYS_PREBUILT_URL` — explicit URL or local artifact path; for core use a packaged archive rather than a bare `.a/.lib` (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`)
+- `<CRATE>_SYS_PREBUILT_URL` — explicit HTTPS archive URL or local artifact path (`prebuilt` enables remote downloads and archive extraction). Remote archives require a matching `SHA256SUMS` entry in the same release directory. Use `DEAR_IMGUI_SHA256SUMS` to select a local checksum manifest.
 - `<CRATE>_SYS_USE_PREBUILT=1` — allow auto download from GitHub Releases (requires feature `prebuilt`)
 - `<CRATE>_SYS_PACKAGE_DIR` — local dir with `.tar.gz` packages
-- `<CRATE>_SYS_CACHE_DIR` — cache root for downloads/extraction
+- `<CRATE>_SYS_CACHE_DIR` — crate-specific cache root for downloads and extraction. Without it, the crate uses `DEAR_IMGUI_CACHE_DIR` or Cargo's `OUT_DIR`.
 - `<CRATE>_SYS_SKIP_CC` — legacy bindings-only without artifact intent; with an explicit artifact or feature `prebuilt`, require a compatible prebuilt
 - `<CRATE>_SYS_FORCE_BUILD` — force source build
-- `CARGO_NET_OFFLINE=true` — forbid network; use only local packages or repo prebuilt
+- `CARGO_NET_OFFLINE=true` — forbid network access and use local packages or cached archives with a matching checksum manifest.
 
 FreeType: enable once anywhere. Turning on `freetype` in `dear-implot`, `dear-imnodes`, `dear-node-editor`, `dear-imguizmo`, `dear-imguizmo-quat`, or `dear-imgui-test-engine` propagates to `dear-imgui-sys`. Source builds probe `pkg-config freetype2` first and then vcpkg's `freetype` port; if neither is available, the build fails instead of silently disabling FreeType. When using a prebuilt `dear-imgui-sys` with freetype, ensure the package manifest includes `features=freetype` (our packager writes this).
 
@@ -383,6 +375,8 @@ Quick examples (enable auto prebuilt download):
 ## Compatibility
 
 Version `0.23.0` pairs Dear ImGui 1.93.1 WIP with the extension revisions listed in the [native source matrix](docs/COMPATIBILITY.md#native-sources-in-023). Development uses Rust 1.100.0. The core requires Rust 1.95 and the Bevy backend requires Rust 1.97.1.
+
+The 0.24 development workspace requires Rust 1.97.1 for all crates. See the [0.24 migration guide](docs/MIGRATING_0_24.md).
 
 Core
 

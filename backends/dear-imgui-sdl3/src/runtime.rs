@@ -34,34 +34,68 @@ use dear_imgui_rs::platform_io::Viewport;
 ))]
 use dear_imgui_rs::render::{SnapshotTextureId, TextureRequest};
 use dear_imgui_rs::{
-    Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextBinding, ContextDestroyed, ContextId, ContextLifecycle,
-    ContextTeardown, NativeWindowInstanceId, TextureData, sys,
+    Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole, ContextBinding,
+    ContextDestroyed, ContextError, ContextId, ContextLifecycle, ContextTeardown,
+    NativeWindowInstanceId, TextureData, sys,
 };
 
 struct Sdl3PlatformAttachmentMarker;
 struct Sdl3RendererAttachmentMarker;
 
 static NEXT_PLATFORM_SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
-static PLATFORM_SESSION_OWNER: AtomicU64 = AtomicU64::new(0);
+struct PlatformSessionRecord {
+    generation: u64,
+    window_id: Option<u32>,
+}
+
+thread_local! {
+    // Core Contexts and SDL video calls stay on their owning thread. A session reserves its
+    // host before initializing the native backend so window-ID input has exactly one owner.
+    static PLATFORM_SESSIONS: RefCell<HashMap<ContextId, PlatformSessionRecord>> = RefCell::new(HashMap::new());
+}
 
 #[derive(Debug)]
 struct Sdl3PlatformSession {
+    context: ContextId,
     generation: u64,
 }
 
 impl Sdl3PlatformSession {
-    fn acquire() -> Result<Self, Sdl3BackendError> {
-        let generation = loop {
-            let generation = NEXT_PLATFORM_SESSION_GENERATION.fetch_add(1, Ordering::Relaxed);
-            if generation != 0 {
-                break generation;
+    fn acquire(context: ContextId, window_id: Option<u32>) -> Result<Self, Sdl3BackendError> {
+        PLATFORM_SESSIONS.with(|sessions| {
+            let mut sessions = sessions.borrow_mut();
+            if sessions.contains_key(&context) {
+                return Err(Sdl3BackendError::PlatformSessionOccupied);
             }
-        };
-        PLATFORM_SESSION_OWNER
-            .compare_exchange(0, generation, Ordering::AcqRel, Ordering::Acquire)
-            .map_err(|_| Sdl3BackendError::PlatformSessionOccupied)?;
-        Ok(Self { generation })
+            if let Some(window_id) = window_id {
+                if window_id == 0 {
+                    return Err(Sdl3BackendError::PlatformStateUnavailable);
+                }
+                if sessions
+                    .values()
+                    .any(|session| session.window_id == Some(window_id))
+                {
+                    return Err(Sdl3BackendError::PlatformWindowOccupied { window_id });
+                }
+            }
+            let generation = loop {
+                let generation = NEXT_PLATFORM_SESSION_GENERATION.fetch_add(1, Ordering::Relaxed);
+                if generation != 0 {
+                    break generation;
+                }
+            };
+            sessions.insert(
+                context,
+                PlatformSessionRecord {
+                    generation,
+                    window_id,
+                },
+            );
+            Ok(Self {
+                context,
+                generation,
+            })
+        })
     }
 
     fn generation(&self) -> u64 {
@@ -71,13 +105,15 @@ impl Sdl3PlatformSession {
 
 impl Drop for Sdl3PlatformSession {
     fn drop(&mut self) {
-        let released = PLATFORM_SESSION_OWNER.compare_exchange(
-            self.generation,
-            0,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        );
-        debug_assert!(released.is_ok(), "SDL3 platform session owner changed");
+        let _ = PLATFORM_SESSIONS.try_with(|sessions| {
+            let mut sessions = sessions.borrow_mut();
+            if sessions
+                .get(&self.context)
+                .is_some_and(|session| session.generation == self.generation)
+            {
+                sessions.remove(&self.context);
+            }
+        });
     }
 }
 
@@ -245,7 +281,7 @@ impl RuntimeFault {
             Self::NativeWindowOwnerLeased => Sdl3BackendError::NativeWindowOwnerLeased,
             Self::NativeWindowLeaseUnavailable => Sdl3BackendError::NativeWindowLeaseUnavailable,
             Self::NativeWindowIdentityExhausted => {
-                dear_imgui_rs::NativeWindowIdentityExhausted.into()
+                dear_imgui_rs::ContextError::NativeWindowIdentityExhausted.into()
             }
             Self::CallbackReplaced(callback) => {
                 Sdl3BackendError::PlatformCallbackReplaced { callback }
@@ -538,10 +574,10 @@ impl Drop for PlatformDispatchGuard<'_> {
         }
         let mut scopes = self.control.dispatch_failures.borrow_mut();
         let completed = scopes.pop();
-        if let Some(completed) = completed {
-            if let Some(parent) = scopes.last_mut() {
-                parent.extend(completed);
-            }
+        if let Some(completed) = completed
+            && let Some(parent) = scopes.last_mut()
+        {
+            parent.extend(completed);
         }
         drop(scopes);
         self.control
@@ -582,7 +618,7 @@ mod drop_events;
 mod native_leases;
 mod windows;
 use native_leases::NativeWindowAllocation;
-pub use native_leases::Sdl3NativeWindowLease;
+pub use native_leases::{Sdl3NativeWindowLease, Sdl3SurfaceWindowLease};
 
 pub use windows::{Sdl3WindowRef, Sdl3WindowSnapshot};
 pub(crate) mod window_policy;

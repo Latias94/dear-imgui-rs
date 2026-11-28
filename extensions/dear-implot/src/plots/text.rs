@@ -2,9 +2,9 @@
 
 use super::{
     PlotData, PlotDataLayout, PlotError, PlotItemStyle, PlotItemStyled, plot_spec_with_style,
-    with_plot_str,
 };
 use crate::{ItemFlags, TextFlags, sys};
+use dear_imgui_rs::with_scratch_txt;
 
 /// Builder for text plots with extensive customization options
 ///
@@ -66,8 +66,12 @@ impl<'a> TextPlot<'a> {
         self
     }
 
-    /// Validate the plot data
+    /// Check the label, plot position, and native pixel offset.
     pub fn validate(&self) -> Result<(), PlotError> {
+        self.validated_pixel_offset().map(|_| ())
+    }
+
+    fn validated_pixel_offset(&self) -> Result<sys::ImVec2_c, PlotError> {
         if self.text.is_empty() {
             return Err(PlotError::InvalidData("Text cannot be empty".to_string()));
         }
@@ -76,17 +80,30 @@ impl<'a> TextPlot<'a> {
                 "text contained null byte".to_string(),
             ));
         }
-        Ok(())
-    }
-
-    /// Plot the text
-    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
+        if !self.x.is_finite() || !self.y.is_finite() {
+            return Err(PlotError::InvalidData(
+                "Text position must be finite".into(),
+            ));
+        }
         let pix_offset = sys::ImVec2_c {
             x: self.pix_offset_x as f32,
             y: self.pix_offset_y as f32,
         };
+        if !pix_offset.x.is_finite() || !pix_offset.y.is_finite() {
+            return Err(PlotError::InvalidData(
+                "Text pixel offsets must convert to finite f32 values".into(),
+            ));
+        }
+        Ok(pix_offset)
+    }
+
+    /// Plot the text, or skip it if validation fails.
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
+        let Ok(pix_offset) = self.validated_pixel_offset() else {
+            return;
+        };
         plot_ui.with_bound_context(|| {
-            let _ = with_plot_str(self.text, |text_ptr| unsafe {
+            with_scratch_txt(self.text, |text_ptr| unsafe {
                 let spec = plot_spec_with_style(
                     plot_ui,
                     self.style,
@@ -106,6 +123,10 @@ impl<'a> PlotData for TextPlot<'a> {
 
     fn data_len(&self) -> usize {
         1 // Text plot has one data point
+    }
+
+    fn validate(&self) -> Result<(), PlotError> {
+        TextPlot::validate(self)
     }
 }
 
@@ -290,36 +311,27 @@ impl FormattedTextPlot {
         self
     }
 
-    /// Validate the plot data
+    /// Check the label, plot position, and native pixel offset.
     pub fn validate(&self) -> Result<(), PlotError> {
-        if self.text.is_empty() {
-            return Err(PlotError::InvalidData("Text cannot be empty".to_string()));
-        }
-        if self.text.contains('\0') {
-            return Err(PlotError::StringConversion(
-                "text contained null byte".to_string(),
-            ));
-        }
-        Ok(())
+        self.as_text_plot().validate()
     }
 
-    /// Plot the formatted text
+    /// Plot the formatted text, or skip it if validation fails.
     pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
-        let pix_offset = sys::ImVec2_c {
-            x: self.pix_offset_x as f32,
-            y: self.pix_offset_y as f32,
-        };
-        plot_ui.with_bound_context(|| {
-            let _ = with_plot_str(&self.text, |text_ptr| unsafe {
-                let spec = plot_spec_with_style(
-                    plot_ui,
-                    self.style,
-                    self.flags.bits() | self.item_flags.bits(),
-                    PlotDataLayout::DEFAULT,
-                );
-                sys::ImPlot_PlotText(text_ptr, self.x, self.y, pix_offset, spec);
-            });
-        })
+        self.as_text_plot().plot(plot_ui);
+    }
+
+    fn as_text_plot(&self) -> TextPlot<'_> {
+        TextPlot {
+            text: &self.text,
+            x: self.x,
+            y: self.y,
+            style: self.style,
+            pix_offset_x: self.pix_offset_x,
+            pix_offset_y: self.pix_offset_y,
+            flags: self.flags,
+            item_flags: self.item_flags,
+        }
     }
 }
 
@@ -330,6 +342,10 @@ impl PlotData for FormattedTextPlot {
 
     fn data_len(&self) -> usize {
         1
+    }
+
+    fn validate(&self) -> Result<(), PlotError> {
+        FormattedTextPlot::validate(self)
     }
 }
 
@@ -412,5 +428,59 @@ impl<'a> TextAnnotation<'a> {
             .with_item_flags(self.item_flags);
 
         text_plot.plot(plot_ui);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FormattedTextPlot, PlotData, PlotError, TextPlot};
+
+    #[test]
+    fn text_validates_label_position_and_native_pixel_offset() {
+        let text = |position_x, position_y| TextPlot::new("label", position_x, position_y);
+        assert!(
+            text(0.0, 1.0)
+                .with_pixel_offset(-1.0, 2.0)
+                .validate()
+                .is_ok()
+        );
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(matches!(
+                text(invalid, 0.0).validate(),
+                Err(PlotError::InvalidData(_))
+            ));
+            assert!(matches!(
+                text(0.0, invalid).validate(),
+                Err(PlotError::InvalidData(_))
+            ));
+        }
+        for invalid in [f64::NAN, f64::INFINITY, f64::MAX, -f64::MAX] {
+            assert!(
+                text(0.0, 0.0)
+                    .with_pixel_offset(invalid, 0.0)
+                    .validate()
+                    .is_err()
+            );
+            assert!(
+                text(0.0, 0.0)
+                    .with_pixel_offset(0.0, invalid)
+                    .validate()
+                    .is_err()
+            );
+        }
+        assert!(matches!(
+            TextPlot::new("", 0.0, 0.0).validate(),
+            Err(PlotError::InvalidData(_))
+        ));
+        assert!(matches!(
+            TextPlot::new("not\0valid", 0.0, 0.0).validate(),
+            Err(PlotError::StringConversion(_))
+        ));
+        let formatted =
+            FormattedTextPlot::new("label".into(), 0.0, 0.0).with_pixel_offset(f64::MAX, 0.0);
+        assert!(matches!(
+            PlotData::validate(&formatted),
+            Err(PlotError::InvalidData(_))
+        ));
     }
 }

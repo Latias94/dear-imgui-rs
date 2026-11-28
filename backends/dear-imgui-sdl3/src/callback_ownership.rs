@@ -487,17 +487,8 @@ impl PlatformCallbacks {
         &self,
         viewport: *mut sys::ImGuiViewport,
         pos: *const sys::ImVec2,
-    ) -> bool {
-        match self.set_window_pos {
-            PlatformSetVec2Callback::Native(Some(_)) => unsafe {
-                sys::ImGuiPlatformIO_InvokePlatformSetWindowPos(&self.raw, viewport, pos)
-            },
-            PlatformSetVec2Callback::Native(None) => false,
-            PlatformSetVec2Callback::Pointer(callback) => {
-                unsafe { callback(viewport, pos) };
-                true
-            }
-        }
+    ) {
+        unsafe { self.set_window_pos.invoke(viewport, pos) };
     }
 
     pub(super) unsafe fn invoke_get_window_pos(
@@ -505,33 +496,15 @@ impl PlatformCallbacks {
         viewport: *mut sys::ImGuiViewport,
         out_pos: *mut sys::ImVec2,
     ) -> bool {
-        match self.get_window_pos {
-            PlatformGetVec2Callback::Native(Some(_)) => unsafe {
-                sys::ImGuiPlatformIO_InvokePlatformGetWindowPos(&self.raw, viewport, out_pos)
-            },
-            PlatformGetVec2Callback::Native(None) => false,
-            PlatformGetVec2Callback::Out(callback) => {
-                unsafe { callback(viewport, out_pos) };
-                true
-            }
-        }
+        unsafe { self.get_window_pos.invoke(viewport, out_pos) }
     }
 
     pub(super) unsafe fn invoke_set_window_size(
         &self,
         viewport: *mut sys::ImGuiViewport,
         size: *const sys::ImVec2,
-    ) -> bool {
-        match self.set_window_size {
-            PlatformSetVec2Callback::Native(Some(_)) => unsafe {
-                sys::ImGuiPlatformIO_InvokePlatformSetWindowSize(&self.raw, viewport, size)
-            },
-            PlatformSetVec2Callback::Native(None) => false,
-            PlatformSetVec2Callback::Pointer(callback) => {
-                unsafe { callback(viewport, size) };
-                true
-            }
-        }
+    ) {
+        unsafe { self.set_window_size.invoke(viewport, size) };
     }
 
     pub(super) unsafe fn invoke_get_window_size(
@@ -539,16 +512,7 @@ impl PlatformCallbacks {
         viewport: *mut sys::ImGuiViewport,
         out_size: *mut sys::ImVec2,
     ) -> bool {
-        match self.get_window_size {
-            PlatformGetVec2Callback::Native(Some(_)) => unsafe {
-                sys::ImGuiPlatformIO_InvokePlatformGetWindowSize(&self.raw, viewport, out_size)
-            },
-            PlatformGetVec2Callback::Native(None) => false,
-            PlatformGetVec2Callback::Out(callback) => {
-                unsafe { callback(viewport, out_size) };
-                true
-            }
-        }
+        unsafe { self.get_window_size.invoke(viewport, out_size) }
     }
 
     pub(super) unsafe fn invoke_get_window_framebuffer_scale(
@@ -556,17 +520,9 @@ impl PlatformCallbacks {
         viewport: *mut sys::ImGuiViewport,
         out_scale: *mut sys::ImVec2,
     ) -> bool {
-        match self.get_window_framebuffer_scale {
-            PlatformGetVec2Callback::Native(Some(_)) => unsafe {
-                sys::ImGuiPlatformIO_InvokePlatformGetWindowFramebufferScale(
-                    &self.raw, viewport, out_scale,
-                )
-            },
-            PlatformGetVec2Callback::Native(None) => false,
-            PlatformGetVec2Callback::Out(callback) => {
-                unsafe { callback(viewport, out_scale) };
-                true
-            }
+        unsafe {
+            self.get_window_framebuffer_scale
+                .invoke(viewport, out_scale)
         }
     }
 
@@ -641,6 +597,18 @@ impl PlatformCallbacks {
 }
 
 impl PlatformSetVec2Callback {
+    unsafe fn invoke(self, viewport: *mut sys::ImGuiViewport, value: *const sys::ImVec2) {
+        match self {
+            Self::Native(Some(callback)) => unsafe {
+                ffi::dear_imgui_sdl3_invoke_viewport_set_vec2(callback, viewport, value);
+            },
+            Self::Native(None) => (),
+            Self::Pointer(callback) => unsafe {
+                ffi::dear_imgui_sdl3_invoke_viewport_set_vec2_ptr(callback, viewport, value);
+            },
+        }
+    }
+
     unsafe fn install_pos(self, platform_io: *mut sys::ImGuiPlatformIO) {
         match self {
             Self::Native(callback) => unsafe {
@@ -673,6 +641,18 @@ impl PlatformSetVec2Callback {
 }
 
 impl PlatformGetVec2Callback {
+    unsafe fn invoke(self, viewport: *mut sys::ImGuiViewport, value: *mut sys::ImVec2) -> bool {
+        match self {
+            Self::Native(Some(callback)) => unsafe {
+                ffi::dear_imgui_sdl3_invoke_viewport_get_vec2(callback, viewport, value)
+            },
+            Self::Native(None) => false,
+            Self::Out(callback) => unsafe {
+                ffi::dear_imgui_sdl3_invoke_viewport_get_vec2_out(callback, viewport, value)
+            },
+        }
+    }
+
     unsafe fn install_pos(self, platform_io: *mut sys::ImGuiPlatformIO) {
         match self {
             Self::Native(callback) => unsafe {
@@ -723,7 +703,7 @@ impl PlatformGetVec2Callback {
 }
 
 #[derive(Clone, Copy)]
-enum RendererSetWindowSizeCallback {
+pub(super) enum RendererSetWindowSizeCallback {
     Native(Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2_c)>),
     Pointer(unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2)),
 }
@@ -768,32 +748,12 @@ impl RendererSetWindowSizeCallback {
             },
         }
     }
-}
-
-pub(super) struct RendererSetWindowSizeInvocation {
-    callback: RendererSetWindowSizeCallback,
-    native_callbacks: PlatformCallbacks,
-}
-
-impl RendererSetWindowSizeInvocation {
-    pub(super) fn invoke(
-        &self,
-        viewport: *mut sys::ImGuiViewport,
-        size: *const sys::ImVec2,
-    ) -> bool {
-        match self.callback {
-            RendererSetWindowSizeCallback::Native(_) => unsafe {
-                sys::ImGuiPlatformIO_InvokeRendererSetWindowSize(
-                    &self.native_callbacks.raw,
-                    viewport,
-                    size,
-                )
-            },
-            RendererSetWindowSizeCallback::Pointer(callback) => {
-                unsafe { callback(viewport, size) };
-                true
-            }
-        }
+    pub(super) unsafe fn invoke(self, viewport: *mut sys::ImGuiViewport, size: *const sys::ImVec2) {
+        let callback = match self {
+            Self::Native(callback) => PlatformSetVec2Callback::Native(callback),
+            Self::Pointer(callback) => PlatformSetVec2Callback::Pointer(callback),
+        };
+        unsafe { callback.invoke(viewport, size) };
     }
 }
 
@@ -1186,6 +1146,27 @@ pub(super) use native_callbacks::{
     renderer_render_window_callback_for_test, renderer_set_window_size_callback_for_test,
 };
 
+impl PlatformCallbackOwnership {
+    pub(super) fn original_callbacks(&self) -> PlatformCallbacks {
+        self.original.snapshot()
+    }
+
+    pub(super) unsafe fn owns_live_slot(&self, slot: PlatformCallbackSlot) -> bool {
+        let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
+        if platform_io.is_null() {
+            return false;
+        }
+        let current = unsafe { PlatformCallbacks::capture(platform_io) };
+        self.installed.same_window_callback(&current, slot)
+    }
+
+    #[cfg(test)]
+    pub(super) fn wraps_slot(&self, slot: PlatformCallbackSlot) -> bool {
+        self.original.window_callback_is_some(slot)
+            && !self.original.same_window_callback(&self.installed, slot)
+    }
+}
+
 #[cfg(test)]
 mod inventory_tests {
     #[test]
@@ -1221,26 +1202,5 @@ mod inventory_tests {
                 "Platform_CreateVkSurface",
             ]
         );
-    }
-}
-
-impl PlatformCallbackOwnership {
-    pub(super) fn original_callbacks(&self) -> PlatformCallbacks {
-        self.original.snapshot()
-    }
-
-    pub(super) unsafe fn owns_live_slot(&self, slot: PlatformCallbackSlot) -> bool {
-        let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
-        if platform_io.is_null() {
-            return false;
-        }
-        let current = unsafe { PlatformCallbacks::capture(platform_io) };
-        self.installed.same_window_callback(&current, slot)
-    }
-
-    #[cfg(test)]
-    pub(super) fn wraps_slot(&self, slot: PlatformCallbackSlot) -> bool {
-        self.original.window_callback_is_some(slot)
-            && !self.original.same_window_callback(&self.installed, slot)
     }
 }

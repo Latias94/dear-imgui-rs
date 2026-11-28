@@ -39,7 +39,7 @@ impl Application for ImPlotMinimal {
         ui.window("ImPlot Minimal")
             .size([680.0, 430.0], Condition::FirstUseEver)
             .build(|| {
-                ui.slider("Amplitude", 0.1, 2.0, &mut self.amplitude);
+                ui.slider("Amplitude", &mut self.amplitude, 0.1, 2.0);
                 ui.text("Drag inside the plot to pan; use the wheel to zoom.");
 
                 let amplitude = f64::from(self.amplitude);

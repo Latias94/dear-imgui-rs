@@ -18,16 +18,15 @@ pub struct Options {
     /// This excludes the two renderer-owned standard sampler sets and must be at least 8 so font
     /// atlas replacements and fence-delayed texture retirement have bounded headroom.
     pub max_textures: u32,
-    /// If true, treat the render target as sRGB.
+    /// Decode interpolated vertex RGB before blending into an sRGB render target.
     ///
-    /// This backend follows the WGPU renderer approach: ImGui provides colors/texels in sRGB
-    /// space (stored as UNORM), and the fragment shader applies `pow(rgb, gamma)` to convert
-    /// to linear before writing to an sRGB render target.
+    /// The fragment shader uses the IEC 61966-2-1 transfer. Use an sRGB image view for any
+    /// application texture containing sRGB-encoded RGB.
     pub framebuffer_srgb: bool,
-    /// Override the gamma used for sRGB->linear conversion in the shader.
+    /// Override the vertex color transfer applied in the fragment shader.
     ///
-    /// - `None`: auto (2.2 when `framebuffer_srgb`, else 1.0)
-    /// - `Some(gamma)`: force a value (e.g. 2.2 or 1.0)
+    /// - `None`: select sRGB decoding from the target configuration.
+    /// - `Some(gamma)`: apply a power curve to vertex RGB, with `1.0` preserving the input.
     pub color_gamma_override: Option<f32>,
 }
 
@@ -57,6 +56,8 @@ pub struct AshRendererConfig {
     pub(super) queue: vk::Queue,
     pub(super) command_pool: vk::CommandPool,
     pub(super) render_target: RenderTarget,
+    #[cfg(feature = "dynamic-rendering")]
+    pub(super) stencil_attachment_format: vk::Format,
     pub(super) options: Options,
 }
 
@@ -109,6 +110,8 @@ impl AshRendererConfig {
             queue,
             command_pool,
             render_target: RenderTarget::RenderPass(render_pass),
+            #[cfg(feature = "dynamic-rendering")]
+            stencil_attachment_format: vk::Format::UNDEFINED,
             options: Options::default(),
         }
     }
@@ -126,8 +129,22 @@ impl AshRendererConfig {
             queue,
             command_pool,
             render_target: RenderTarget::DynamicRendering(dynamic_rendering),
+            stencil_attachment_format: vk::Format::UNDEFINED,
             options: Options::default(),
         }
+    }
+
+    /// Set the stencil attachment format for the dynamic rendering pipeline.
+    ///
+    /// Declare the format when `VkRenderingInfo::pStencilAttachment` supplies an image view,
+    /// even with stencil testing disabled. Use a stencil-capable format that matches the depth
+    /// format when both attachments are bound. The default is `vk::Format::UNDEFINED`.
+    /// Render-pass pipelines take their attachment formats from the render pass.
+    #[cfg(feature = "dynamic-rendering")]
+    #[must_use]
+    pub fn with_stencil_attachment_format(mut self, format: vk::Format) -> Self {
+        self.stencil_attachment_format = format;
+        self
     }
 
     /// Replace the renderer options.
@@ -143,5 +160,9 @@ impl AshRendererConfig {
 #[derive(Debug, Clone, Copy)]
 pub struct DynamicRendering {
     pub color_attachment_format: vk::Format,
+    /// Format of the view bound as `VkRenderingInfo::pDepthAttachment`.
+    ///
+    /// Declare a bound stencil aspect separately with
+    /// [`AshRendererConfig::with_stencil_attachment_format`].
     pub depth_attachment_format: Option<vk::Format>,
 }

@@ -43,17 +43,19 @@ pub(super) fn draw_grid(
     }
 }
 
-pub(super) fn draw_node<'ui>(
-    ui: &'ui Ui,
-    mut custom: Option<&mut Box<dyn for<'a> FnMut(&DrawListMut<'a>, [f32; 4], NodeId) + 'ui>>,
+pub(super) type CustomNodeDraw<'ui> = dyn for<'a> FnMut(&DrawListMut<'a>, [f32; 4], NodeId) + 'ui;
+
+pub(super) fn draw_node(
+    ui: &Ui,
+    custom: Option<&mut CustomNodeDraw<'_>>,
     dl: &DrawListMut,
     origin: [f32; 2],
     view: &GraphView,
     node: &Node,
     style: &GraphStyle,
-    selected: bool,
-    hovered_node: bool,
 ) {
+    let selected = view.selected_nodes.contains(&node.id);
+    let hovered_node = view.hovered_node == Some(node.id);
     let pos = world_to_screen(node.pos, origin, view);
     let sz = node_size(node);
     let rect = [
@@ -146,15 +148,16 @@ pub(super) fn draw_node<'ui>(
         rect[2] - style.node_rounding * view.zoom,
         rect[3] - style.node_rounding * view.zoom,
     ];
-    if custom_min[0] < custom_max[0] && custom_min[1] < custom_max[1] {
-        if let Some(cb) = custom.as_deref_mut() {
-            let _clip_rect = ui.push_clip_rect(custom_min, custom_max, true);
-            (*cb)(
-                dl,
-                [custom_min[0], custom_min[1], custom_max[0], custom_max[1]],
-                node.id,
-            );
-        }
+    if custom_min[0] < custom_max[0]
+        && custom_min[1] < custom_max[1]
+        && let Some(cb) = custom
+    {
+        let _clip_rect = ui.push_clip_rect(custom_min, custom_max, true);
+        (*cb)(
+            dl,
+            [custom_min[0], custom_min[1], custom_max[0], custom_max[1]],
+            node.id,
+        );
     }
 }
 

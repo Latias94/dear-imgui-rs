@@ -4,19 +4,15 @@
 //! evidence. Native Winit, Vulkan, swapchain, renderer, and teardown order remain in the shared
 //! Ash lifecycle used by the interactive example.
 
-#[path = "../support/ash_multi_viewport.rs"]
-mod ash_multi_viewport;
-
 use ash::vk::{self, Handle as _};
-use ash_multi_viewport::validation::{
+use dear_imgui_ash::AshRenderState;
+use dear_imgui_examples::ash_multi_viewport::validation::{
     AshCompletionRequest, AshFrameOutcome, AshFrameUi, AshSecondarySubmissions,
     AshValidationScenario, TeardownEvidence, ValidationConfig, ValidationState, run_validation,
 };
-use ash_multi_viewport::{ExampleResult, VulkanAdapterInfo};
-use dear_imgui_ash::AshRenderState;
+use dear_imgui_examples::ash_multi_viewport::{ExampleResult, VulkanAdapterInfo};
 use dear_imgui_rs::{
-    Condition, Context, Id, ManagedTextureId, OwnedTextureData, TextureDataError, TextureFormat,
-    sys,
+    Condition, Context, Id, ManagedTextureId, OwnedTextureData, TextureError, TextureFormat, sys,
 };
 use std::{
     env,
@@ -59,7 +55,7 @@ fn smoke_texture_pixels(revision: u8) -> Vec<u8> {
     pixels
 }
 
-fn smoke_texture_data(revision: u8) -> Result<OwnedTextureData, TextureDataError> {
+fn smoke_texture_data(revision: u8) -> Result<OwnedTextureData, TextureError> {
     OwnedTextureData::from_pixels(TextureFormat::RGBA32, 8, 8, &smoke_texture_pixels(revision))
 }
 
@@ -353,50 +349,29 @@ impl ValidationSmoke {
                 observed_viewport_id = viewport.id();
                 observed_viewport_size = viewport.size();
                 ui.text("Ash dynamic rendering validation surface");
-                {
-                    let draw_list = ui.get_window_draw_list();
-                    unsafe {
-                        draw_list.add_callback(
-                            frame.sampler_nearest_callback,
-                            std::ptr::null_mut(),
-                            0,
-                        );
-                        draw_list.add_callback(
-                            smoke_nearest_sampler_probe,
-                            std::ptr::null_mut(),
-                            0,
-                        );
-                    }
-                }
+                ui.with_window_draw_list(|draw_list| unsafe {
+                    draw_list.add_callback(frame.sampler_nearest_callback, std::ptr::null_mut(), 0);
+                    draw_list.add_callback(smoke_nearest_sampler_probe, std::ptr::null_mut(), 0);
+                });
                 if let Some(texture) = managed_texture {
                     ui.image(texture, [64.0, 64.0]);
                 } else {
                     ui.text("Font atlas sampler probe");
                 }
-                {
-                    let draw_list = ui.get_window_draw_list();
-                    unsafe {
-                        draw_list.add_callback(
-                            frame.sampler_linear_callback,
-                            std::ptr::null_mut(),
-                            0,
-                        );
-                        draw_list.add_callback(smoke_linear_sampler_probe, std::ptr::null_mut(), 0);
-                        draw_list.add_callback(smoke_raw_callback, std::ptr::null_mut(), 0);
-                        draw_list.add_callback(
-                            frame.reset_render_state_callback,
-                            std::ptr::null_mut(),
-                            0,
-                        );
-                    }
-                }
+                ui.with_window_draw_list(|draw_list| unsafe {
+                    draw_list.add_callback(frame.sampler_linear_callback, std::ptr::null_mut(), 0);
+                    draw_list.add_callback(smoke_linear_sampler_probe, std::ptr::null_mut(), 0);
+                    draw_list.add_callback(smoke_raw_callback, std::ptr::null_mut(), 0);
+                    draw_list.add_callback(
+                        frame.reset_render_state_callback,
+                        std::ptr::null_mut(),
+                        0,
+                    );
+                });
                 ui.text("Draw after reset-render-state callback");
-                {
-                    let draw_list = ui.get_window_draw_list();
-                    unsafe {
-                        draw_list.add_callback(smoke_reset_probe, std::ptr::null_mut(), 0);
-                    }
-                }
+                ui.with_window_draw_list(|draw_list| unsafe {
+                    draw_list.add_callback(smoke_reset_probe, std::ptr::null_mut(), 0);
+                });
             });
         self.observe_window(
             observed_viewport_id,

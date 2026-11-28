@@ -203,22 +203,29 @@ pub(crate) fn dispatch_surface_frame<Frame, Output>(
         SurfaceAdmission::Admitted(admitted) => admitted,
         SurfaceAdmission::Skipped(reason) => return Ok(SurfaceDispatch::skipped(reason)),
     };
-    let frame_index = admitted_frame_count
+    let frame_index = next_frame_index(admitted_frame_count, "admitted frame counter exhausted")?;
+    drive(admitted, frame_index).map(SurfaceDispatch::presented)
+}
+
+pub(super) fn next_frame_index(
+    frame_count: &mut u64,
+    exhausted: &'static str,
+) -> Result<u64, RunError> {
+    let frame_index = frame_count
         .checked_add(1)
         .ok_or_else(|| RunError::Recovery {
-            message: "admitted frame counter exhausted".to_owned(),
+            message: exhausted.to_owned(),
         })?;
-    *admitted_frame_count = frame_index;
-    drive(admitted, frame_index).map(SurfaceDispatch::presented)
+    *frame_count = frame_index;
+    Ok(frame_index)
 }
 
 pub(crate) fn settle_surface_presentation<Output>(
     result: Result<Output, RunError>,
-    was_presented: bool,
     reconfigure_after_present: bool,
     reconfigure: impl FnOnce(),
 ) -> Result<Output, RunError> {
-    if reconfigure_after_present && was_presented {
+    if reconfigure_after_present {
         reconfigure();
     }
     result
@@ -457,6 +464,23 @@ mod tests {
             Err(RunError::GpuOutOfMemory { .. })
         ));
 
+        let mut retry_out_of_memory =
+            ProbeBackend::new([SurfaceAcquisition::Lost, SurfaceAcquisition::OutOfMemory]);
+        assert!(matches!(
+            admit_surface_frame(&mut retry_out_of_memory),
+            Err(RunError::GpuOutOfMemory { .. })
+        ));
+        assert_eq!(
+            retry_out_of_memory.events,
+            [
+                "acquire",
+                "event:Lost",
+                "recover:RecreateSurface",
+                "acquire",
+                "event:OutOfMemory",
+            ]
+        );
+
         let mut recovery = ProbeBackend::new([SurfaceAcquisition::Lost]);
         recovery.fail_recovery = true;
         assert!(
@@ -541,8 +565,8 @@ mod tests {
     }
 
     #[test]
-    fn suboptimal_reconfiguration_requires_an_actual_presentation() {
-        for (was_presented, result_is_error, expected_reconfigures) in [
+    fn required_reconfiguration_runs_even_after_a_post_presentation_error() {
+        for (reconfigure_after_present, result_is_error, expected_reconfigures) in [
             (true, false, 1),
             (true, true, 1),
             (false, false, 0),
@@ -556,17 +580,12 @@ mod tests {
             } else {
                 Ok(41)
             };
-            let settled = settle_surface_presentation(result, was_presented, true, || {
+            let settled = settle_surface_presentation(result, reconfigure_after_present, || {
                 reconfigures += 1;
             });
             assert_eq!(settled.is_err(), result_is_error);
             assert_eq!(reconfigures, expected_reconfigures);
         }
-
-        let mut reconfigures = 0;
-        let settled = settle_surface_presentation(Ok(7), true, false, || reconfigures += 1);
-        assert_eq!(settled.unwrap(), 7);
-        assert_eq!(reconfigures, 0);
     }
 
     #[test]

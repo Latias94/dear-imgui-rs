@@ -3,46 +3,29 @@
 //! This module contains the main backend data structure and initialization info,
 //! following the pattern from imgui_impl_wgpu.cpp
 
-use std::{cell::Cell, ffi::c_void, marker::PhantomData, ptr::NonNull, rc::Rc};
+use std::{cell::RefCell, marker::PhantomData, ptr::NonNull, rc::Rc};
 
 use crate::{FrameResourceArena, FrameResources, RenderResources, RendererError, RendererResult};
+use dear_imgui_backend_support::BackendError;
 use dear_imgui_rs::sys;
-use thiserror::Error;
 use wgpu::*;
 
-/// Error returned while borrowing the transient WGPU draw-callback state.
-#[derive(Copy, Clone, Debug, Eq, Error, PartialEq)]
-#[non_exhaustive]
-pub enum WgpuRenderStateAccessError {
-    /// No WGPU render state is active on the current Dear ImGui Context.
-    #[error("no WGPU render state is active on the current Dear ImGui context")]
-    Inactive,
-    /// The active callback state is already borrowed by an outer scoped access.
-    #[error("the active WGPU render state is already borrowed")]
-    AlreadyBorrowed,
+pub(crate) struct WgpuRenderStateStorage<'pass, 'encoder> {
+    device: &'pass Device,
+    render_pass: NonNull<RenderPass<'encoder>>,
+    borrowed: RefCell<()>,
+    _pass: PhantomData<&'pass mut RenderPass<'encoder>>,
 }
 
-pub(crate) struct WgpuRenderStateStorage {
-    device: NonNull<Device>,
-    render_pass: NonNull<c_void>,
-    borrowed: Cell<bool>,
-}
-
-impl WgpuRenderStateStorage {
-    pub(crate) fn new(device: &Device, render_pass: &mut RenderPass<'_>) -> Self {
+impl<'pass, 'encoder> WgpuRenderStateStorage<'pass, 'encoder> {
+    /// Holds an exclusive reborrow of `render_pass` until publication ends.
+    pub(crate) fn new(device: &'pass Device, render_pass: &'pass mut RenderPass<'encoder>) -> Self {
         Self {
-            device: NonNull::from(device),
-            render_pass: NonNull::from(render_pass).cast(),
-            borrowed: Cell::new(false),
+            device,
+            render_pass: NonNull::from(render_pass),
+            borrowed: RefCell::default(),
+            _pass: PhantomData,
         }
-    }
-}
-
-struct WgpuRenderStateBorrow<'storage>(&'storage Cell<bool>);
-
-impl Drop for WgpuRenderStateBorrow<'_> {
-    fn drop(&mut self) {
-        self.0.set(false);
     }
 }
 
@@ -54,6 +37,8 @@ impl Drop for WgpuRenderStateBorrow<'_> {
 ///
 /// The state borrows the renderer's device and render pass; it does not own
 /// either resource and does not provide access to the Dear ImGui [`Context`].
+/// The pass's encoder lifetime is opaque to the callback and remains distinct
+/// from the shorter borrow of the state.
 ///
 /// ```compile_fail
 /// use dear_imgui_wgpu::WgpuRenderState;
@@ -64,13 +49,14 @@ impl Drop for WgpuRenderStateBorrow<'_> {
 ///
 /// [`Context`]: dear_imgui_rs::Context
 #[derive(Debug)]
-pub struct WgpuRenderState<'callback> {
-    storage: NonNull<WgpuRenderStateStorage>,
-    _callback: PhantomData<&'callback mut WgpuRenderStateStorage>,
+pub struct WgpuRenderState<'encoder> {
+    device: NonNull<Device>,
+    render_pass: NonNull<RenderPass<'encoder>>,
+    _encoder: PhantomData<*mut RenderPass<'encoder>>,
     _ui_thread: PhantomData<Rc<()>>,
 }
 
-impl WgpuRenderState<'_> {
+impl<'encoder> WgpuRenderState<'encoder> {
     /// Borrows the state published for the current raw draw callback.
     ///
     /// # Safety
@@ -84,50 +70,56 @@ impl WgpuRenderState<'_> {
     /// The higher-ranked closure prevents references to the render pass from
     /// escaping the callback scope. Recursive access is rejected at runtime.
     pub unsafe fn with_current<R>(
-        callback: impl for<'callback> FnOnce(WgpuRenderState<'callback>) -> R,
-    ) -> Result<R, WgpuRenderStateAccessError> {
+        callback: impl for<'pass_encoder> FnOnce(WgpuRenderState<'pass_encoder>) -> R,
+    ) -> Result<R, BackendError> {
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         let raw_state = if platform_io.is_null() {
             None
         } else {
             NonNull::new(unsafe { (*platform_io).Renderer_RenderState })
         }
-        .ok_or(WgpuRenderStateAccessError::Inactive)?;
-        let storage = raw_state.cast::<WgpuRenderStateStorage>();
-        let borrowed = unsafe { &storage.as_ref().borrowed };
-        if borrowed.replace(true) {
-            return Err(WgpuRenderStateAccessError::AlreadyBorrowed);
-        }
-        let _borrow = WgpuRenderStateBorrow(borrowed);
+        .ok_or(BackendError::RenderStateInactive)?;
+        let storage = unsafe { raw_state.cast::<WgpuRenderStateStorage<'_, '_>>().as_ref() };
+        let _borrow = storage
+            .borrowed
+            .try_borrow_mut()
+            .map_err(|_| BackendError::RenderStateAlreadyBorrowed)?;
         Ok(callback(WgpuRenderState {
-            storage,
-            _callback: PhantomData,
+            device: NonNull::from(storage.device),
+            render_pass: storage.render_pass,
+            _encoder: PhantomData,
             _ui_thread: PhantomData,
         }))
     }
 
     /// Returns the renderer device for the callback duration.
     pub fn device(&self) -> &Device {
-        unsafe { self.storage.as_ref().device.as_ref() }
+        unsafe { self.device.as_ref() }
     }
 
     /// Returns the active render pass for the duration of this borrow.
-    pub fn render_pass(&mut self) -> &mut RenderPass<'_> {
-        unsafe {
-            self.storage
-                .as_ref()
-                .render_pass
-                .cast::<RenderPass<'_>>()
-                .as_mut()
-        }
+    ///
+    /// A pass tied to a callback-local encoder cannot replace the renderer's pass.
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::{WgpuRenderState, wgpu};
+    ///
+    /// unsafe fn replace_pass(encoder: &mut wgpu::CommandEncoder) {
+    ///     let _ = unsafe {
+    ///         WgpuRenderState::with_current(|mut state| {
+    ///             let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor::default());
+    ///             *state.render_pass() = pass;
+    ///         })
+    ///     };
+    /// }
+    /// ```
+    pub fn render_pass(&mut self) -> &mut RenderPass<'encoder> {
+        unsafe { self.render_pass.as_mut() }
     }
 
     /// Returns the device and render pass as disjoint callback-scoped borrows.
-    pub fn resources(&mut self) -> (&Device, &mut RenderPass<'_>) {
-        let storage = unsafe { self.storage.as_ref() };
-        let device = unsafe { storage.device.as_ref() };
-        let render_pass = unsafe { storage.render_pass.cast::<RenderPass<'_>>().as_mut() };
-        (device, render_pass)
+    pub fn resources(&mut self) -> (&Device, &mut RenderPass<'encoder>) {
+        unsafe { (self.device.as_ref(), self.render_pass.as_mut()) }
     }
 }
 
@@ -173,7 +165,9 @@ impl From<&SurfaceConfiguration> for WgpuViewportSurfaceConfig {
 pub struct WgpuInitInfo {
     /// WGPU instance (required for multi-viewport to create per-window surfaces)
     pub instance: Option<Instance>,
-    /// WGPU adapter (required by multi-viewport; optional for single-window rendering)
+    /// The adapter that created `device`. Required for multi-viewport.
+    ///
+    /// Without the adapter, vertex offsets are implemented by rebinding vertex buffer slices.
     pub adapter: Option<Adapter>,
     /// WGPU device
     pub device: Device,
@@ -226,7 +220,7 @@ impl WgpuInitInfo {
         self
     }
 
-    /// Provide the adapter required to negotiate multi-viewport surface capabilities
+    /// Provide the adapter that created the device to select draw and surface capabilities.
     pub fn with_adapter(mut self, adapter: Adapter) -> Self {
         self.adapter = Some(adapter);
         self
@@ -247,6 +241,7 @@ pub(crate) struct WgpuBackendData {
     pub(crate) init_info: WgpuInitInfo,
     /// WGPU device
     pub(crate) device: Device,
+    pub(crate) supports_base_vertex: bool,
     /// Default queue
     pub(crate) queue: Queue,
     /// Render target format
@@ -312,8 +307,15 @@ impl WgpuBackendData {
     /// Create new backend data from initialization info
     pub(crate) fn new(init_info: WgpuInitInfo) -> Self {
         let queue = init_info.queue.clone();
+        let supports_base_vertex = init_info.adapter.as_ref().is_some_and(|adapter| {
+            adapter
+                .get_downlevel_capabilities()
+                .flags
+                .contains(DownlevelFlags::BASE_VERTEX)
+        });
         Self {
             device: init_info.device.clone(),
+            supports_base_vertex,
             queue,
             render_target_format: init_info.render_target_format,
             depth_stencil_format: init_info.depth_stencil_format,
@@ -403,7 +405,6 @@ mod tests {
         let surface = SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
             format: TextureFormat::Bgra8UnormSrgb,
-            #[cfg(feature = "wgpu-30")]
             color_space: SurfaceColorSpace::DisplayP3,
             width: 128,
             height: 96,

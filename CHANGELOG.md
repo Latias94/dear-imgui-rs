@@ -8,6 +8,33 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+Upgrade the workspace crates together and rebuild custom core archives. See the [0.24 migration guide](docs/MIGRATING_0_24.md) and [PR #104](https://github.com/Latias94/dear-imgui-rs/pull/104).
+
+### Breaking Changes and Migration
+
+- The workspace MSRV is Rust 1.97.1. The Core groups public failures under `ContextError`, `FrameError`, `TextureError`, and `FontError`. `ImGuiError` aggregates those families for callers that handle multiple domains.
+- Store `Context` directly in place of `SuspendedContext`. Use closure-scoped window draw lists and keep child-window, drag, list-box, and tab builders inside the `Ui` they borrow. Text input uses `String` for its editable buffer.
+- WGPU integrations require WGPU 30. Remove the WGPU version features and select `webgl` or `webgpu` in browsers. WGPU and Ash can compile their Winit and SDL3 multi-viewport routes together. Ash allocator selection happens at renderer construction.
+- For custom native archives, run `cargo run -p xtask -- package <sys-crate>`. Prebuilt downloads use HTTPS archives with SHA-256 checksums. The default cache lives under Cargo's `OUT_DIR`.
+- Enable `native-rfd` to use desktop file dialogs. Applications with thumbnails start a reusable `ThumbnailDecoder` worker pool and keep texture uploads on the render thread.
+- CTE margin callers use `set_left_margin` and `left_margin`. The margin also applies when line numbers are hidden.
+
+### Added
+
+- `dear-imgui-backend-support` shares clip-rectangle, texture update, color, and callback handling. Custom renderers can signal a completed resource release with a `RendererResetSignal` so the Context can reset texture bindings after the old consumer drains.
+- Checked font loading accepts supported TrueType, OpenType, and collection faces on native FreeType configurations. The built-in stb route validates its supported standalone TrueType subset before passing its bytes to the native loader.
+
+### Changed
+
+- WGPU and Ash managed textures upload dirty rectangles and preserve resources still referenced by earlier work. WGPU, Ash, and Glow with an owned native context release renderer resources on drop under their documented ownership contracts.
+- WGPU, Ash, and Glow decode interpolated vertex tint before modulating with the sampled color in their sRGB rendering modes. Bevy defaults to linear HDR compositing and offers an explicit `CompositingSpace::Srgb` option for a `Camera2d` overlay. Reported by [@lysenika](https://github.com/lysenika) in [issue #103](https://github.com/Latias94/dear-imgui-rs/issues/103).
+
+### Fixed
+
+- File-browser modals apply initial size to the `Ui` that owns the dialog when multiple ImGui contexts are live.
+- SDL3 platform sessions can serve distinct windows and contexts in one process. SDLGPU3 secondary viewports preserve the attachment on `NoRendererClear` and clear transparent windows with zero alpha.
+- Pass Winit's display handle to WGPU for GL presentation on X11. Contributed by [@vrtulka23](https://github.com/vrtulka23) in [PR #102](https://github.com/Latias94/dear-imgui-rs/pull/102).
+
 ## [0.23.0] - 2026-11-23
 
 This release updates the native extensions and SDL3 backend, changes the plot and node-editor APIs, and fixes texture ownership across frames and renderer replacements. Upgrade all workspace crates together and rebuild native archives or browser providers. [Compatibility and migration](https://github.com/Latias94/dear-imgui-rs/blob/v0.23.0/docs/COMPATIBILITY.md#023-release-train) · [PR #101](https://github.com/Latias94/dear-imgui-rs/pull/101)

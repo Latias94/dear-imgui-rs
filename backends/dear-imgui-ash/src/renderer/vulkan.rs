@@ -6,7 +6,6 @@ use crate::{Options, RenderTarget, RendererError, RendererResult};
 use ash::{Device, vk};
 use std::ffi::CString;
 
-use super::allocator::{Allocate, Allocator, Memory};
 use super::shaders::{fragment_spirv, vertex_spirv};
 
 #[repr(C)]
@@ -49,50 +48,18 @@ pub(crate) fn clip_rect_to_scissor(
     fb_width: u32,
     fb_height: u32,
 ) -> Option<vk::Rect2D> {
-    if fb_width == 0
-        || fb_height == 0
-        || !clip_rect
-            .into_iter()
-            .chain(clip_off)
-            .chain(clip_scale)
-            .all(f32::is_finite)
-    {
-        return None;
-    }
-    let clip_rect = [
-        (clip_rect[0] - clip_off[0]) * clip_scale[0],
-        (clip_rect[1] - clip_off[1]) * clip_scale[1],
-        (clip_rect[2] - clip_off[0]) * clip_scale[0],
-        (clip_rect[3] - clip_off[1]) * clip_scale[1],
+    let extent = [
+        fb_width.min(i32::MAX as u32),
+        fb_height.min(i32::MAX as u32),
     ];
-
-    if clip_rect[2] <= clip_rect[0]
-        || clip_rect[3] <= clip_rect[1]
-        || clip_rect[0] >= fb_width as f32
-        || clip_rect[1] >= fb_height as f32
-        || clip_rect[2] <= 0.0
-        || clip_rect[3] <= 0.0
-    {
-        return None;
-    }
-
-    let x0 = clip_rect[0].max(0.0).floor() as i32;
-    let y0 = clip_rect[1].max(0.0).floor() as i32;
-    let x1 = clip_rect[2].min(fb_width as f32).ceil() as i32;
-    let y1 = clip_rect[3].min(fb_height as f32).ceil() as i32;
-
-    let w = (x1 - x0).max(0) as u32;
-    let h = (y1 - y0).max(0) as u32;
-    if w == 0 || h == 0 {
-        return None;
-    }
-
+    let [x, y, width, height] =
+        dear_imgui_backend_support::compute_scissor_rect(clip_rect, clip_off, clip_scale, extent)?;
     Some(vk::Rect2D {
-        offset: vk::Offset2D { x: x0, y: y0 },
-        extent: vk::Extent2D {
-            width: w,
-            height: h,
+        offset: vk::Offset2D {
+            x: x as i32,
+            y: y as i32,
         },
+        extent: vk::Extent2D { width, height },
     })
 }
 
@@ -100,18 +67,12 @@ pub(super) const MIN_SAMPLED_IMAGE_DESCRIPTORS: u32 = 8;
 pub(super) const STANDARD_SAMPLER_DESCRIPTORS: u32 = 2;
 
 #[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 pub(crate) struct ImageUploadRegion {
     pub(crate) x: u32,
     pub(crate) y: u32,
     pub(crate) width: u32,
     pub(crate) height: u32,
-}
-
-#[derive(Clone, Copy)]
-struct ImageLayoutState {
-    layout: vk::ImageLayout,
-    stage: vk::PipelineStageFlags,
-    access: vk::AccessFlags,
 }
 
 /// Create one descriptor set layout compatible with the graphics pipeline.
@@ -148,11 +109,24 @@ pub fn create_vulkan_pipeline_layout(
     Ok(pipeline_layout)
 }
 
-pub fn create_vulkan_pipeline(
+#[cfg(feature = "dynamic-rendering")]
+fn pipeline_rendering_info(
+    color_attachment_formats: &[vk::Format],
+    depth_attachment_format: Option<vk::Format>,
+    stencil_attachment_format: vk::Format,
+) -> vk::PipelineRenderingCreateInfo<'_> {
+    vk::PipelineRenderingCreateInfo::default()
+        .color_attachment_formats(color_attachment_formats)
+        .depth_attachment_format(depth_attachment_format.unwrap_or(vk::Format::UNDEFINED))
+        .stencil_attachment_format(stencil_attachment_format)
+}
+
+pub(super) fn create_vulkan_pipeline(
     device: &Device,
     pipeline_layout: vk::PipelineLayout,
     render_target: RenderTarget,
     options: Options,
+    #[cfg(feature = "dynamic-rendering")] stencil_attachment_format: vk::Format,
 ) -> RendererResult<vk::Pipeline> {
     let entry_point_name = CString::new("main").unwrap();
 
@@ -282,11 +256,11 @@ pub fn create_vulkan_pipeline(
         #[cfg(feature = "dynamic-rendering")]
         RenderTarget::DynamicRendering(dynamic_rendering) => {
             let color_attachment_formats = [dynamic_rendering.color_attachment_format];
-            let mut rendering_info = vk::PipelineRenderingCreateInfo::default()
-                .color_attachment_formats(&color_attachment_formats);
-            if let Some(depth_attachment_format) = dynamic_rendering.depth_attachment_format {
-                rendering_info = rendering_info.depth_attachment_format(depth_attachment_format);
-            }
+            let mut rendering_info = pipeline_rendering_info(
+                &color_attachment_formats,
+                dynamic_rendering.depth_attachment_format,
+                stencil_attachment_format,
+            );
             let pipeline_info = pipeline_info.push_next(&mut rendering_info);
             unsafe {
                 device.create_graphics_pipelines(
@@ -476,6 +450,7 @@ impl VulkanRendererResources {
         device: &Device,
         render_target: RenderTarget,
         options: Options,
+        #[cfg(feature = "dynamic-rendering")] stencil_attachment_format: vk::Format,
     ) -> RendererResult<Self> {
         let mut resources = Self::empty();
         let result = (|| {
@@ -488,8 +463,14 @@ impl VulkanRendererResources {
                 resources.sampled_image_set_layout,
                 resources.sampler_set_layout,
             )?;
-            resources.pipeline =
-                create_vulkan_pipeline(device, resources.pipeline_layout, render_target, options)?;
+            resources.pipeline = create_vulkan_pipeline(
+                device,
+                resources.pipeline_layout,
+                render_target,
+                options,
+                #[cfg(feature = "dynamic-rendering")]
+                stencil_attachment_format,
+            )?;
             resources.descriptor_pool =
                 create_vulkan_descriptor_pool(device, options.max_textures)?;
             resources.linear_sampler = create_standard_sampler(device, vk::Filter::LINEAR)?;
@@ -567,230 +548,316 @@ impl VulkanRendererResources {
     }
 }
 
-pub(crate) fn create_and_fill_buffer<T: Copy>(
+pub(super) const MANAGED_TEXTURE_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
+
+const TEXTURE_SUBRESOURCE_RANGE: vk::ImageSubresourceRange = vk::ImageSubresourceRange {
+    aspect_mask: vk::ImageAspectFlags::COLOR,
+    base_mip_level: 0,
+    level_count: 1,
+    base_array_layer: 0,
+    layer_count: 1,
+};
+
+const TEXTURE_SUBRESOURCE_LAYERS: vk::ImageSubresourceLayers = vk::ImageSubresourceLayers {
+    aspect_mask: vk::ImageAspectFlags::COLOR,
+    mip_level: 0,
+    base_array_layer: 0,
+    layer_count: 1,
+};
+
+pub(super) fn create_texture_image_view(
     device: &Device,
-    allocator: &mut Allocator,
-    data: &[T],
-    usage: vk::BufferUsageFlags,
-) -> RendererResult<(vk::Buffer, Memory)> {
-    let size = std::mem::size_of_val(data);
-    let (buffer, mut memory) = allocator.create_buffer(device, size, usage)?;
-    if let Err(err) = allocator.update_buffer(device, &mut memory, data) {
-        let _ = allocator.destroy_buffer(device, buffer, memory);
-        return Err(err);
-    }
-    Ok((buffer, memory))
+    image: vk::Image,
+) -> RendererResult<vk::ImageView> {
+    let create_info = vk::ImageViewCreateInfo::default()
+        .image(image)
+        .view_type(vk::ImageViewType::TYPE_2D)
+        .format(MANAGED_TEXTURE_FORMAT)
+        .subresource_range(TEXTURE_SUBRESOURCE_RANGE);
+    Ok(unsafe { device.create_image_view(&create_info, None)? })
 }
 
-pub(crate) struct Texture {
-    pub image: vk::Image,
-    pub image_mem: Memory,
-    pub image_view: vk::ImageView,
+pub(super) struct ImageUploadPixels<'pixels> {
+    pub(super) region: ImageUploadRegion,
+    pub(super) rgba: std::borrow::Cow<'pixels, [u8]>,
 }
 
-pub(crate) const MANAGED_TEXTURE_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
-
-impl Texture {
-    /// Create a GPU image, view, and a staging buffer filled with `pixels_rgba`.
-    pub fn create(
-        device: &Device,
-        allocator: &mut Allocator,
+impl<'pixels> ImageUploadPixels<'pixels> {
+    pub(super) fn full_image(
         width: u32,
         height: u32,
-        pixels_rgba: &[u8],
-    ) -> RendererResult<(Self, vk::Buffer, Memory)> {
-        let expected = (width as usize)
-            .checked_mul(height as usize)
-            .and_then(|v| v.checked_mul(4))
-            .ok_or_else(|| RendererError::Allocator("texture size overflow".into()))?;
-        if pixels_rgba.len() < expected {
-            return Err(RendererError::Allocator(
-                "texture pixel buffer too small".into(),
-            ));
-        }
-
-        let (image, image_mem) =
-            allocator.create_image(device, width, height, MANAGED_TEXTURE_FORMAT)?;
-
-        let (buffer, buffer_mem) = match create_and_fill_buffer(
-            device,
-            allocator,
-            &pixels_rgba[..expected],
-            vk::BufferUsageFlags::TRANSFER_SRC,
-        ) {
-            Ok(staging) => staging,
-            Err(err) => {
-                let _ = allocator.destroy_image(device, image, image_mem);
-                return Err(err);
-            }
-        };
-
-        let image_view = {
-            let create_info = vk::ImageViewCreateInfo::default()
-                .image(image)
-                .view_type(vk::ImageViewType::TYPE_2D)
-                .format(MANAGED_TEXTURE_FORMAT)
-                .subresource_range(vk::ImageSubresourceRange {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                });
-            match unsafe { device.create_image_view(&create_info, None) } {
-                Ok(image_view) => image_view,
-                Err(err) => {
-                    let _ = allocator.destroy_buffer(device, buffer, buffer_mem);
-                    let _ = allocator.destroy_image(device, image, image_mem);
-                    return Err(err.into());
-                }
-            }
-        };
-
-        Ok((
-            Self {
-                image,
-                image_mem,
-                image_view,
-            },
-            buffer,
-            buffer_mem,
-        ))
-    }
-
-    pub fn destroy(self, device: &Device, allocator: &mut Allocator) -> RendererResult<()> {
-        unsafe {
-            device.destroy_image_view(self.image_view, None);
-        }
-        allocator.destroy_image(device, self.image, self.image_mem)
-    }
-
-    pub fn upload(
-        &self,
-        device: &Device,
-        command_buffer: vk::CommandBuffer,
-        buffer: vk::Buffer,
-        width: u32,
-        height: u32,
-    ) {
-        upload_buffer_to_image(
-            device,
-            command_buffer,
-            buffer,
-            self.image,
-            ImageUploadRegion {
+        rgba: std::borrow::Cow<'pixels, [u8]>,
+    ) -> Self {
+        Self {
+            region: ImageUploadRegion {
                 x: 0,
                 y: 0,
                 width,
                 height,
             },
-            ImageLayoutState {
-                layout: vk::ImageLayout::UNDEFINED,
-                stage: vk::PipelineStageFlags::TOP_OF_PIPE,
-                access: vk::AccessFlags::empty(),
-            },
+            rgba,
+        }
+    }
+}
+
+pub(super) struct ImageUpload<'pixels> {
+    image: vk::Image,
+    initialization: ImageUploadInitialization,
+    pixels: &'pixels [ImageUploadPixels<'pixels>],
+}
+
+enum ImageUploadInitialization {
+    New,
+    PreviouslySampled,
+    CopyFrom(vk::Image, vk::Extent3D),
+}
+
+impl<'pixels> ImageUpload<'pixels> {
+    pub(super) fn new_image(
+        image: vk::Image,
+        pixels: &'pixels [ImageUploadPixels<'pixels>],
+    ) -> Self {
+        Self {
+            image,
+            initialization: ImageUploadInitialization::New,
+            pixels,
+        }
+    }
+
+    pub(super) fn subrect(image: vk::Image, pixels: &'pixels ImageUploadPixels<'pixels>) -> Self {
+        Self {
+            image,
+            initialization: ImageUploadInitialization::PreviouslySampled,
+            pixels: std::slice::from_ref(pixels),
+        }
+    }
+
+    pub(super) fn replacement(
+        image: vk::Image,
+        previous: vk::Image,
+        width: u32,
+        height: u32,
+        pixels: &'pixels [ImageUploadPixels<'pixels>],
+    ) -> Self {
+        Self {
+            image,
+            initialization: ImageUploadInitialization::CopyFrom(
+                previous,
+                vk::Extent3D {
+                    width,
+                    height,
+                    depth: 1,
+                },
+            ),
+            pixels,
+        }
+    }
+
+    pub(super) fn pixel_chunks(&self) -> impl Iterator<Item = &[u8]> + Clone {
+        self.pixels.iter().map(|pixels| pixels.rgba.as_ref())
+    }
+
+    pub(super) fn record(
+        &self,
+        device: &Device,
+        command_buffer: vk::CommandBuffer,
+        buffer: vk::Buffer,
+        offset: &mut vk::DeviceSize,
+    ) {
+        debug_assert!(!self.pixels.is_empty());
+        let image = self.image;
+        let initial_layout = match self.initialization {
+            ImageUploadInitialization::PreviouslySampled => {
+                ImageLayoutState::sampled_after_upload()
+            }
+            _ => ImageLayoutState::UNDEFINED,
+        };
+        image_barrier(
+            device,
+            command_buffer,
+            image,
+            initial_layout,
+            ImageLayoutState::TRANSFER_DST,
+        );
+
+        let copied_previous =
+            if let ImageUploadInitialization::CopyFrom(previous, extent) = self.initialization {
+                copy_sampled_image(device, command_buffer, previous, image, extent);
+                true
+            } else {
+                false
+            };
+
+        for (index, pixels) in self.pixels.iter().enumerate() {
+            debug_assert!(!pixels.rgba.is_empty() && pixels.rgba.len().is_multiple_of(4));
+            debug_assert!(offset.is_multiple_of(4));
+            if copied_previous || index != 0 {
+                // The initial image copy and overlapping patches must write in request order.
+                image_barrier(
+                    device,
+                    command_buffer,
+                    image,
+                    ImageLayoutState::TRANSFER_DST,
+                    ImageLayoutState::TRANSFER_DST,
+                );
+            }
+            copy_buffer_to_texture(
+                device,
+                command_buffer,
+                buffer,
+                *offset,
+                image,
+                pixels.region,
+            );
+            *offset += pixels.rgba.len() as vk::DeviceSize;
+        }
+
+        // This dependency also covers fragment reads in later submissions on this queue.
+        image_barrier(
+            device,
+            command_buffer,
+            image,
+            ImageLayoutState::TRANSFER_DST,
+            ImageLayoutState::SAMPLED,
         );
     }
 }
 
-pub(crate) fn upload_rgba_subrect_to_image(
-    device: &Device,
-    command_buffer: vk::CommandBuffer,
-    buffer: vk::Buffer,
-    image: vk::Image,
-    region: ImageUploadRegion,
-) {
-    upload_buffer_to_image(
-        device,
-        command_buffer,
-        buffer,
-        image,
-        region,
-        ImageLayoutState {
-            layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            stage: vk::PipelineStageFlags::FRAGMENT_SHADER,
-            access: vk::AccessFlags::SHADER_READ,
-        },
-    );
+#[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
+struct ImageLayoutState {
+    layout: vk::ImageLayout,
+    stage: vk::PipelineStageFlags,
+    access: vk::AccessFlags,
 }
 
-fn upload_buffer_to_image(
+impl ImageLayoutState {
+    const UNDEFINED: Self = Self {
+        layout: vk::ImageLayout::UNDEFINED,
+        stage: vk::PipelineStageFlags::TOP_OF_PIPE,
+        access: vk::AccessFlags::empty(),
+    };
+    const SAMPLED: Self = Self {
+        layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        stage: vk::PipelineStageFlags::FRAGMENT_SHADER,
+        access: vk::AccessFlags::SHADER_READ,
+    };
+    const TRANSFER_SRC: Self = Self {
+        layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+        stage: vk::PipelineStageFlags::TRANSFER,
+        access: vk::AccessFlags::TRANSFER_READ,
+    };
+    const TRANSFER_DST: Self = Self {
+        layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        stage: vk::PipelineStageFlags::TRANSFER,
+        access: vk::AccessFlags::TRANSFER_WRITE,
+    };
+
+    fn sampled_after_upload() -> Self {
+        Self {
+            stage: vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::TRANSFER,
+            access: vk::AccessFlags::SHADER_READ | vk::AccessFlags::TRANSFER_WRITE,
+            ..Self::SAMPLED
+        }
+    }
+}
+
+fn image_barrier(
     device: &Device,
     command_buffer: vk::CommandBuffer,
-    buffer: vk::Buffer,
     image: vk::Image,
-    region: ImageUploadRegion,
-    source_state: ImageLayoutState,
+    from: ImageLayoutState,
+    to: ImageLayoutState,
 ) {
-    let mut barrier = vk::ImageMemoryBarrier::default()
+    let barrier = vk::ImageMemoryBarrier::default()
         .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .image(image)
-        .subresource_range(vk::ImageSubresourceRange {
-            aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            layer_count: 1,
-        });
+        .subresource_range(TEXTURE_SUBRESOURCE_RANGE)
+        .old_layout(from.layout)
+        .new_layout(to.layout)
+        .src_access_mask(from.access)
+        .dst_access_mask(to.access);
 
     unsafe {
-        barrier.old_layout = source_state.layout;
-        barrier.new_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
-        barrier.src_access_mask = source_state.access;
-        barrier.dst_access_mask = vk::AccessFlags::TRANSFER_WRITE;
-
         device.cmd_pipeline_barrier(
             command_buffer,
-            source_state.stage,
-            vk::PipelineStageFlags::TRANSFER,
+            from.stage,
+            to.stage,
             vk::DependencyFlags::empty(),
             &[],
             &[],
             &[barrier],
         );
+    }
+}
 
-        let region = vk::BufferImageCopy::default()
-            .buffer_offset(0)
-            .buffer_row_length(0)
-            .buffer_image_height(0)
-            .image_subresource(vk::ImageSubresourceLayers {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                mip_level: 0,
-                base_array_layer: 0,
-                layer_count: 1,
-            })
-            .image_offset(vk::Offset3D {
-                x: region.x as i32,
-                y: region.y as i32,
-                z: 0,
-            })
-            .image_extent(vk::Extent3D {
-                width: region.width,
-                height: region.height,
-                depth: 1,
-            });
+fn copy_sampled_image(
+    device: &Device,
+    command_buffer: vk::CommandBuffer,
+    source: vk::Image,
+    destination: vk::Image,
+    extent: vk::Extent3D,
+) {
+    image_barrier(
+        device,
+        command_buffer,
+        source,
+        ImageLayoutState::sampled_after_upload(),
+        ImageLayoutState::TRANSFER_SRC,
+    );
+    let region = vk::ImageCopy::default()
+        .src_subresource(TEXTURE_SUBRESOURCE_LAYERS)
+        .dst_subresource(TEXTURE_SUBRESOURCE_LAYERS)
+        .extent(extent);
+    unsafe {
+        device.cmd_copy_image(
+            command_buffer,
+            source,
+            ImageLayoutState::TRANSFER_SRC.layout,
+            destination,
+            ImageLayoutState::TRANSFER_DST.layout,
+            &[region],
+        );
+    }
+    // Already recorded draws still bind the old view and expect its original layout and contents.
+    image_barrier(
+        device,
+        command_buffer,
+        source,
+        ImageLayoutState::TRANSFER_SRC,
+        ImageLayoutState::SAMPLED,
+    );
+}
+
+fn copy_buffer_to_texture(
+    device: &Device,
+    command_buffer: vk::CommandBuffer,
+    buffer: vk::Buffer,
+    offset: vk::DeviceSize,
+    image: vk::Image,
+    region: ImageUploadRegion,
+) {
+    let region = vk::BufferImageCopy::default()
+        .buffer_offset(offset)
+        .image_subresource(TEXTURE_SUBRESOURCE_LAYERS)
+        .image_offset(vk::Offset3D {
+            x: region.x as i32,
+            y: region.y as i32,
+            z: 0,
+        })
+        .image_extent(vk::Extent3D {
+            width: region.width,
+            height: region.height,
+            depth: 1,
+        });
+    unsafe {
         device.cmd_copy_buffer_to_image(
             command_buffer,
             buffer,
             image,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            ImageLayoutState::TRANSFER_DST.layout,
             &[region],
-        );
-
-        barrier.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
-        barrier.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
-        barrier.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
-        barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
-
-        device.cmd_pipeline_barrier(
-            command_buffer,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::FRAGMENT_SHADER,
-            vk::DependencyFlags::empty(),
-            &[],
-            &[],
-            &[barrier],
         );
     }
 }
@@ -798,6 +865,238 @@ fn upload_buffer_to_image(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replacement_copies_and_restores_old_image_before_ordered_dirty_writes() {
+        use ash::vk::Handle;
+        use std::{cell::RefCell, ffi::c_void};
+
+        #[derive(Debug, Eq, PartialEq)]
+        enum Command {
+            Barrier(vk::Image, ImageLayoutState, ImageLayoutState),
+            CopyImage(
+                vk::Image,
+                vk::ImageLayout,
+                vk::Image,
+                vk::ImageLayout,
+                vk::Extent3D,
+            ),
+            Patch(
+                vk::Image,
+                vk::ImageLayout,
+                vk::DeviceSize,
+                vk::Offset3D,
+                vk::Extent3D,
+            ),
+        }
+
+        thread_local! {
+            static COMMANDS: RefCell<Vec<Command>> = const { RefCell::new(Vec::new()) };
+        }
+
+        unsafe extern "system" fn barrier(
+            _: vk::CommandBuffer,
+            src_stage: vk::PipelineStageFlags,
+            dst_stage: vk::PipelineStageFlags,
+            _: vk::DependencyFlags,
+            _: u32,
+            _: *const vk::MemoryBarrier<'_>,
+            _: u32,
+            _: *const vk::BufferMemoryBarrier<'_>,
+            count: u32,
+            barriers: *const vk::ImageMemoryBarrier<'_>,
+        ) {
+            // SAFETY: ash supplies the slice used by the recording code for this call.
+            for barrier in unsafe { std::slice::from_raw_parts(barriers, count as usize) } {
+                COMMANDS.with_borrow_mut(|commands| {
+                    commands.push(Command::Barrier(
+                        barrier.image,
+                        ImageLayoutState {
+                            layout: barrier.old_layout,
+                            stage: src_stage,
+                            access: barrier.src_access_mask,
+                        },
+                        ImageLayoutState {
+                            layout: barrier.new_layout,
+                            stage: dst_stage,
+                            access: barrier.dst_access_mask,
+                        },
+                    ));
+                });
+            }
+        }
+
+        unsafe extern "system" fn copy_image(
+            _: vk::CommandBuffer,
+            src: vk::Image,
+            src_layout: vk::ImageLayout,
+            dst: vk::Image,
+            dst_layout: vk::ImageLayout,
+            count: u32,
+            regions: *const vk::ImageCopy,
+        ) {
+            // SAFETY: ash supplies the slice used by the recording code for this call.
+            for region in unsafe { std::slice::from_raw_parts(regions, count as usize) } {
+                COMMANDS.with_borrow_mut(|commands| {
+                    commands.push(Command::CopyImage(
+                        src,
+                        src_layout,
+                        dst,
+                        dst_layout,
+                        region.extent,
+                    ));
+                });
+            }
+        }
+
+        unsafe extern "system" fn copy_buffer(
+            _: vk::CommandBuffer,
+            _: vk::Buffer,
+            dst: vk::Image,
+            layout: vk::ImageLayout,
+            count: u32,
+            regions: *const vk::BufferImageCopy,
+        ) {
+            // SAFETY: ash supplies the slice used by the recording code for this call.
+            for region in unsafe { std::slice::from_raw_parts(regions, count as usize) } {
+                COMMANDS.with_borrow_mut(|commands| {
+                    commands.push(Command::Patch(
+                        dst,
+                        layout,
+                        region.buffer_offset,
+                        region.image_offset,
+                        region.image_extent,
+                    ));
+                });
+            }
+        }
+
+        // SAFETY: all exercised Vulkan entry points use stubs with the corresponding ABI.
+        let device = unsafe {
+            Device::load_with(
+                |name| match name.to_bytes() {
+                    b"vkCmdPipelineBarrier" => barrier as *const c_void,
+                    b"vkCmdCopyImage" => copy_image as *const c_void,
+                    b"vkCmdCopyBufferToImage" => copy_buffer as *const c_void,
+                    _ => std::ptr::null(),
+                },
+                vk::Device::null(),
+            )
+        };
+        let old = vk::Image::from_raw(1);
+        let new = vk::Image::from_raw(2);
+        let pixels = [
+            ImageUploadPixels {
+                region: ImageUploadRegion {
+                    x: 2,
+                    y: 1,
+                    width: 1,
+                    height: 2,
+                },
+                rgba: (&[1; 8][..]).into(),
+            },
+            ImageUploadPixels {
+                region: ImageUploadRegion {
+                    x: 2,
+                    y: 2,
+                    width: 1,
+                    height: 1,
+                },
+                rgba: (&[2; 4][..]).into(),
+            },
+        ];
+        let upload = ImageUpload::replacement(new, old, 8, 4, &pixels);
+        let mut offset = 4;
+        upload.record(
+            &device,
+            vk::CommandBuffer::null(),
+            vk::Buffer::null(),
+            &mut offset,
+        );
+        assert_eq!(offset, 16);
+
+        use ImageLayoutState as Layout;
+        let transfer_write = ImageLayoutState {
+            layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            stage: vk::PipelineStageFlags::TRANSFER,
+            access: vk::AccessFlags::TRANSFER_WRITE,
+        };
+        assert_eq!(
+            COMMANDS.take(),
+            [
+                Command::Barrier(new, Layout::UNDEFINED, transfer_write),
+                Command::Barrier(
+                    old,
+                    ImageLayoutState {
+                        layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        stage: vk::PipelineStageFlags::FRAGMENT_SHADER
+                            | vk::PipelineStageFlags::TRANSFER,
+                        access: vk::AccessFlags::SHADER_READ | vk::AccessFlags::TRANSFER_WRITE,
+                    },
+                    Layout::TRANSFER_SRC
+                ),
+                Command::CopyImage(
+                    old,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    new,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::Extent3D {
+                        width: 8,
+                        height: 4,
+                        depth: 1
+                    }
+                ),
+                Command::Barrier(old, Layout::TRANSFER_SRC, Layout::SAMPLED),
+                Command::Barrier(new, transfer_write, transfer_write),
+                Command::Patch(
+                    new,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    4,
+                    vk::Offset3D { x: 2, y: 1, z: 0 },
+                    vk::Extent3D {
+                        width: 1,
+                        height: 2,
+                        depth: 1
+                    }
+                ),
+                Command::Barrier(new, transfer_write, transfer_write),
+                Command::Patch(
+                    new,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    12,
+                    vk::Offset3D { x: 2, y: 2, z: 0 },
+                    vk::Extent3D {
+                        width: 1,
+                        height: 1,
+                        depth: 1
+                    }
+                ),
+                Command::Barrier(new, transfer_write, Layout::SAMPLED),
+            ]
+        );
+    }
+
+    #[cfg(feature = "dynamic-rendering")]
+    #[test]
+    fn dynamic_pipeline_declares_only_the_bound_depth_and_stencil_aspects() {
+        let colors = [vk::Format::B8G8R8A8_UNORM];
+        let combined = vk::Format::D24_UNORM_S8_UINT;
+        for (depth, stencil) in [
+            (None, vk::Format::UNDEFINED),
+            (Some(vk::Format::D32_SFLOAT), vk::Format::UNDEFINED),
+            (Some(combined), vk::Format::UNDEFINED),
+            (Some(combined), combined),
+            (None, vk::Format::S8_UINT),
+        ] {
+            let info = pipeline_rendering_info(&colors, depth, stencil);
+            assert_eq!(info.color_attachment_count, 1);
+            assert_eq!(
+                info.depth_attachment_format,
+                depth.unwrap_or(vk::Format::UNDEFINED)
+            );
+            assert_eq!(info.stencil_attachment_format, stencil);
+        }
+    }
 
     #[test]
     fn descriptor_pool_reserves_images_and_two_renderer_owned_samplers() {

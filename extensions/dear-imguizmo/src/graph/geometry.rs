@@ -25,7 +25,7 @@ pub(super) fn node_size(node: &Node) -> [f32; 2] {
     [w, header + rows * line + pads]
 }
 
-pub(super) fn find_pin<'a>(graph: &'a Graph, pid: PinId) -> Option<(&'a Node, PinKind, usize)> {
+pub(super) fn find_pin(graph: &Graph, pid: PinId) -> Option<(&Node, PinKind, usize)> {
     for n in &graph.nodes {
         if let Some(idx) = n.inputs.iter().position(|p| p.id == pid) {
             return Some((n, PinKind::Input, idx));
@@ -177,10 +177,10 @@ pub(super) fn near_link_end(
     None
 }
 
-pub(super) fn link_endpoints<'a>(
-    graph: &'a Graph,
+pub(super) fn link_endpoints(
+    graph: &Graph,
     lid: LinkId,
-) -> Option<(&'a Node, PinKind, usize, &'a Node, PinKind, usize)> {
+) -> Option<(&Node, PinKind, usize, &Node, PinKind, usize)> {
     let ln = graph.links.iter().find(|l| l.id == lid)?;
     let (np1, pk1, idx1) = find_pin(graph, ln.from)?;
     let (np2, pk2, idx2) = find_pin(graph, ln.to)?;

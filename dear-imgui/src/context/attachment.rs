@@ -6,12 +6,11 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr::NonNull;
 use std::rc::{Rc, Weak};
 
-use thiserror::Error;
-
+use crate::error::context::ContextError;
 use crate::render::RendererConsumerCapability;
 
+use super::Context;
 use super::binding::{self, ContextId, ContextLifecycle, ContextState};
-use super::core::Context;
 
 /// Ordered phase of Context teardown exposed to an attachment hook.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -37,54 +36,6 @@ pub enum ContextAttachmentRole {
     Platform,
 }
 
-/// Non-retryable failure reported by an attachment during `Context::drop`.
-///
-/// Backends should expose their concrete error from explicit shutdown APIs. This erased error is
-/// only for the final ownership fallback, where continuing into a later teardown phase would be
-/// unsafe and the process therefore aborts after all peers in the current phase are notified.
-#[derive(Clone, Debug, Eq, Error, PartialEq)]
-#[error("{message}")]
-pub struct ContextAttachmentTeardownError {
-    message: String,
-}
-
-impl ContextAttachmentTeardownError {
-    /// Create a fail-stop attachment error from a backend diagnostic.
-    pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-}
-
-/// Failure while entering or leaving an explicit platform-window teardown transaction.
-///
-/// Unlike [`ContextAttachmentTeardownError`], this error is returned to the caller of
-/// [`crate::Context::destroy_platform_windows`] before or after its native operation. It does not
-/// use Context-drop's fail-stop policy because the caller still owns a live Context.
-#[derive(Clone, Debug, Eq, Error, PartialEq)]
-#[non_exhaustive]
-pub enum ContextPlatformWindowTeardownError {
-    /// The Context is already being dropped.
-    #[error("Dear ImGui context teardown is in progress")]
-    ContextDropping,
-    /// A platform-window teardown transaction attempted to re-enter itself.
-    #[error("platform-window teardown cannot be reentered")]
-    Reentrant,
-    /// The active platform attachment rejected the transaction before native teardown began.
-    #[error("platform attachment rejected platform-window teardown: {0}")]
-    AttachmentPreflight(#[source] ContextAttachmentTeardownError),
-    /// The active platform attachment failed after native teardown completed.
-    #[error("platform attachment could not complete platform-window teardown: {0}")]
-    AttachmentPostflight(#[source] ContextAttachmentTeardownError),
-    /// The active platform attachment panicked before native teardown began.
-    #[error("platform attachment panicked before platform-window teardown")]
-    BeginPanicked,
-    /// The active platform attachment panicked after native teardown completed.
-    #[error("platform attachment panicked after platform-window teardown")]
-    EndPanicked,
-}
-
 /// Type-erased lifecycle hooks owned by a Context.
 ///
 /// Hooks must be idempotent. If a hook panics, the remaining attachments in that phase are still
@@ -92,7 +43,7 @@ pub enum ContextPlatformWindowTeardownError {
 /// ordering. Explicit backend shutdown APIs remain responsible for reporting retryable errors;
 /// attachment hooks are the fail-stop fallback used by `Context::drop`.
 pub trait ContextAttachment {
-    /// Validates and prepares a normal [`crate::Context::destroy_platform_windows`] call.
+    /// Validates and prepares a normal `Context::destroy_platform_windows` call.
     ///
     /// Only the active platform attachment receives this hook. The passed capability may bind the
     /// target Context for immediate native inspection, but intentionally does not expose a mutable
@@ -100,11 +51,11 @@ pub trait ContextAttachment {
     fn begin_platform_window_teardown(
         &self,
         _context: &ContextPlatformWindowTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         Ok(())
     }
 
-    /// Completes a normal [`crate::Context::destroy_platform_windows`] call.
+    /// Completes a normal `Context::destroy_platform_windows` call.
     ///
     /// This runs only when [`Self::begin_platform_window_teardown`] succeeded and native teardown
     /// returned normally. Implementations should restore any temporary callback state and record
@@ -112,15 +63,12 @@ pub trait ContextAttachment {
     fn end_platform_window_teardown(
         &self,
         _context: &ContextPlatformWindowTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         Ok(())
     }
 
     /// Stops new work before native teardown begins.
-    fn quiesce(
-        &self,
-        _context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn quiesce(&self, _context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         Ok(())
     }
 
@@ -128,82 +76,17 @@ pub trait ContextAttachment {
     fn release_renderer_resources(
         &self,
         _context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         Ok(())
     }
 
     /// Releases platform windows before the native Context is destroyed.
-    fn release_platform_windows(
-        &self,
-        _context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, _context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         Ok(())
     }
 
     /// Tombstones Rust state after the native Context has been destroyed.
     fn context_destroyed(&self, _context: ContextDestroyed) {}
-}
-
-/// Failure to register an attachment with a Context.
-#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
-#[non_exhaustive]
-pub enum ContextAttachmentError {
-    /// An attachment with the same marker type is already active.
-    #[error("an attachment with this marker type is already registered")]
-    DuplicateAttachment,
-    /// The exclusive platform or renderer role is already occupied.
-    #[error("the {0:?} attachment role is already occupied")]
-    RoleOccupied(ContextAttachmentRole),
-    /// A renderer cannot attach until a platform runtime is registered.
-    #[error("a renderer attachment requires an active platform attachment")]
-    MissingPlatform,
-    /// Context teardown has already started.
-    #[error("Dear ImGui context teardown has already started")]
-    ContextDropping,
-}
-
-/// Failure to explicitly detach a live Context attachment lease.
-///
-/// A failed detach leaves both the attachment and lease active. Platform backends must release
-/// renderer dependencies first and use [`Context::prepare_platform_attachment_release`] for
-/// transactional native teardown.
-#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
-#[non_exhaustive]
-pub enum ContextAttachmentDetachError {
-    /// Another transaction has reserved this platform attachment generation for release.
-    #[error("platform attachment release is already in progress")]
-    ReleaseInProgress,
-    /// Renderer resources still depend on platform-owned native handles.
-    #[error("the platform attachment cannot be detached while a renderer attachment is active")]
-    RendererActive,
-}
-
-/// Failure to prepare an explicit platform attachment release.
-///
-/// Platform backends must complete this preflight before closing a frame, destroying native
-/// windows, or clearing callback state. The returned permit keeps the exact attachment generation
-/// reserved until the backend either commits detachment or abandons the transaction.
-#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
-#[non_exhaustive]
-pub enum ContextPlatformAttachmentReleaseError {
-    /// Context-owned teardown has already started.
-    #[error("Dear ImGui context teardown is in progress")]
-    ContextDropping,
-    /// The supplied attachment generation has already detached.
-    #[error("the platform attachment generation is no longer active")]
-    AttachmentInactive,
-    /// The supplied attachment does not own the platform role.
-    #[error("the supplied attachment does not own the platform role")]
-    NotPlatform,
-    /// The supplied attachment is not this Context's active platform generation.
-    #[error("the supplied attachment is not the active platform generation for this Context")]
-    PlatformGenerationMismatch,
-    /// Another release transaction already reserves this platform generation.
-    #[error("platform attachment release is already in progress")]
-    ReleaseInProgress,
-    /// Renderer resources still depend on platform-owned native handles.
-    #[error("the platform attachment cannot be released while a renderer attachment is active")]
-    RendererActive,
 }
 
 /// Phase-limited access passed to pre-destroy attachment hooks.
@@ -284,23 +167,16 @@ impl ContextTeardown<'_> {
     pub fn with_renderer_texture_reset(
         &self,
         consumer: &impl RendererConsumerCapability,
-        release: impl FnOnce() -> Result<(), ContextAttachmentTeardownError>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+        release: impl FnOnce() -> Result<(), ContextError>,
+    ) -> Result<(), ContextError> {
         if self.phase != ContextAttachmentPhase::RendererResources {
-            return Err(ContextAttachmentTeardownError::new(format!(
-                "renderer texture reset requires the RendererResources phase, not {:?}",
-                self.phase
-            )));
+            return Err(ContextError::RendererTextureResetWrongPhase { phase: self.phase });
         }
         if self.state().lifecycle() != ContextLifecycle::Dropping {
-            return Err(ContextAttachmentTeardownError::new(
-                "renderer texture reset requires active Context teardown",
-            ));
+            return Err(ContextError::RendererTextureResetOutsideTeardown);
         }
         if self.renderer_texture_reset_active.replace(true) {
-            return Err(ContextAttachmentTeardownError::new(
-                "renderer texture reset cannot be reentered",
-            ));
+            return Err(ContextError::ReentrantRendererTextureReset);
         }
         let _active = RendererTextureResetInvocation {
             active: &self.renderer_texture_reset_active,
@@ -311,11 +187,7 @@ impl ContextTeardown<'_> {
         // attempts to create another reset transaction through this capability.
         let watermark = unsafe { &mut *self.owner.as_ptr() }
             .prepare_renderer_texture_reset_during_teardown(consumer)
-            .map_err(|error| {
-                ContextAttachmentTeardownError::new(format!(
-                    "renderer texture reset preflight failed: {error}"
-                ))
-            })?;
+            .map_err(ContextError::RendererTextureResetPreflight)?;
 
         release()?;
 
@@ -430,18 +302,18 @@ pub(super) struct AttachmentControl {
 }
 
 impl AttachmentControl {
-    fn detach(&self) -> Result<bool, ContextAttachmentDetachError> {
+    fn detach(&self) -> Result<bool, ContextError> {
         match self.state.get() {
             AttachmentState::Active => {}
             AttachmentState::ReleasePrepared => {
-                return Err(ContextAttachmentDetachError::ReleaseInProgress);
+                return Err(ContextError::PlatformReleaseInProgress);
             }
             AttachmentState::Teardown | AttachmentState::Complete | AttachmentState::Detached => {
                 return Ok(false);
             }
         }
         if self.role == ContextAttachmentRole::Platform && self.roles.renderer_active.get() {
-            return Err(ContextAttachmentDetachError::RendererActive);
+            return Err(ContextError::RendererAttachmentActive);
         }
         self.state.set(AttachmentState::Detached);
         if self.role == ContextAttachmentRole::Renderer {
@@ -513,7 +385,7 @@ impl ContextAttachmentLease {
     /// attached: platform backends must not destroy native state after such a failure. Explicit
     /// platform shutdown should use [`Context::prepare_platform_attachment_release`] so native
     /// teardown and lease release share one transaction.
-    pub fn detach(&mut self) -> Result<bool, ContextAttachmentDetachError> {
+    pub fn detach(&mut self) -> Result<bool, ContextError> {
         self.control
             .upgrade()
             .map_or(Ok(false), |control| control.detach())
@@ -668,24 +540,24 @@ impl AttachmentRegistry {
         &self,
         lifecycle: ContextLifecycle,
         role: ContextAttachmentRole,
-    ) -> Result<(), ContextAttachmentError> {
+    ) -> Result<(), ContextError> {
         if lifecycle != ContextLifecycle::Alive || self.tearing_down {
-            return Err(ContextAttachmentError::ContextDropping);
+            return Err(ContextError::ContextDropping);
         }
 
         let marker = TypeId::of::<Marker>();
         if self.controls.iter().any(|control| {
             control.marker == marker && control.state.get() != AttachmentState::Detached
         }) {
-            return Err(ContextAttachmentError::DuplicateAttachment);
+            return Err(ContextError::DuplicateAttachment);
         }
         if role == ContextAttachmentRole::Renderer
             && !self.role_is_operational(ContextAttachmentRole::Platform)
         {
-            return Err(ContextAttachmentError::MissingPlatform);
+            return Err(ContextError::MissingPlatformAttachment);
         }
         if role != ContextAttachmentRole::Extension && self.role_is_active(role) {
-            return Err(ContextAttachmentError::RoleOccupied(role));
+            return Err(ContextError::AttachmentRoleOccupied(role));
         }
         Ok(())
     }
@@ -695,7 +567,7 @@ impl AttachmentRegistry {
         lifecycle: ContextLifecycle,
         role: ContextAttachmentRole,
         attachment: Rc<dyn ContextAttachment>,
-    ) -> Result<ContextAttachmentLease, ContextAttachmentError> {
+    ) -> Result<ContextAttachmentLease, ContextError> {
         self.preflight_register::<Marker>(lifecycle, role)?;
         self.controls
             .retain(|control| control.state.get() != AttachmentState::Detached);
@@ -738,24 +610,24 @@ impl AttachmentRegistry {
     pub(super) fn prepare_platform_release(
         &self,
         handle: &ContextAttachmentHandle,
-    ) -> Result<Rc<AttachmentControl>, ContextPlatformAttachmentReleaseError> {
+    ) -> Result<Rc<AttachmentControl>, ContextError> {
         if self.tearing_down {
-            return Err(ContextPlatformAttachmentReleaseError::ContextDropping);
+            return Err(ContextError::ContextDropping);
         }
         let control = handle
             .control
             .upgrade()
-            .ok_or(ContextPlatformAttachmentReleaseError::AttachmentInactive)?;
+            .ok_or(ContextError::PlatformAttachmentInactive)?;
         if control.role != ContextAttachmentRole::Platform {
-            return Err(ContextPlatformAttachmentReleaseError::NotPlatform);
+            return Err(ContextError::NotPlatformAttachment);
         }
         match control.state.get() {
             AttachmentState::Active => {}
             AttachmentState::ReleasePrepared => {
-                return Err(ContextPlatformAttachmentReleaseError::ReleaseInProgress);
+                return Err(ContextError::PlatformReleaseInProgress);
             }
             AttachmentState::Teardown | AttachmentState::Complete | AttachmentState::Detached => {
-                return Err(ContextPlatformAttachmentReleaseError::AttachmentInactive);
+                return Err(ContextError::PlatformAttachmentInactive);
             }
         }
         let owns_active_generation = self.controls.iter().any(|candidate| {
@@ -764,10 +636,10 @@ impl AttachmentRegistry {
                 && candidate.state.get() == AttachmentState::Active
         });
         if !owns_active_generation {
-            return Err(ContextPlatformAttachmentReleaseError::PlatformGenerationMismatch);
+            return Err(ContextError::PlatformGenerationMismatch);
         }
         if self.roles.renderer_active.get() {
-            return Err(ContextPlatformAttachmentReleaseError::RendererActive);
+            return Err(ContextError::RendererAttachmentActive);
         }
         control.prepare_platform_release();
         Ok(control)
@@ -777,12 +649,12 @@ impl AttachmentRegistry {
     pub(super) fn begin_platform_window_teardown(
         &self,
         context: &ContextPlatformWindowTeardown<'_>,
-    ) -> Result<PlatformWindowTeardownInvocation<'_>, ContextPlatformWindowTeardownError> {
+    ) -> Result<PlatformWindowTeardownInvocation<'_>, ContextError> {
         if self.tearing_down {
-            return Err(ContextPlatformWindowTeardownError::ContextDropping);
+            return Err(ContextError::ContextDropping);
         }
         if self.platform_window_teardown_active.get() {
-            return Err(ContextPlatformWindowTeardownError::Reentrant);
+            return Err(ContextError::ReentrantPlatformWindowTeardown);
         }
         self.platform_window_teardown_active.set(true);
         let invocation = PlatformWindowTeardownInvocation {
@@ -830,10 +702,7 @@ pub(super) struct PlatformWindowTeardownInvocation<'a> {
 
 #[cfg(feature = "multi-viewport")]
 impl PlatformWindowTeardownInvocation<'_> {
-    fn begin(
-        &self,
-        context: &ContextPlatformWindowTeardown<'_>,
-    ) -> Result<(), ContextPlatformWindowTeardownError> {
+    fn begin(&self, context: &ContextPlatformWindowTeardown<'_>) -> Result<(), ContextError> {
         let Some(attachment) = &self.attachment else {
             return Ok(());
         };
@@ -841,14 +710,14 @@ impl PlatformWindowTeardownInvocation<'_> {
             attachment.begin_platform_window_teardown(context)
         })) {
             Ok(Ok(())) => Ok(()),
-            Ok(Err(error)) => Err(ContextPlatformWindowTeardownError::AttachmentPreflight(
+            Ok(Err(error)) => Err(ContextError::PlatformWindowTeardownPreflight(Box::new(
                 error,
-            )),
+            ))),
             Err(payload) => {
                 // A panic payload may panic when dropped. The transaction is rejected before any
                 // native teardown begins, so retaining it is preferable to a nested unwind.
                 std::mem::forget(payload);
-                Err(ContextPlatformWindowTeardownError::BeginPanicked)
+                Err(ContextError::PlatformWindowTeardownBeginPanicked)
             }
         }
     }
@@ -856,7 +725,7 @@ impl PlatformWindowTeardownInvocation<'_> {
     pub(super) fn finish(
         self,
         context: &ContextPlatformWindowTeardown<'_>,
-    ) -> Result<(), ContextPlatformWindowTeardownError> {
+    ) -> Result<(), ContextError> {
         let Some(attachment) = &self.attachment else {
             return Ok(());
         };
@@ -864,14 +733,14 @@ impl PlatformWindowTeardownInvocation<'_> {
             attachment.end_platform_window_teardown(context)
         })) {
             Ok(Ok(())) => Ok(()),
-            Ok(Err(error)) => Err(ContextPlatformWindowTeardownError::AttachmentPostflight(
+            Ok(Err(error)) => Err(ContextError::PlatformWindowTeardownPostflight(Box::new(
                 error,
-            )),
+            ))),
             Err(payload) => {
                 // Native teardown completed, but the caller still receives a recoverable Rust
                 // error rather than unwinding through an FFI boundary.
                 std::mem::forget(payload);
-                Err(ContextPlatformWindowTeardownError::EndPanicked)
+                Err(ContextError::PlatformWindowTeardownEndPanicked)
             }
         }
     }
@@ -929,13 +798,13 @@ pub(super) fn run_post_destroy(
     let context = ContextDestroyed { id: context_id };
     let mut completed = true;
     for control in controls {
-        if let Some(attachment) = control.attachment.borrow().clone() {
-            if let Err(payload) =
+        let attachment = control.attachment.borrow().clone();
+        if let Some(attachment) = attachment
+            && let Err(payload) =
                 catch_unwind(AssertUnwindSafe(|| attachment.context_destroyed(context)))
-            {
-                completed = false;
-                std::mem::forget(payload);
-            }
+        {
+            completed = false;
+            std::mem::forget(payload);
         }
         control.state.set(AttachmentState::Complete);
         let attachment = control.attachment.borrow_mut().take();

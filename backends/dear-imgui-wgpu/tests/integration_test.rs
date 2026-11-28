@@ -8,8 +8,8 @@ use dear_imgui_rs::{
 };
 use dear_imgui_wgpu::wgpu::*;
 use dear_imgui_wgpu::{
-    ExternalTextureId, FramebufferExtent, RendererError, RendererResult, WgpuInitInfo,
-    WgpuRenderState, WgpuRenderStateAccessError, WgpuRenderer,
+    BackendError, ExternalTextureId, FramebufferExtent, RendererError, RendererResult,
+    WgpuInitInfo, WgpuRenderState, WgpuRenderer,
 };
 use static_assertions::assert_not_impl_any;
 use std::sync::{
@@ -18,9 +18,6 @@ use std::sync::{
 };
 
 fn request_test_device() -> Option<(Device, Queue)> {
-    #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
-    let instance = Instance::new(&InstanceDescriptor::default());
-    #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
     let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
     let request_adapter = |force_fallback_adapter| {
         pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
@@ -83,7 +80,7 @@ unsafe extern "C" fn observe_callback_a(
         WgpuRenderState::with_current(|mut state| {
             let nested = WgpuRenderState::with_current(|_| ());
             CALLBACK_NESTED_BORROW_REJECTED.store(
-                matches!(nested, Err(WgpuRenderStateAccessError::AlreadyBorrowed)),
+                matches!(nested, Err(BackendError::RenderStateAlreadyBorrowed)),
                 Ordering::SeqCst,
             );
             let (device, render_pass) = state.resources();
@@ -194,7 +191,6 @@ fn render_callback_contract_frame(
             color_attachments: &color_attachments,
             depth_stencil_attachment: None,
             occlusion_query_set: None,
-            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
             multiview_mask: None,
             timestamp_writes: None,
         });
@@ -229,7 +225,7 @@ fn render_callback_contract_frame(
     assert!(unsafe { context.platform_io().renderer_render_state() }.is_null());
     assert!(matches!(
         unsafe { WgpuRenderState::with_current(|_| ()) },
-        Err(WgpuRenderStateAccessError::Inactive)
+        Err(BackendError::RenderStateInactive)
     ));
     Ok(())
 }
@@ -303,7 +299,6 @@ fn render_opens_its_resource_arena_from_the_pending_frame_epoch() -> RendererRes
         color_attachments: &color_attachments,
         depth_stencil_attachment: None,
         occlusion_query_set: None,
-        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
         multiview_mask: None,
         timestamp_writes: None,
     });
@@ -373,7 +368,6 @@ fn zero_sized_framebuffer_still_reconciles_the_pending_frame() -> RendererResult
             color_attachments: &color_attachments,
             depth_stencil_attachment: None,
             occlusion_query_set: None,
-            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
             multiview_mask: None,
             timestamp_writes: None,
         });
@@ -447,7 +441,6 @@ fn render_test_frame(
             color_attachments: &color_attachments,
             depth_stencil_attachment: None,
             occlusion_query_set: None,
-            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
             multiview_mask: None,
             timestamp_writes: None,
         });
@@ -495,7 +488,6 @@ fn render_pending_frame(
         color_attachments: &color_attachments,
         depth_stencil_attachment: None,
         occlusion_query_set: None,
-        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
         multiview_mask: None,
         timestamp_writes: None,
     });
@@ -551,7 +543,6 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
     // The text draw above succeeds only after the renderer processes the requeued font-atlas
     // create request. Managed atlas bindings intentionally have no public TextureId bypass.
 
-    let suspended_owner = context.suspend_or_panic();
     let mut foreign_context = Context::create();
     let foreign_flags = foreign_context.io().backend_flags();
     let foreign_consumer = foreign_context.create_synchronous_renderer_consumer()?;
@@ -578,10 +569,6 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
     foreign_context.io_mut().set_backend_flags(foreign_flags);
     assert_eq!(foreign_context.io().backend_flags(), foreign_flags);
 
-    let suspended_foreign = foreign_context.suspend_or_panic();
-    let mut context = suspended_owner
-        .activate()
-        .expect("renderer owner context should reactivate");
     render_test_frame(&mut renderer, &mut context, &device, &queue, None, None)?;
 
     renderer.shutdown(&mut context)?;
@@ -600,26 +587,60 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
     replacement.shutdown(&mut context)?;
     drop(replacement);
 
-    let suspended_owner = context.suspend_or_panic();
-    let mut context = suspended_foreign
-        .activate()
-        .expect("replacement context should activate after owner shutdown");
-    drop(suspended_owner);
+    drop(context);
 
     let mut foreign_renderer = WgpuRenderer::new(
         WgpuInitInfo::new(device.clone(), queue.clone(), format),
-        &mut context,
+        &mut foreign_context,
     )?;
     render_test_frame(
         &mut foreign_renderer,
-        &mut context,
+        &mut foreign_context,
         &device,
         &queue,
         None,
         None,
     )?;
-    foreign_renderer.shutdown(&mut context)?;
+    foreign_renderer.shutdown(&mut foreign_context)?;
 
+    Ok(())
+}
+
+#[test]
+fn dropping_renderer_releases_its_gpu_handles_and_allows_replacement() -> RendererResult<()> {
+    let Some((device, queue)) = request_test_device() else {
+        assert!(std::env::var_os("DEAR_IMGUI_REQUIRE_WGPU_ADAPTER").is_none());
+        return Ok(());
+    };
+    let init = WgpuInitInfo::new(device.clone(), queue.clone(), TextureFormat::Rgba8Unorm);
+    let mut context = Context::create();
+    let mut renderer = WgpuRenderer::new(init.clone(), &mut context)?;
+    let texture = OwnedTextureData::from_pixels(ImGuiTextureFormat::RGBA32, 1, 1, &[255; 4])
+        .expect("valid texture data");
+    let id = context.register_texture(texture);
+    render_test_frame(&mut renderer, &mut context, &device, &queue, Some(id), None)?;
+
+    drop(renderer);
+    assert!(context.io().backend_renderer_user_data().is_null());
+    context.poll_snapshot_completions()?;
+    context
+        .with_texture(id, |texture| {
+            assert_eq!(texture.status(), dear_imgui_rs::TextureStatus::WantCreate);
+            assert!(texture.texture_id().is_null());
+        })
+        .expect("managed texture remains registered");
+
+    let mut replacement = WgpuRenderer::new(init, &mut context)?;
+    render_test_frame(
+        &mut replacement,
+        &mut context,
+        &device,
+        &queue,
+        Some(id),
+        None,
+    )?;
+    drop(context);
+    drop(replacement);
     Ok(())
 }
 
@@ -847,7 +868,6 @@ fn recording_dependencies_match_distinct_texture_pixels_and_keep_replaced_revisi
         })];
         let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
             color_attachments: &attachments,
-            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
             multiview_mask: None,
             ..Default::default()
         });
@@ -911,9 +931,6 @@ fn recording_dependencies_match_distinct_texture_pixels_and_keep_replaced_revisi
         .expect("map callback must run")
         .expect("readback mapping must succeed");
     {
-        #[cfg(any(feature = "wgpu-27", feature = "wgpu-28", feature = "wgpu-29"))]
-        let bytes = readback.slice(..).get_mapped_range();
-        #[cfg(feature = "wgpu-30")]
         let bytes = readback
             .slice(..)
             .get_mapped_range()

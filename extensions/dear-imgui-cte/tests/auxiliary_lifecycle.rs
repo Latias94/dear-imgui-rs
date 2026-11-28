@@ -1,11 +1,10 @@
-use dear_imgui_cte::{CteError, TextDiff, dejavu_font_source, noto_sans_sc_font_source};
+use dear_imgui_cte::{CteError, Palette, TextDiff, dejavu_font_source, noto_sans_sc_font_source};
 use dear_imgui_rs::{Context, sys};
 
 #[test]
 fn auxiliary_owners_bind_their_context_for_drop_and_restore_the_previous_one() {
     let context_a = Context::create();
     let diff = TextDiff::create(&context_a);
-    let suspended_a = context_a.suspend_or_panic();
 
     let context_b = Context::create();
     let raw_b = context_b.as_raw();
@@ -13,15 +12,14 @@ fn auxiliary_owners_bind_their_context_for_drop_and_restore_the_previous_one() {
     assert_eq!(unsafe { sys::igGetCurrentContext() }, raw_b);
 
     drop(context_b);
-    drop(suspended_a.activate_or_panic());
+    drop(context_a);
 }
 
 #[test]
 fn dead_owner_drop_preserves_another_current_context() {
     let context_a = Context::create();
     let diff = TextDiff::create(&context_a);
-    let suspended_a = context_a.suspend_or_panic();
-    drop(suspended_a);
+    drop(context_a);
 
     let context_b = Context::create();
     let raw_b = context_b.as_raw();
@@ -39,6 +37,15 @@ fn auxiliary_instances_have_independent_native_owners() {
     assert_ne!(unsafe { first_diff.as_raw() }, unsafe {
         second_diff.as_raw()
     });
+}
+
+#[test]
+fn built_in_palettes_respect_the_imgui_owner_thread() {
+    let context = Context::create();
+    let other_thread = std::thread::spawn(|| std::panic::catch_unwind(Palette::dark).is_err());
+    assert!(other_thread.join().unwrap());
+    assert_ne!(Palette::dark(), Palette::light());
+    drop(context);
 }
 
 #[test]

@@ -1,5 +1,11 @@
-use dear_file_browser::{DialogMode, FileDialogExt, FileDialogState};
+use dear_file_browser::{DialogMode, FileDialogCore, FileDialogExt, FileDialogState};
 use dear_imgui_rs::Context;
+
+#[test]
+fn dialog_core_can_be_moved_between_threads() {
+    fn assert_send<T: Send>() {}
+    assert_send::<FileDialogCore>();
+}
 
 /// Basic smoke test: create an ImGui context, open a file browser window for a
 /// single frame, and ensure it can render without panicking.

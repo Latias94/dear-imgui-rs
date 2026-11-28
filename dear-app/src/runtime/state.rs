@@ -376,7 +376,7 @@ pub(crate) struct UiState {
     #[cfg(feature = "implot")]
     pub(crate) implot: Option<implot::PlotContext>,
     #[cfg(feature = "imnodes")]
-    pub(crate) imnodes: Option<imnodes::Context>,
+    pub(crate) imnodes: Option<imnodes::ImNodesContext>,
     #[cfg(feature = "implot3d")]
     pub(crate) implot3d: Option<implot3d::Plot3DContext>,
     pub(crate) docking: DockingController,
@@ -445,7 +445,7 @@ impl UiState {
         let imnodes = config
             .addons
             .with_imnodes
-            .then(|| imnodes::Context::create(&context));
+            .then(|| imnodes::ImNodesContext::create(&context));
         #[cfg(feature = "implot3d")]
         let implot3d = config
             .addons
@@ -560,12 +560,24 @@ fn drain_gpu_signal_mailbox(
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut events = std::mem::take(&mut *pending);
+    // WGPU can report device loss before the OOM from the same surface operation.
+    let has_out_of_memory = events.iter().any(|event| {
+        matches!(event, RuntimeEvent::GpuFault {
+            generation: owner,
+            kind: GpuFaultKind::OutOfMemory,
+            ..
+        } if *owner == generation)
+    });
     // Validation is never evidence of loss. Only the exact generation's device-lost callback
     // publishes this atomic, including when its Winit wake event has not been dispatched yet.
-    if device_lost.load(Ordering::Acquire)
+    if has_out_of_memory {
+        events.retain(|event| {
+            !matches!(event, RuntimeEvent::DeviceLost { generation: owner, .. } if *owner == generation)
+        });
+    } else if device_lost.load(Ordering::Acquire)
         && !events
             .iter()
-            .any(|event| matches!(event, RuntimeEvent::DeviceLost { .. }))
+            .any(|event| matches!(event, RuntimeEvent::DeviceLost { generation: owner, .. } if *owner == generation))
     {
         events.push(RuntimeEvent::DeviceLost {
             generation,
@@ -585,6 +597,18 @@ fn release_renderer_and_surface<Surface>(
 }
 
 impl GpuState {
+    pub(super) fn check_surface_recovery(&self) -> Result<(), RunError> {
+        let pending = self
+            .pending_signals
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !pending.is_empty() || self.device_lost.load(Ordering::Acquire) {
+            // The runner will classify these signals after the frame's GPU borrows end.
+            return Err(RunError::SurfaceValidation);
+        }
+        Ok(())
+    }
+
     pub(crate) fn take_pending_signals(
         &self,
         generation: GpuGeneration,
@@ -768,12 +792,11 @@ impl WgpuRuntimeFactory {
         });
 
         let format = window.configure_surface(&adapter, &device, config)?;
-        let init_info = dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), format);
+        let init_info = dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), format)
+            .with_adapter(adapter.clone());
         #[cfg(feature = "multi-viewport")]
         let init_info = if config.multi_viewport {
-            init_info
-                .with_instance(window.instance.clone())
-                .with_adapter(adapter.clone())
+            init_info.with_instance(window.instance.clone())
         } else {
             init_info
         };
@@ -809,10 +832,10 @@ impl WgpuRuntimeFactory {
                 }
             }
         } else {
-            super::renderer::AppRenderer::Single(renderer)
+            super::renderer::AppRenderer::Single(Box::new(renderer))
         };
         #[cfg(not(feature = "multi-viewport"))]
-        let renderer = super::renderer::AppRenderer::Single(renderer);
+        let renderer = super::renderer::AppRenderer::Single(Box::new(renderer));
 
         Ok(RuntimeGeneration {
             id: generation,
@@ -983,6 +1006,36 @@ mod tests {
         assert!(
             matches!(signals.as_slice(), [super::RuntimeEvent::DeviceLost { generation: actual, .. }] if *actual == generation)
         );
+    }
+
+    #[test]
+    fn surface_out_of_memory_suppresses_recovery_for_its_generation() {
+        use super::{GpuFaultKind, RuntimeEvent};
+        use crate::GpuGeneration;
+
+        let generation = GpuGeneration(5);
+        let pending = Mutex::new(vec![
+            RuntimeEvent::DeviceLost {
+                generation,
+                message: "device lost".to_owned(),
+            },
+            RuntimeEvent::GpuFault {
+                generation,
+                kind: GpuFaultKind::OutOfMemory,
+                message: "surface acquisition exhausted memory".to_owned(),
+            },
+        ]);
+        let lost = AtomicBool::new(true);
+        let signals = drain_gpu_signal_mailbox(&pending, &lost, generation);
+        assert!(matches!(
+            signals.as_slice(),
+            [RuntimeEvent::GpuFault {
+                generation: actual,
+                kind: GpuFaultKind::OutOfMemory,
+                ..
+            }] if *actual == generation
+        ));
+        assert!(lost.load(Ordering::Acquire));
     }
 
     #[test]

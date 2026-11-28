@@ -22,7 +22,7 @@ fn align_size(size: usize, alignment: usize) -> usize {
 pub struct Uniforms {
     /// Model-View-Projection matrix (4x4 f32 matrix)
     pub mvp: [[f32; 4]; 4],
-    /// RGB power exponent. A negative value selects the piecewise sRGB transfer.
+    /// Vertex RGB power exponent. A negative value selects the piecewise sRGB transfer.
     pub gamma: f32,
     /// Padding to ensure proper alignment
     pub _padding: [f32; 3],
@@ -65,7 +65,7 @@ impl Uniforms {
 
     pub(crate) fn shader_gamma(mode: GammaMode, format: TextureFormat) -> f32 {
         match mode {
-            GammaMode::Auto if format.is_srgb() => 2.2,
+            GammaMode::Auto if format.is_srgb() => -1.0,
             GammaMode::Auto | GammaMode::Linear => 1.0,
             GammaMode::Gamma22 => 2.2,
             GammaMode::Srgb => -1.0,
@@ -197,7 +197,7 @@ mod tests {
                 channel: AstcChannel::UnormSrgb,
             },
         ] {
-            assert_eq!(Uniforms::shader_gamma(GammaMode::Auto, format), 2.2);
+            assert_eq!(Uniforms::shader_gamma(GammaMode::Auto, format), -1.0);
         }
         for format in [
             TextureFormat::Rgba8Unorm,

@@ -1,13 +1,14 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
+use crate::ContextError;
+use crate::FontError;
+use crate::FrameError;
 use crate::context::ContextId;
-use crate::error::ImGuiError;
-use crate::render::snapshot::{RendererConsumerError, SnapshotTextureId};
+use crate::render::snapshot::SnapshotTextureId;
 use crate::sys;
 
 use super::FontAtlas;
-use super::error::FontAtlasModeError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct FontAtlasState {
@@ -52,7 +53,7 @@ enum FontAtlasRendererMode {
 
 pub(super) fn claim_font_atlas_legacy_renderer(
     raw: *mut sys::ImFontAtlas,
-) -> Result<(), FontAtlasModeError> {
+) -> Result<(), FontError> {
     assert!(!raw.is_null(), "legacy renderer requires a font atlas");
     FONT_ATLAS_STATES.with(|states| {
         let mut states = states.borrow_mut();
@@ -75,11 +76,9 @@ pub(super) fn claim_font_atlas_legacy_renderer(
                     .expect("font atlas legacy capability count overflowed");
                 Ok(())
             }
-            Some(FontAtlasRendererMode::Managed { .. }) => {
-                Err(FontAtlasModeError::ManagedRendererActive)
-            }
+            Some(FontAtlasRendererMode::Managed { .. }) => Err(FontError::ManagedRendererActive),
             Some(FontAtlasRendererMode::RendererReleasePending { .. }) => {
-                Err(FontAtlasModeError::RendererReleasePending)
+                Err(FontError::RendererReleasePending)
             }
         }
     })
@@ -136,16 +135,18 @@ pub(super) fn reset_font_atlas_mode_after_full_clear(raw: *mut sys::ImFontAtlas)
 
 pub(crate) fn validate_font_atlas_context_registration(
     raw: *mut sys::ImFontAtlas,
-) -> Result<(), ImGuiError> {
+) -> Result<(), ContextError> {
     if raw.is_null() {
         return Ok(());
     }
     FONT_ATLAS_STATES.with(|states| {
         let states = states.borrow();
         match states.renderer_modes.get(&(raw as usize)) {
-            Some(FontAtlasRendererMode::Managed { .. }) => Err(ImGuiError::SharedFontAtlasManaged),
+            Some(FontAtlasRendererMode::Managed { .. }) => {
+                Err(ContextError::SharedFontAtlasManaged)
+            }
             Some(FontAtlasRendererMode::RendererReleasePending { .. }) => {
-                Err(ImGuiError::SharedFontAtlasRendererReleasePending)
+                Err(ContextError::SharedFontAtlasRendererReleasePending)
             }
             Some(FontAtlasRendererMode::Legacy { .. }) | None => Ok(()),
         }
@@ -155,7 +156,7 @@ pub(crate) fn validate_font_atlas_context_registration(
 pub(crate) fn validate_font_atlas_managed_renderer(
     raw: *mut sys::ImFontAtlas,
     context: *mut sys::ImGuiContext,
-) -> Result<(), RendererConsumerError> {
+) -> Result<(), FrameError> {
     assert!(!raw.is_null(), "managed renderer requires a font atlas");
     assert!(
         !context.is_null(),
@@ -174,11 +175,9 @@ pub(crate) fn validate_font_atlas_managed_renderer(
                 .get(&atlas_key)
                 .is_some_and(|contexts| contexts.contains(&(context as usize)))
         {
-            return Err(
-                RendererConsumerError::SharedFontAtlasRequiresExclusiveContext {
-                    registered_contexts,
-                },
-            );
+            return Err(FrameError::SharedFontAtlasRequiresExclusiveContext {
+                registered_contexts,
+            });
         }
 
         match states.renderer_modes.get(&atlas_key).copied() {
@@ -188,23 +187,21 @@ pub(crate) fn validate_font_atlas_managed_renderer(
                 return Ok(());
             }
             Some(FontAtlasRendererMode::Managed { .. }) => {
-                return Err(
-                    RendererConsumerError::SharedFontAtlasRequiresExclusiveContext {
-                        registered_contexts,
-                    },
-                );
+                return Err(FrameError::SharedFontAtlasRequiresExclusiveContext {
+                    registered_contexts,
+                });
             }
             Some(FontAtlasRendererMode::Legacy { .. }) => {
-                return Err(RendererConsumerError::FontAtlasRequiresManagedRebuild);
+                return Err(FrameError::FontAtlasRequiresManagedRebuild);
             }
             Some(FontAtlasRendererMode::RendererReleasePending { .. }) => {
-                return Err(RendererConsumerError::SharedFontAtlasRendererReleasePending);
+                return Err(FrameError::SharedFontAtlasRendererReleasePending);
             }
             None => {}
         }
 
         if !font_atlas_supports_managed_renderer(raw) {
-            return Err(RendererConsumerError::FontAtlasRequiresManagedRebuild);
+            return Err(FrameError::FontAtlasRequiresManagedRebuild);
         }
         Ok(())
     })
@@ -545,6 +542,10 @@ pub(super) fn font_atlas_state(raw: *mut sys::ImFontAtlas) -> FontAtlasState {
         let mut states = states.borrow_mut();
         *states.get_or_insert(raw)
     })
+}
+
+pub(super) fn try_font_atlas_state(raw: *mut sys::ImFontAtlas) -> Option<FontAtlasState> {
+    FONT_ATLAS_STATES.with(|states| states.borrow().by_atlas.get(&(raw as usize)).copied())
 }
 
 pub(super) fn bump_font_atlas_generation(raw: *mut sys::ImFontAtlas) -> FontAtlasState {
@@ -905,8 +906,14 @@ pub(super) fn font_atlas_contains_font(
 }
 
 pub(super) fn current_context_font_atlas(caller: &str) -> *mut sys::ImFontAtlas {
+    context_font_atlas(unsafe { sys::igGetCurrentContext() }, caller)
+}
+
+pub(super) fn context_font_atlas(
+    ctx: *mut sys::ImGuiContext,
+    caller: &str,
+) -> *mut sys::ImFontAtlas {
     unsafe {
-        let ctx = sys::igGetCurrentContext();
         assert!(!ctx.is_null(), "{caller} requires an active ImGui context");
         let io = sys::igGetIO_ContextPtr(ctx);
         assert!(!io.is_null(), "{caller} requires a valid ImGui IO");
@@ -916,5 +923,31 @@ pub(super) fn current_context_font_atlas(caller: &str) -> *mut sys::ImFontAtlas 
             "{caller} requires the current ImGui context to have a font atlas"
         );
         atlas
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn querying_a_font_from_a_destroyed_atlas_does_not_register_it_again() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let (id, atlas) = {
+            let context = crate::Context::create();
+            let atlas = context.font_atlas();
+            let id = atlas.add_font(&[crate::fonts::FontSource::default_font()]);
+            (id, atlas.raw())
+        };
+        let is_registered = || {
+            FONT_ATLAS_STATES
+                .with(|states| states.borrow().by_atlas.contains_key(&(atlas as usize)))
+        };
+        assert!(!is_registered());
+        assert!(
+            std::panic::catch_unwind(|| super::super::validate_font_id(id, "retired font test"))
+                .is_err()
+        );
+        assert!(!is_registered());
     }
 }

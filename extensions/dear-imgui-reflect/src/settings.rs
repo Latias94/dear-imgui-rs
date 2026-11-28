@@ -41,6 +41,7 @@ pub struct ReflectSettings {
     numerics_u32: U32NumericSettings,
     numerics_f64: F64NumericSettings,
     member_overrides: HashMap<TypeId, HashMap<String, MemberSettings>>,
+    path_overrides: HashMap<String, MemberSettings>,
 }
 
 impl ReflectSettings {
@@ -154,11 +155,32 @@ impl ReflectSettings {
     }
 
     /// Returns mutable member settings for a type and field, creating them as needed.
+    ///
+    /// Derives with lifetime or type parameters use [`Self::for_path`] instead
+    /// so that rendering does not require those parameters to be `'static`.
     pub fn for_member<T: 'static>(&mut self, field: &str) -> &mut MemberSettings {
         self.member_overrides
             .entry(TypeId::of::<T>())
             .or_default()
             .entry(field.to_owned())
             .or_default()
+    }
+
+    /// Creates an override for a logical inspector path, such as `items[0].weight`.
+    ///
+    /// Unlike [`Self::for_member`], this works with borrowed and generic derives.
+    /// Paths are relative to the inspector root and use Rust field names, tuple
+    /// indices, variant names, and quoted map keys, not widget captions. A path
+    /// override takes precedence over a type-specific override at the same field.
+    pub fn for_path(&mut self, path: &str) -> &mut MemberSettings {
+        self.path_overrides.entry(path.to_owned()).or_default()
+    }
+
+    pub(crate) fn has_path_overrides(&self) -> bool {
+        !self.path_overrides.is_empty()
+    }
+
+    pub(crate) fn member_at_path(&self, path: &str) -> Option<&MemberSettings> {
+        self.path_overrides.get(path)
     }
 }

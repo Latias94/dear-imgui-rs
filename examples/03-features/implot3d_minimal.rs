@@ -37,7 +37,7 @@ impl Application for ImPlot3dMinimal {
         ui.window("ImPlot3D Minimal")
             .size([680.0, 520.0], Condition::FirstUseEver)
             .build(|| {
-                ui.slider("Turns", 1.0, 5.0, &mut self.turns);
+                ui.slider("Turns", &mut self.turns, 1.0, 5.0);
                 ui.text("Drag to rotate the plot; use the wheel to zoom.");
 
                 let denominator = (SAMPLE_COUNT - 1) as f32;

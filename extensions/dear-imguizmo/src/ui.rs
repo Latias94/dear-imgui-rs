@@ -1,14 +1,14 @@
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 
-use dear_imgui_rs::{Id, Ui};
+use dear_imgui_rs::{Id, Ui, math::Vec3Like};
 use dear_imgui_sys as imgui_sys;
 use dear_imguizmo_sys as sys;
 
 use crate::frame::{DrawList, GizmoFrame};
 use crate::mat::Mat4Like;
 use crate::style::Style;
-use crate::types::{AxisMask, DrawListTarget, GuizmoId, Mode, MoveType, Operation, Vec3Like};
+use crate::types::{AxisMask, DrawListTarget, GuizmoId, Mode, MoveType, Operation};
 
 fn hash_bytes(bytes: &[u8]) -> u32 {
     // ImHashStr treats a zero byte count as a NUL-terminated string.
@@ -17,31 +17,6 @@ fn hash_bytes(bytes: &[u8]) -> u32 {
     }
     let range = bytes.as_ptr_range();
     unsafe { sys::ImGuizmo_GetID_StrStr(range.start.cast(), range.end.cast()) }
-}
-
-/// A handle to begin ImGuizmo drawing for an ImGui frame.
-#[derive(Default, Clone, Copy)]
-pub struct GuizmoContext;
-
-impl GuizmoContext {
-    pub fn new() -> Self {
-        Self
-    }
-
-    /// Share the ImGuizmo state for this ImGui frame. The first call opens its helper window.
-    /// Consecutive frames of one context continue active gestures. Handing ImGuizmo to
-    /// another context cancels drags, hover and view interpolation. Style and drawing
-    /// configuration remain process-global.
-    ///
-    /// # Panics
-    ///
-    /// Panics if another ImGui context still has an open ImGuizmo frame.
-    pub fn begin_frame<'ui>(&self, ui: &'ui Ui) -> GizmoUi<'ui> {
-        GizmoUi {
-            ui,
-            frame: GizmoFrame::begin(ui),
-        }
-    }
 }
 
 pub struct GizmoUi<'ui> {
@@ -54,6 +29,27 @@ pub struct GridColors {
     pub major: u32,
     pub minor: u32,
     pub center: u32,
+}
+
+fn validate_grid(grid_size: f32, major_step: f32, subdivision: u32) {
+    assert!(
+        grid_size.is_finite() && grid_size >= 0.0,
+        "grid size must be finite and non-negative"
+    );
+    assert!(
+        major_step.is_finite() && major_step > 0.0,
+        "grid step must be finite and positive"
+    );
+    assert!(
+        (1..=i32::MAX as u32).contains(&subdivision),
+        "grid subdivision must be a positive signed index"
+    );
+    let minor_step = major_step / subdivision as f32;
+    let line_count = (grid_size / minor_step).ceil();
+    assert!(
+        minor_step > 0.0 && line_count < i32::MAX as f32,
+        "grid line count exceeds the native index range"
+    );
 }
 
 impl<'ui> GizmoUi<'ui> {
@@ -98,6 +94,10 @@ impl<'ui> GizmoUi<'ui> {
     }
 
     pub fn draw_grid<T: Mat4Like>(&self, view: &T, projection: &T, model: &T, grid_size: f32) {
+        assert!(
+            (0.0..16_777_216.0).contains(&grid_size),
+            "grid size must allow native unit steps to make progress"
+        );
         let view = view.to_cols_array();
         let projection = projection.to_cols_array();
         let model = model.to_cols_array();
@@ -120,6 +120,7 @@ impl<'ui> GizmoUi<'ui> {
         major_step: f32,
         subdivision: u32,
     ) {
+        validate_grid(grid_size, major_step, subdivision);
         let view = view.to_cols_array();
         let projection = projection.to_cols_array();
         let model = model.to_cols_array();
@@ -135,6 +136,10 @@ impl<'ui> GizmoUi<'ui> {
         });
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Preserves the public draw call with separate transforms, grid parameters, and colors"
+    )]
     pub fn draw_grid_custom_color<T: Mat4Like>(
         &self,
         view: &T,
@@ -145,6 +150,7 @@ impl<'ui> GizmoUi<'ui> {
         subdivision: u32,
         colors: GridColors,
     ) {
+        validate_grid(grid_size, major_step, subdivision);
         let view = view.to_cols_array();
         let projection = projection.to_cols_array();
         let model = model.to_cols_array();
@@ -163,49 +169,45 @@ impl<'ui> GizmoUi<'ui> {
         });
     }
 
-    pub fn draw_axes<T: Mat4Like>(&self, view: &T, projection: &T, matrices: &[T]) {
-        let count = match i32::try_from(matrices.len()) {
-            Ok(v) => v,
-            Err(_) => return,
-        };
-        if count == 0 {
+    /// Draw axes using a contiguous slice of column-major model matrices.
+    pub fn draw_axes<T: Mat4Like>(&self, view: &T, projection: &T, matrices: &[[f32; 16]]) {
+        if matrices.is_empty() {
             return;
         }
-        let cap = match matrices.len().checked_mul(16) {
-            Some(v) => v,
-            None => return,
-        };
-        let mut flat: Vec<f32> = Vec::with_capacity(cap);
-        for m in matrices {
-            flat.extend_from_slice(&m.to_cols_array());
-        }
+        assert!(
+            matrices.len() <= i32::MAX as usize / 16,
+            "axis matrix count exceeds the native index range"
+        );
         let view = view.to_cols_array();
         let projection = projection.to_cols_array();
         self.with_draw_list(|_| unsafe {
-            sys::ImGuizmo_DrawAxes(view.as_ptr(), projection.as_ptr(), flat.as_ptr(), count)
+            sys::ImGuizmo_DrawAxes(
+                view.as_ptr(),
+                projection.as_ptr(),
+                matrices.as_ptr().cast(),
+                matrices.len() as i32,
+            )
         });
     }
 
-    pub fn draw_cubes<T: Mat4Like>(&self, view: &T, projection: &T, matrices: &[T]) {
-        let count = match i32::try_from(matrices.len()) {
-            Ok(v) => v,
-            Err(_) => return,
-        };
-        if count == 0 {
+    /// Draw cubes using a contiguous slice of column-major model matrices.
+    pub fn draw_cubes<T: Mat4Like>(&self, view: &T, projection: &T, matrices: &[[f32; 16]]) {
+        if matrices.is_empty() {
             return;
         }
-        let cap = match matrices.len().checked_mul(16) {
-            Some(v) => v,
-            None => return,
-        };
-        let mut flat: Vec<f32> = Vec::with_capacity(cap);
-        for m in matrices {
-            flat.extend_from_slice(&m.to_cols_array());
-        }
+        assert!(
+            matrices.len() <= i32::MAX as usize / 16,
+            "cube matrix count exceeds the native index range"
+        );
         let view = view.to_cols_array();
         let projection = projection.to_cols_array();
         self.with_draw_list(|_| unsafe {
-            sys::ImGuizmo_DrawCubes(view.as_ptr(), projection.as_ptr(), flat.as_ptr(), count)
+            sys::ImGuizmo_DrawCubes(
+                view.as_ptr(),
+                projection.as_ptr(),
+                matrices.as_ptr().cast(),
+                matrices.len() as i32,
+            )
         });
     }
 
@@ -290,6 +292,10 @@ impl<'ui> GizmoUi<'ui> {
     }
 
     /// Manipulate using the selected draw list. Each frame starts on ImGuizmo's helper window.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Mirrors ImGuizmo::Manipulate and preserves the separate optional edit inputs"
+    )]
     pub fn manipulate<T: Mat4Like>(
         &self,
         view: &T,
@@ -361,6 +367,10 @@ impl<'ui> GizmoUi<'ui> {
     }
 
     /// Extended view manipulator that also takes projection and edits a target matrix.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Mirrors the native camera manipulator overload and preserves its public call shape"
+    )]
     pub fn view_manipulate_with_camera<T: Mat4Like>(
         &self,
         view: &mut T,
@@ -560,11 +570,18 @@ impl Drop for IdToken<'_> {
 
 /// Extension methods on dear-imgui's Ui to access ImGuizmo in a unified way
 pub trait GuizmoExt {
+    /// Share ImGuizmo's state for this ImGui frame.
+    ///
+    /// Switching contexts cancels interaction from the previous context. Panics if that context
+    /// still has an open ImGuizmo frame.
     fn guizmo(&self) -> GizmoUi<'_>;
 }
 impl GuizmoExt for Ui {
     fn guizmo(&self) -> GizmoUi<'_> {
-        GuizmoContext::new().begin_frame(self)
+        GizmoUi {
+            ui: self,
+            frame: GizmoFrame::begin(self),
+        }
     }
 }
 
@@ -731,20 +748,20 @@ mod tests {
         giz.set_rect(0.0, 0.0, 800.0, 600.0);
         giz.set_orthographic(false);
         giz.set_drawlist_window();
-        let draw = ui.get_window_draw_list();
         let raw = unsafe { imgui_sys::igGetWindowDrawList() };
-        draw.with_clip_rect([0.0, 0.0], [120.0, 120.0], || {
-            let clips = unsafe { (*raw)._ClipRectStack.Size };
-            let identity = <[f32; 16] as Mat4Like>::identity();
-            let mut model = identity;
-            model[14] = -5.0;
-            assert!(
-                !giz.manipulate_config(&identity, &identity, &mut model)
-                    .build()
-            );
-            assert_eq!(unsafe { (*raw)._ClipRectStack.Size }, clips);
+        ui.with_window_draw_list(|draw| {
+            draw.with_clip_rect([0.0, 0.0], [120.0, 120.0], || {
+                let clips = unsafe { (*raw)._ClipRectStack.Size };
+                let identity = <[f32; 16] as Mat4Like>::identity();
+                let mut model = identity;
+                model[14] = -5.0;
+                assert!(
+                    !giz.manipulate_config(&identity, &identity, &mut model)
+                        .build()
+                );
+                assert_eq!(unsafe { (*raw)._ClipRectStack.Size }, clips);
+            })
         });
-        drop(draw);
         assert!(ctx.end_frame());
     }
 

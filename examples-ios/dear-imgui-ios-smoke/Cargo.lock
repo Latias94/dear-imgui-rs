@@ -326,6 +326,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
+name = "dear-imgui-backend-support"
+version = "0.23.0"
+dependencies = [
+ "dear-imgui-rs",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "dear-imgui-build-support"
 version = "0.23.0"
 dependencies = [
@@ -351,8 +359,10 @@ version = "0.23.0"
 dependencies = [
  "bitflags 2.13.2",
  "dear-imgui-sys",
+ "mint",
  "parking_lot 0.13.0",
  "thiserror 2.0.21",
+ "ttf-parser",
 ]
 
 [[package]]
@@ -369,6 +379,7 @@ name = "dear-imgui-wgpu"
 version = "0.23.0"
 dependencies = [
  "bytemuck",
+ "dear-imgui-backend-support",
  "dear-imgui-rs",
  "thiserror 2.0.21",
  "wgpu",

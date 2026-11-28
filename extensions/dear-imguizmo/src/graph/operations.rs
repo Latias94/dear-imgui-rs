@@ -11,7 +11,7 @@ pub fn delete_selected(graph: &mut Graph, view: &mut GraphView) {
 pub(super) fn delete_selected_core(
     graph: &mut Graph,
     view: &mut GraphView,
-    mut on_del_link: Option<&mut dyn FnMut(LinkId)>,
+    on_del_link: Option<&mut (dyn FnMut(LinkId) + '_)>,
 ) {
     if view.selected_nodes.is_empty() && view.selected_links.is_empty() {
         return;
@@ -41,7 +41,7 @@ pub(super) fn delete_selected_core(
             to_remove.push(ln.id);
         }
     }
-    if let Some(cb) = on_del_link.as_deref_mut() {
+    if let Some(cb) = on_del_link {
         for lid in &to_remove {
             (cb)(*lid);
         }

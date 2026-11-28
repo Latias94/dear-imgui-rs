@@ -3,7 +3,7 @@
 //! This module provides high-level functionality for creating complex plots
 //! with multiple subplots, legends, and advanced layout management.
 
-use crate::context::with_cleanup;
+use crate::context::{is_valid_axis_range, with_cleanup};
 use crate::{AxisFlags, YAxis, plots::PlotError, sys};
 use crate::{PlotCond, PlotScope, PlotSetup, PlotUi};
 use std::ffi::CString;
@@ -40,11 +40,11 @@ fn validate_ratios(caller: &str, name: &str, ratios: &[f32]) -> Result<(), PlotE
 }
 
 fn validate_range(caller: &str, min: f64, max: f64) -> Result<(), PlotError> {
-    if min.is_finite() && max.is_finite() && min != max {
+    if is_valid_axis_range(min, max) {
         Ok(())
     } else {
         Err(PlotError::InvalidData(format!(
-            "{caller} range values must be finite and distinct"
+            "{caller} min must be less than max with a finite range width"
         )))
     }
 }
@@ -317,7 +317,7 @@ pub struct LegendManager;
 
 impl LegendManager {
     /// Configure the legend during plot setup.
-    pub fn setup(setup: &PlotSetup<'_>, location: LegendLocation, flags: LegendFlags) {
+    pub fn setup(setup: &PlotSetup<'_, '_>, location: LegendLocation, flags: LegendFlags) {
         setup.plot.with_bound_context(|| unsafe {
             sys::ImPlot_SetupLegend(location as _, flags.bits() as _)
         });
@@ -361,15 +361,15 @@ impl PlotUi<'_> {
 /// Legend location options (ImPlotLocation)
 #[repr(i32)]
 pub enum LegendLocation {
-    Center = sys::ImPlotLocation_Center as i32,
-    North = sys::ImPlotLocation_North as i32,
-    South = sys::ImPlotLocation_South as i32,
-    West = sys::ImPlotLocation_West as i32,
-    East = sys::ImPlotLocation_East as i32,
-    NorthWest = sys::ImPlotLocation_NorthWest as i32,
-    NorthEast = sys::ImPlotLocation_NorthEast as i32,
-    SouthWest = sys::ImPlotLocation_SouthWest as i32,
-    SouthEast = sys::ImPlotLocation_SouthEast as i32,
+    Center = sys::ImPlotLocation_Center as _,
+    North = sys::ImPlotLocation_North as _,
+    South = sys::ImPlotLocation_South as _,
+    West = sys::ImPlotLocation_West as _,
+    East = sys::ImPlotLocation_East as _,
+    NorthWest = sys::ImPlotLocation_NorthWest as _,
+    NorthEast = sys::ImPlotLocation_NorthEast as _,
+    SouthWest = sys::ImPlotLocation_SouthWest as _,
+    SouthEast = sys::ImPlotLocation_SouthEast as _,
 }
 
 bitflags::bitflags! {

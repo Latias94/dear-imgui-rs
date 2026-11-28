@@ -10,7 +10,7 @@ use dear_imguizmo::{GuizmoExt, Mode as GuizmoMode, Operation as GuizmoOperation}
 #[cfg(feature = "imguizmo-quat")]
 use dear_imguizmo_quat::{GizmoQuatExt, Mode as GizmoQuatMode};
 #[cfg(feature = "imnodes")]
-use dear_imnodes::{Context as ImnodesContext, EditorContext as ImnodesEditorContext, ImNodesExt};
+use dear_imnodes::{EditorContext as ImnodesEditorContext, ImNodesContext, ImNodesExt};
 #[cfg(feature = "implot")]
 use dear_implot::PlotContext;
 #[cfg(feature = "implot3d")]
@@ -80,7 +80,7 @@ struct ImguiState {
     #[cfg(feature = "implot3d")]
     implot3d_ctx: Plot3DContext,
     #[cfg(feature = "imnodes")]
-    imnodes_ctx: ImnodesContext,
+    imnodes_ctx: ImNodesContext,
     #[cfg(feature = "imnodes")]
     imnodes_editor: ImnodesEditorContext,
     #[cfg(feature = "imguizmo")]
@@ -213,7 +213,7 @@ impl AppWindow {
         #[cfg(feature = "implot3d")]
         let implot3d_ctx = Plot3DContext::create(&context);
         #[cfg(feature = "imnodes")]
-        let imnodes_ctx = ImnodesContext::create(&context);
+        let imnodes_ctx = ImNodesContext::create(&context);
         #[cfg(feature = "imnodes")]
         let imnodes_editor = imnodes_ctx.create_editor_context();
         #[cfg(feature = "imguizmo")]
@@ -630,7 +630,7 @@ impl AppWindow {
                     .renderer_consumer()
                     .map_err(|e| JsValue::from_str(&format!("renderer consumer: {e}")))?,
             )
-            .map_err(|e| JsValue::from_str(&format!("capture frame: {e}")))?;
+            .map_err(|(_frame, error)| JsValue::from_str(&format!("capture frame: {error}")))?;
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

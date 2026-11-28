@@ -1,10 +1,16 @@
-//! Exercise standard sampler commands through the production draw-list interpreter.
+//! Exercise draw commands through a fake OpenGL function table.
 
 use std::{cell::RefCell, num::NonZeroU32};
 
-use dear_imgui_rs::{Context, FramePrepareOptions, TextureId, render::RendererRenderStateGuard};
+use dear_imgui_rs::{
+    Context, FramePrepareOptions, TextureId,
+    render::{DrawCmdParams, DrawVert},
+    sys,
+};
 
-use super::{FramebufferExtent, GlowRenderer, VertexArrayGuard};
+use super::{
+    DeviceObjectReadiness, DrawListRenderScope, FramebufferExtent, GlowRenderer, SamplerBinding,
+};
 use crate::{
     GlVersion,
     renderer::{
@@ -15,7 +21,6 @@ use crate::{
         sampler::SamplerObjects,
     },
     shaders::Shaders,
-    state::{GlowRenderStateStorage, GlowSamplerStrategy},
     texture::TextureRegistry,
 };
 
@@ -25,18 +30,23 @@ const ORIGINAL_MAG_FILTER: i32 = glow::LINEAR as i32;
 #[derive(Debug, PartialEq)]
 struct DrawSample {
     sampler: u32,
+    program_pipeline: u32,
     min_filter: i32,
     mag_filter: i32,
     parameter_writes: usize,
+    attrib_offsets: [usize; 3],
+    index_byte_offset: usize,
 }
 
 struct FakeGl {
     next_sampler: u32,
     sampler: u32,
     sampler_bindings: Vec<u32>,
+    program_pipeline: u32,
     min_filter: i32,
     mag_filter: i32,
     parameter_writes: usize,
+    attrib_offsets: [usize; 3],
     draws: Vec<DrawSample>,
 }
 
@@ -46,9 +56,11 @@ impl Default for FakeGl {
             next_sampler: 40,
             sampler: 0,
             sampler_bindings: Vec::new(),
+            program_pipeline: 0,
             min_filter: ORIGINAL_MIN_FILTER,
             mag_filter: ORIGINAL_MAG_FILTER,
             parameter_writes: 0,
+            attrib_offsets: [0; 3],
             draws: Vec::new(),
         }
     }
@@ -60,14 +72,45 @@ thread_local! {
 
 unsafe extern "system" fn get_string(name: u32) -> *const u8 {
     if name == glow::VERSION {
-        c"3.3".as_ptr().cast()
+        c"4.1".as_ptr().cast()
     } else {
         c"".as_ptr().cast()
     }
 }
 
-unsafe extern "system" fn get_integer(_name: u32, value: *mut i32) {
-    unsafe { *value = 0 };
+unsafe extern "system" fn get_integer(name: u32, value: *mut i32) {
+    unsafe {
+        *value = match name {
+            glow::ACTIVE_TEXTURE => glow::TEXTURE0 as i32,
+            glow::PROGRAM_PIPELINE_BINDING => {
+                GL_STATE.with_borrow(|state| state.program_pipeline as i32)
+            }
+            _ => 0,
+        };
+    }
+}
+
+unsafe extern "system" fn get_floats(_name: u32, values: *mut f32) {
+    unsafe { values.copy_from_nonoverlapping([0.0; 4].as_ptr(), 4) };
+}
+
+unsafe extern "system" fn get_booleans(_name: u32, values: *mut u8) {
+    unsafe { values.copy_from_nonoverlapping([1; 4].as_ptr(), 4) };
+}
+
+unsafe extern "system" fn is_enabled(_name: u32) -> u8 {
+    0
+}
+
+unsafe extern "system" fn bind_program_pipeline(pipeline: u32) {
+    GL_STATE.with_borrow_mut(|state| state.program_pipeline = pipeline);
+}
+
+unsafe extern "C" fn bind_callback_pipeline(
+    _list: *const sys::ImDrawList,
+    _cmd: *const sys::ImDrawCmd,
+) {
+    unsafe { bind_program_pipeline(29) };
 }
 
 unsafe extern "system" fn gen_samplers(count: i32, samplers: *mut u32) {
@@ -96,14 +139,17 @@ unsafe extern "system" fn one_u32(_value: u32) {}
 unsafe extern "system" fn two_u32(_first: u32, _second: u32) {}
 unsafe extern "system" fn blend_func(_src_rgb: u32, _dst_rgb: u32, _src_a: u32, _dst_a: u32) {}
 unsafe extern "system" fn four_i32(_x: i32, _y: i32, _w: i32, _h: i32) {}
+unsafe extern "system" fn clear_color(_r: f32, _g: f32, _b: f32, _a: f32) {}
+unsafe extern "system" fn color_mask(_r: u8, _g: u8, _b: u8, _a: u8) {}
 unsafe extern "system" fn vertex_attrib(
-    _index: u32,
+    index: u32,
     _size: i32,
     _kind: u32,
     _normalized: u8,
     _stride: i32,
-    _pointer: *const std::ffi::c_void,
+    pointer: *const std::ffi::c_void,
 ) {
+    GL_STATE.with_borrow_mut(|state| state.attrib_offsets[index as usize] = pointer as usize);
 }
 unsafe extern "system" fn buffer_data(
     _target: u32,
@@ -138,14 +184,17 @@ unsafe extern "system" fn draw_elements(
     _mode: u32,
     _count: i32,
     _kind: u32,
-    _indices: *const std::ffi::c_void,
+    indices: *const std::ffi::c_void,
 ) {
     GL_STATE.with_borrow_mut(|state| {
         state.draws.push(DrawSample {
             sampler: state.sampler,
+            program_pipeline: state.program_pipeline,
             min_filter: state.min_filter,
             mag_filter: state.mag_filter,
             parameter_writes: state.parameter_writes,
+            attrib_offsets: state.attrib_offsets,
+            index_byte_offset: indices as usize,
         });
     });
 }
@@ -167,6 +216,9 @@ fn fake_gl(has_sampler_objects: bool) -> glow::Context {
             match name {
                 "glGetString" => get_string as *const (),
                 "glGetIntegerv" => get_integer as *const (),
+                "glGetFloatv" => get_floats as *const (),
+                "glGetBooleanv" => get_booleans as *const (),
+                "glIsEnabled" => is_enabled as *const (),
                 "glGenSamplers" => gen_samplers as *const (),
                 "glBindSampler" if has_sampler_objects => bind_sampler as *const (),
                 "glSamplerParameteri" => sampler_parameter as *const (),
@@ -179,15 +231,21 @@ fn fake_gl(has_sampler_objects: bool) -> glow::Context {
                 | "glBlendEquation"
                 | "glUseProgram"
                 | "glEnableVertexAttribArray" => one_u32 as *const (),
-                "glPolygonMode" | "glBindBuffer" | "glBindTexture" => two_u32 as *const (),
+                "glPolygonMode" | "glBindBuffer" | "glBindTexture" | "glBlendEquationSeparate" => {
+                    two_u32 as *const ()
+                }
                 "glBlendFuncSeparate" => blend_func as *const (),
                 "glViewport" | "glScissor" => four_i32 as *const (),
+                "glClearColor" => clear_color as *const (),
+                "glColorMask" => color_mask as *const (),
                 "glVertexAttribPointer" => vertex_attrib as *const (),
                 "glBufferData" => buffer_data as *const (),
                 "glGetTexParameteriv" => get_texture_parameter as *const (),
                 "glTexParameteri" => texture_parameter as *const (),
                 "glDrawElements" => draw_elements as *const (),
-                "glDrawElementsBaseVertex" => draw_elements_base_vertex as *const (),
+                "glDrawElementsBaseVertex" if has_sampler_objects => {
+                    draw_elements_base_vertex as *const ()
+                }
                 _ => std::ptr::null(),
             }
             .cast()
@@ -201,6 +259,7 @@ fn renderer(gl: &glow::Context, has_sampler_objects: bool) -> GlowRenderer {
             program: None,
             attrib_location_tex: None,
             attrib_location_proj_mtx: None,
+            attrib_location_decode_vertex_srgb: None,
             attrib_location_color_gamma: None,
             attrib_location_vtx_pos: 0,
             attrib_location_vtx_uv: 1,
@@ -218,16 +277,15 @@ fn renderer(gl: &glow::Context, has_sampler_objects: bool) -> GlowRenderer {
         clip_origin: Default::default(),
         has_separate_polygon_modes: false,
         has_sampler_object_support: has_sampler_objects,
+        bind_program_pipeline: None,
         gl_context: None,
+        context_owner: None,
         context_binding: None,
-        backend_user_data: Box::default(),
-        renderer_name_ptr: std::ptr::null(),
-        renderer_texture_max: [0, 0],
+        publication: None,
         renderer_state_fault: None,
         synthetic_test_renderer: true,
         texture_registry: TextureRegistry::default(),
         managed_textures: Default::default(),
-        destroyed_managed_textures: Default::default(),
         renderer_consumer: None,
         framebuffer_srgb: false,
         color_gamma_override: None,
@@ -246,10 +304,16 @@ fn draw_image(draw_list: &dear_imgui_rs::DrawListMut<'_>, texture: TextureId) {
     );
 }
 
-fn render_sampler_sequence(has_sampler_objects: bool) {
-    GL_STATE.set(FakeGl::default());
+fn render_sampler_sequence(has_sampler_objects: bool, initial_pipeline: Option<u32>) {
+    GL_STATE.set(FakeGl {
+        program_pipeline: initial_pipeline.unwrap_or_default(),
+        ..FakeGl::default()
+    });
     let gl = fake_gl(has_sampler_objects);
     let mut renderer = renderer(&gl, has_sampler_objects);
+    if initial_pipeline.is_some() {
+        unsafe { renderer.set_bind_program_pipeline(Some(bind_program_pipeline)) };
+    }
     let texture = renderer
         .texture_registry
         .register_external(glow::NativeTexture(NonZeroU32::new(9).unwrap()))
@@ -285,45 +349,22 @@ fn render_sampler_sequence(has_sampler_objects: bool) {
     draw_list.set_sampler_from_texture();
     draw_image(&draw_list, texture);
     unsafe {
+        if initial_pipeline.is_some() {
+            draw_list.add_callback(bind_callback_pipeline, std::ptr::null_mut(), 0);
+        }
         draw_list.add_callback(draw_callback_reset_render_state, std::ptr::null_mut(), 0);
     }
     draw_image(&draw_list, texture);
     drop(draw_list);
     let frame = context.render_legacy();
-    let draw_data = frame.draw_data();
-    let extent = FramebufferExtent::from_draw_data(draw_data)
-        .unwrap()
-        .unwrap();
-    let vertex_array = VertexArrayGuard::create_and_bind(&gl).unwrap();
-    let strategy = if has_sampler_objects {
-        GlowSamplerStrategy::SamplerObjects
-    } else {
-        GlowSamplerStrategy::TextureParameters
-    };
-    let mut callback_state = GlowRenderStateStorage::new(&gl, strategy);
-    // SAFETY: The current Context and callback storage remain alive for this render scope.
-    let render_state = unsafe {
-        RendererRenderStateGuard::install(
-            dear_imgui_rs::sys::igGetPlatformIO_Nil(),
-            &mut callback_state,
-        )
-    }
-    .unwrap();
     renderer
-        .set_up_render_state(&gl, draw_data, extent, &vertex_array, None)
-        .unwrap();
-    renderer
-        .render_draw_lists(
+        .render_draw_data_transaction(
             &gl,
-            &renderer.texture_registry,
-            draw_data,
-            extent,
-            &vertex_array,
-            None,
-            &render_state,
+            Some(frame.draw_data()),
+            false,
+            DeviceObjectReadiness::Ready,
         )
         .unwrap();
-    render_state.finish().unwrap();
     if let Some(samplers) = renderer.samplers.take() {
         samplers.destroy(&gl);
     }
@@ -331,9 +372,9 @@ fn render_sampler_sequence(has_sampler_objects: bool) {
 
 #[test]
 fn texture_owned_sampler_unbinds_the_previous_sampler_during_rendering() {
-    render_sampler_sequence(true);
+    render_sampler_sequence(true, None);
     GL_STATE.with_borrow(|state| {
-        assert_eq!(state.sampler_bindings, [40, 41, 0, 40, 0, 40]);
+        assert_eq!(state.sampler_bindings, [40, 41, 0, 40, 0, 40, 0]);
         assert_eq!(
             state
                 .draws
@@ -352,7 +393,7 @@ fn texture_owned_sampler_unbinds_the_previous_sampler_during_rendering() {
 
 #[test]
 fn texture_owned_sampler_preserves_mipmapped_texture_parameters_during_fallback_rendering() {
-    render_sampler_sequence(false);
+    render_sampler_sequence(false, None);
     GL_STATE.with_borrow(|state| {
         let nearest = glow::NEAREST as i32;
         let linear = glow::LINEAR as i32;
@@ -374,5 +415,65 @@ fn texture_owned_sampler_preserves_mipmapped_texture_parameters_during_fallback_
         assert_eq!(state.mag_filter, ORIGINAL_MAG_FILTER);
         assert_eq!(state.parameter_writes, 8);
         assert!(state.sampler_bindings.is_empty());
+    });
+}
+
+#[test]
+fn render_and_reset_unbind_program_pipeline_then_restore_host_binding() {
+    render_sampler_sequence(false, Some(17));
+    GL_STATE.with_borrow(|state| {
+        assert_eq!(state.draws.len(), 5);
+        assert!(state.draws.iter().all(|draw| draw.program_pipeline == 0));
+        assert_eq!(state.program_pipeline, 17);
+    });
+}
+
+#[test]
+fn webgl2_vertex_offset_shifts_attributes_and_returns_to_zero() {
+    GL_STATE.set(FakeGl::default());
+    let gl = fake_gl(false);
+    let mut renderer = renderer(&gl, false);
+    renderer.gl_version = GlVersion::parse("WebGL 2.0 (OpenGL ES 3.0)");
+    let texture = renderer
+        .texture_registry
+        .register_external(glow::NativeTexture(NonZeroU32::new(9).unwrap()))
+        .unwrap()
+        .texture_id();
+    let scope = DrawListRenderScope {
+        gl: &gl,
+        texture_registry: &renderer.texture_registry,
+        display_pos: [0.0, 0.0],
+        framebuffer_scale: [1.0, 1.0],
+        extent: FramebufferExtent {
+            width: 64,
+            height: 64,
+        },
+        vertices: &[DrawVert::new([0.0; 2], [0.0; 2], 0); 8],
+        indices: &[0, 1, 2, 0, 2, 3],
+    };
+    renderer.set_vertex_attrib_pointers(&gl, 0);
+    let mut bound_byte_offset = Some(0);
+    for (vtx_offset, idx_offset) in [(4, 0), (0, 3)] {
+        renderer
+            .render_elements(
+                &scope,
+                3,
+                &DrawCmdParams {
+                    clip_rect: [0.0, 0.0, 64.0, 64.0],
+                    texture_id: texture,
+                    vtx_offset,
+                    idx_offset,
+                },
+                SamplerBinding::TextureOwned,
+                &mut bound_byte_offset,
+            )
+            .unwrap();
+    }
+    GL_STATE.with_borrow(|state| {
+        assert_eq!(state.draws.len(), 2);
+        assert_eq!(state.draws[0].attrib_offsets, [80, 88, 96]);
+        assert_eq!(state.draws[0].index_byte_offset, 0);
+        assert_eq!(state.draws[1].attrib_offsets, [0, 8, 16]);
+        assert_eq!(state.draws[1].index_byte_offset, 6);
     });
 }

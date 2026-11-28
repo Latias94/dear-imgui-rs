@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -43,8 +44,8 @@ struct StackLayoutItem
     float SpringSize;
     float CurrentAlign;
     float CurrentAlignOffset;
-    unsigned int VertexIndexBegin;
-    unsigned int VertexIndexEnd;
+    int VertexIndexBegin;
+    int VertexIndexEnd;
 
     explicit StackLayoutItem(StackLayoutItemType type)
         : Type(type)
@@ -206,7 +207,7 @@ StackLayout* FindLayout(WindowStackLayoutState& state, ImGuiID id, ImGuiLayoutTy
         return nullptr;
 
     StackLayout* layout = it->second.get();
-    if (layout->Type != type)
+    if (!layout->Live && layout->Type != type)
     {
         layout->Type = type;
         layout->MinimumSize = ImVec2(0.0f, 0.0f);
@@ -367,10 +368,12 @@ float CalculateLayoutItemAlignmentOffset(StackLayout& layout, StackLayoutItem& i
 
 void TranslateLayoutItem(StackLayoutItem& item, const ImVec2& offset)
 {
-    if ((offset.x == 0.0f && offset.y == 0.0f) || item.VertexIndexBegin == item.VertexIndexEnd)
+    if ((offset.x == 0.0f && offset.y == 0.0f) || item.VertexIndexBegin >= item.VertexIndexEnd)
         return;
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    if (item.VertexIndexBegin < 0 || item.VertexIndexEnd > draw_list->VtxBuffer.Size)
+        return;
     ImDrawVert* begin = draw_list->VtxBuffer.Data + item.VertexIndexBegin;
     ImDrawVert* end = draw_list->VtxBuffer.Data + item.VertexIndexEnd;
 
@@ -479,29 +482,50 @@ bool HasAnyNonZeroSpring(StackLayout& layout)
 
 void BalanceChildLayouts(StackLayout& layout)
 {
-    for (StackLayout* child = layout.FirstChild; child != nullptr; child = child->NextSibling)
+    const auto fit_to_parent = [](StackLayout& child) {
+        if (child.Type == ImGuiLayoutType_Horizontal && child.Size.x <= 0.0f)
+            child.CurrentSize.x = child.Parent->CurrentSize.x;
+        else if (child.Type == ImGuiLayoutType_Vertical && child.Size.y <= 0.0f)
+            child.CurrentSize.y = child.Parent->CurrentSize.y;
+    };
+
+    // Visit descendants before balancing their parent, using the existing tree links.
+    StackLayout* current = &layout;
+    for (;;)
     {
-        if (child->Type == ImGuiLayoutType_Horizontal && child->Size.x <= 0.0f)
-            child->CurrentSize.x = layout.CurrentSize.x;
-        else if (child->Type == ImGuiLayoutType_Vertical && child->Size.y <= 0.0f)
-            child->CurrentSize.y = layout.CurrentSize.y;
-
-        BalanceChildLayouts(*child);
-
-        if (HasAnyNonZeroSpring(*child)
-            && child->ParentItemIndex >= 0
-            && child->ParentItemIndex < static_cast<int>(layout.Items.size()))
+        while (current->FirstChild)
         {
-            StackLayoutItem& item = layout.Items[child->ParentItemIndex];
-            if (child->Type == ImGuiLayoutType_Horizontal && child->Size.x <= 0.0f)
-                item.MeasuredBounds.Max.x = ImMax(item.MeasuredBounds.Max.x, item.MeasuredBounds.Min.x + layout.CurrentSize.x);
-            else if (child->Type == ImGuiLayoutType_Vertical && child->Size.y <= 0.0f)
-                item.MeasuredBounds.Max.y = ImMax(item.MeasuredBounds.Max.y, item.MeasuredBounds.Min.y + layout.CurrentSize.y);
+            current = current->FirstChild;
+            fit_to_parent(*current);
+        }
+        for (;;)
+        {
+            BalanceLayoutSprings(*current);
+            BalanceLayoutItemsAlignment(*current);
+            if (current == &layout)
+                return;
+
+            StackLayout* parent = current->Parent;
+            if (HasAnyNonZeroSpring(*current)
+                && current->ParentItemIndex >= 0
+                && current->ParentItemIndex < static_cast<int>(parent->Items.size()))
+            {
+                StackLayoutItem& item = parent->Items[current->ParentItemIndex];
+                if (current->Type == ImGuiLayoutType_Horizontal && current->Size.x <= 0.0f)
+                    item.MeasuredBounds.Max.x = ImMax(item.MeasuredBounds.Max.x, item.MeasuredBounds.Min.x + parent->CurrentSize.x);
+                else if (current->Type == ImGuiLayoutType_Vertical && current->Size.y <= 0.0f)
+                    item.MeasuredBounds.Max.y = ImMax(item.MeasuredBounds.Max.y, item.MeasuredBounds.Min.y + parent->CurrentSize.y);
+            }
+
+            if (current->NextSibling)
+            {
+                current = current->NextSibling;
+                fit_to_parent(*current);
+                break;
+            }
+            current = parent;
         }
     }
-
-    BalanceLayoutSprings(layout);
-    BalanceLayoutItemsAlignment(layout);
 }
 
 void BeginLayoutItem(WindowStackLayoutState& state, StackLayout& layout)
@@ -529,7 +553,7 @@ void BeginLayoutItem(WindowStackLayoutState& state, StackLayout& layout)
     }
 
     item.MeasuredBounds.Min = item.MeasuredBounds.Max = window->DC.CursorPos;
-    item.VertexIndexBegin = item.VertexIndexEnd = window->DrawList->_VtxCurrentIdx;
+    item.VertexIndexBegin = item.VertexIndexEnd = window->DrawList->VtxBuffer.Size;
 }
 
 void MeasureCurrentLayoutItem(ImGuiWindow* window, const ImVec2& bb_max)
@@ -548,7 +572,7 @@ void EndLayoutItem(StackLayout& layout)
     IM_ASSERT(layout.CurrentItemIndex < static_cast<int>(layout.Items.size()));
 
     StackLayoutItem& item = layout.Items[layout.CurrentItemIndex];
-    item.VertexIndexEnd = window->DrawList->_VtxCurrentIdx;
+    item.VertexIndexEnd = window->DrawList->VtxBuffer.Size;
 
     if (item.CurrentAlign > 0.0f && layout.Type == ImGuiLayoutType_Vertical)
         SignedIndent(-item.CurrentAlignOffset);
@@ -580,7 +604,7 @@ void AddLayoutSpring(WindowStackLayoutState& state, StackLayout& layout, float w
 
     StackLayoutItem* spring_item = GenerateLayoutItem(state, layout, StackLayoutItemType::Spring);
     spring_item->MeasuredBounds.Min = spring_item->MeasuredBounds.Max = window->DC.CursorPos;
-    spring_item->VertexIndexBegin = spring_item->VertexIndexEnd = window->DrawList->_VtxCurrentIdx;
+    spring_item->VertexIndexBegin = spring_item->VertexIndexEnd = window->DrawList->VtxBuffer.Size;
 
     if (weight < 0.0f)
         weight = 0.0f;
@@ -609,7 +633,7 @@ void AddLayoutSpring(WindowStackLayoutState& state, StackLayout& layout, float w
         ImGui::Dummy(ImFloor(spring_size));
         ImGui::PopStyleVar();
         spring_item->MeasuredBounds.Max = ImMax(spring_item->MeasuredBounds.Max, g.LastItemData.Rect.Max);
-        spring_item->VertexIndexEnd = window->DrawList->_VtxCurrentIdx;
+        spring_item->VertexIndexEnd = window->DrawList->VtxBuffer.Size;
     }
 
     layout.CurrentItemIndex++;
@@ -618,15 +642,18 @@ void AddLayoutSpring(WindowStackLayoutState& state, StackLayout& layout, float w
 
 void BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float align)
 {
+    if (!GImGui || !GImGui->CurrentWindow)
+        return;
     WindowStackLayoutState& state = GetWindowState();
     ImGuiWindow* window = ImGui::GetCurrentWindow();
 
-    ImGui::PushID(reinterpret_cast<const void*>(static_cast<uintptr_t>(id)));
-
     StackLayout* layout = FindLayout(state, id, type);
+    if (layout && layout->Live)
+        return;
     if (!layout)
         layout = CreateNewLayout(state, id, type, size);
 
+    ImGui::PushID(reinterpret_cast<const void*>(static_cast<uintptr_t>(id)));
     layout->Live = true;
     PushLayout(state, layout);
 
@@ -655,12 +682,13 @@ void BeginLayout(ImGuiID id, ImGuiLayoutType type, ImVec2 size, float align)
 
 void EndLayout(ImGuiLayoutType type)
 {
+    if (!GImGui || !GImGui->CurrentWindow)
+        return;
     WindowStackLayoutState& state = GetWindowState();
-    ImGuiWindow* window = ImGui::GetCurrentWindow();
-    IM_ASSERT(state.CurrentLayout != nullptr);
-    IM_ASSERT(state.CurrentLayout->Type == type);
-
     StackLayout* layout = state.CurrentLayout;
+    if (!layout || layout->Type != type)
+        return;
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
     EndLayoutItem(*layout);
 
     if (layout->CurrentItemIndex < static_cast<int>(layout->Items.size()))
@@ -732,75 +760,87 @@ void EndLayout(ImGuiLayoutType type)
 
 extern "C"
 {
-void dear_imgui_stack_begin_horizontal_str(const char* str_id, ImVec2 size, float align)
+void dear_imgui_stack_begin_horizontal_str(const char* str_id, ImVec2 size, float align) try
 {
-    ImGuiWindow* window = ImGui::GetCurrentWindow();
-    BeginLayout(window->GetID(str_id), ImGuiLayoutType_Horizontal, size, align);
+    if (GImGui && GImGui->CurrentWindow && str_id)
+        BeginLayout(GImGui->CurrentWindow->GetID(str_id), ImGuiLayoutType_Horizontal, size, align);
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_begin_horizontal_ptr(const void* ptr_id, ImVec2 size, float align)
+void dear_imgui_stack_begin_horizontal_ptr(const void* ptr_id, ImVec2 size, float align) try
 {
-    ImGuiWindow* window = ImGui::GetCurrentWindow();
-    BeginLayout(window->GetID(ptr_id), ImGuiLayoutType_Horizontal, size, align);
+    if (GImGui && GImGui->CurrentWindow)
+        BeginLayout(GImGui->CurrentWindow->GetID(ptr_id), ImGuiLayoutType_Horizontal, size, align);
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_begin_horizontal_int(int id, ImVec2 size, float align)
+void dear_imgui_stack_begin_horizontal_int(int id, ImVec2 size, float align) try
 {
-    ImGuiWindow* window = ImGui::GetCurrentWindow();
-    BeginLayout(window->GetID(reinterpret_cast<void*>(static_cast<intptr_t>(id))), ImGuiLayoutType_Horizontal, size, align);
+    dear_imgui_stack_begin_horizontal_ptr(reinterpret_cast<void*>(static_cast<intptr_t>(id)), size, align);
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_begin_horizontal_id(ImGuiID id, ImVec2 size, float align)
+void dear_imgui_stack_begin_horizontal_id(ImGuiID id, ImVec2 size, float align) try
 {
     BeginLayout(id, ImGuiLayoutType_Horizontal, size, align);
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_end_horizontal()
+void dear_imgui_stack_end_horizontal() try
 {
     EndLayout(ImGuiLayoutType_Horizontal);
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_begin_vertical_str(const char* str_id, ImVec2 size, float align)
+void dear_imgui_stack_begin_vertical_str(const char* str_id, ImVec2 size, float align) try
 {
-    ImGuiWindow* window = ImGui::GetCurrentWindow();
-    BeginLayout(window->GetID(str_id), ImGuiLayoutType_Vertical, size, align);
+    if (GImGui && GImGui->CurrentWindow && str_id)
+        BeginLayout(GImGui->CurrentWindow->GetID(str_id), ImGuiLayoutType_Vertical, size, align);
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_begin_vertical_ptr(const void* ptr_id, ImVec2 size, float align)
+void dear_imgui_stack_begin_vertical_ptr(const void* ptr_id, ImVec2 size, float align) try
 {
-    ImGuiWindow* window = ImGui::GetCurrentWindow();
-    BeginLayout(window->GetID(ptr_id), ImGuiLayoutType_Vertical, size, align);
+    if (GImGui && GImGui->CurrentWindow)
+        BeginLayout(GImGui->CurrentWindow->GetID(ptr_id), ImGuiLayoutType_Vertical, size, align);
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_begin_vertical_int(int id, ImVec2 size, float align)
+void dear_imgui_stack_begin_vertical_int(int id, ImVec2 size, float align) try
 {
-    ImGuiWindow* window = ImGui::GetCurrentWindow();
-    BeginLayout(window->GetID(reinterpret_cast<void*>(static_cast<intptr_t>(id))), ImGuiLayoutType_Vertical, size, align);
+    dear_imgui_stack_begin_vertical_ptr(reinterpret_cast<void*>(static_cast<intptr_t>(id)), size, align);
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_begin_vertical_id(ImGuiID id, ImVec2 size, float align)
+void dear_imgui_stack_begin_vertical_id(ImGuiID id, ImVec2 size, float align) try
 {
     BeginLayout(id, ImGuiLayoutType_Vertical, size, align);
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_end_vertical()
+void dear_imgui_stack_end_vertical() try
 {
     EndLayout(ImGuiLayoutType_Vertical);
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_spring(float weight, float spacing)
+void dear_imgui_stack_spring(float weight, float spacing) try
 {
+    if (!GImGui || !GImGui->CurrentWindow)
+        return;
     WindowStackLayoutState& state = GetWindowState();
-    IM_ASSERT(state.CurrentLayout != nullptr);
-    AddLayoutSpring(state, *state.CurrentLayout, weight, spacing);
+    if (state.CurrentLayout)
+        AddLayoutSpring(state, *state.CurrentLayout, weight, spacing);
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_item_add(ImGuiWindow* window, ImVec2 bb_max)
+void dear_imgui_stack_item_add(ImGuiWindow* window, ImVec2 bb_max) try
 {
     MeasureCurrentLayoutItem(window, bb_max);
 }
+catch (...) { std::abort(); }
 
-bool dear_imgui_stack_current_layout_type(ImGuiWindow* window, int* layout_type)
+bool dear_imgui_stack_current_layout_type(ImGuiWindow* window, int* layout_type) try
 {
     WindowStackLayoutState* state = FindFastActiveLayoutState(window);
     if (!state || !state->CurrentLayout)
@@ -810,22 +850,28 @@ bool dear_imgui_stack_current_layout_type(ImGuiWindow* window, int* layout_type)
         *layout_type = static_cast<int>(state->CurrentLayout->Type);
     return true;
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_suspend_layout()
+void dear_imgui_stack_suspend_layout() try
 {
+    if (!GImGui || !GImGui->CurrentWindow)
+        return;
     WindowStackLayoutState& state = GetWindowState();
     PushLayout(state, nullptr);
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_resume_layout()
+void dear_imgui_stack_resume_layout() try
 {
+    if (!GImGui || !GImGui->CurrentWindow)
+        return;
     WindowStackLayoutState& state = GetWindowState();
-    IM_ASSERT(state.CurrentLayout == nullptr);
-    IM_ASSERT(!state.LayoutStack.empty());
-    PopLayout(state, nullptr);
+    if (!state.CurrentLayout && !state.LayoutStack.empty())
+        PopLayout(state, nullptr);
 }
+catch (...) { std::abort(); }
 
-void dear_imgui_stack_destroy_context_state(ImGuiContext* context)
+void dear_imgui_stack_destroy_context_state(ImGuiContext* context) try
 {
     if (!context)
         return;
@@ -840,9 +886,11 @@ void dear_imgui_stack_destroy_context_state(ImGuiContext* context)
 
     GStackLayoutStates.erase(context);
 }
+catch (...) { std::abort(); }
 
-size_t dear_imgui_stack_state_count()
+size_t dear_imgui_stack_state_count() try
 {
     return GStackLayoutStates.size();
 }
+catch (...) { std::abort(); }
 }

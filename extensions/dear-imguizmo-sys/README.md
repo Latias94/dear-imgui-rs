@@ -7,7 +7,7 @@ Low-level FFI bindings for ImGuizmo via the cimguizmo C API. This crate pairs wi
 - `prebuilt`: allow the build script to auto-download a release archive when available (the env toggle `IMGUIZMO_SYS_USE_PREBUILT=1` requires this feature).
 - `build-from-source`: force building native sources with `cc` even if a prebuilt could be linked.
 - `freetype`: passthrough to `dear-imgui-sys/freetype` to enable FreeType in the workspace.
-- `package-bin`: enable an internal `bin/package` helper to produce release artifacts.
+- To produce release archives from the workspace, run `cargo run -p xtask -- package dear-imguizmo-sys`.
 
 ## Build Modes
 

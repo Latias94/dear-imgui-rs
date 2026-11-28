@@ -18,6 +18,7 @@ compile_error!(
 );
 
 mod error;
+pub use dear_imgui_backend_support::BackendError;
 pub use error::*;
 
 mod texture;

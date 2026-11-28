@@ -49,7 +49,7 @@ impl Application for ImPlot3dApp {
         ui.window(&self.rust_demo)
             .size([750.0, 850.0], Condition::FirstUseEver)
             .build(|| {
-                ui.text(format!("ImPlot3D says olá! (0.3 WIP)"));
+                ui.text("ImPlot3D says olá! (0.3 WIP)");
                 ui.spacing();
                 // Tools toggles similar to upstream demo
                 demo_tools(ui, &plot_ui);
@@ -205,17 +205,17 @@ fn demo_scatter_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
     let mut zs1 = vec![0.0f32; 100];
     for i in 0..100 {
         xs1[i] = i as f32 * 0.01;
-        ys1[i] = xs1[i] + 0.1 * ((i as f32 * 12.9898).sin() * 43758.5453).fract();
-        zs1[i] = xs1[i] + 0.1 * ((i as f32 * 78.233).sin() * 43758.5453).fract();
+        ys1[i] = xs1[i] + 0.1 * ((i as f32 * 12.9898).sin() * 43_758.547).fract();
+        zs1[i] = xs1[i] + 0.1 * ((i as f32 * 78.233).sin() * 43_758.547).fract();
     }
 
     let mut xs2 = vec![0.0f32; 50];
     let mut ys2 = vec![0.0f32; 50];
     let mut zs2 = vec![0.0f32; 50];
     for i in 0..50 {
-        xs2[i] = 0.25 + 0.2 * ((i as f32 * 12.9898).sin() * 43758.5453).fract();
-        ys2[i] = 0.50 + 0.2 * ((i as f32 * 78.233).sin() * 43758.5453).fract();
-        zs2[i] = 0.75 + 0.2 * ((i as f32 * 45.164).sin() * 43758.5453).fract();
+        xs2[i] = 0.25 + 0.2 * ((i as f32 * 12.9898).sin() * 43_758.547).fract();
+        ys2[i] = 0.50 + 0.2 * ((i as f32 * 78.233).sin() * 43_758.547).fract();
+        zs2[i] = 0.75 + 0.2 * ((i as f32 * 45.164).sin() * 43_758.547).fract();
     }
 
     plot_ui.begin_plot("Scatter Plots").build(|plot| {
@@ -268,7 +268,7 @@ fn demo_triangle_plots(ui: &Ui, plot_ui: &Plot3DUi) {
 
     // Triangle flags
     thread_local! {
-        static FLAGS: Cell<Triangle3DFlags> = Cell::new(Triangle3DFlags::NONE);
+        static FLAGS: Cell<Triangle3DFlags> = const { Cell::new(Triangle3DFlags::NONE) };
     }
 
     let mut flags = FLAGS.with(|f| f.get());
@@ -298,9 +298,9 @@ fn demo_triangle_plots(ui: &Ui, plot_ui: &Plot3DUi) {
 }
 
 fn demo_quad_plots(ui: &Ui, plot_ui: &Plot3DUi) {
-    let mut xs = vec![0.0f32; 6 * 4];
-    let mut ys = vec![0.0f32; 6 * 4];
-    let mut zs = vec![0.0f32; 6 * 4];
+    let mut xs = [0.0f32; 6 * 4];
+    let mut ys = [0.0f32; 6 * 4];
+    let mut zs = [0.0f32; 6 * 4];
 
     // Cube faces (+x, -x, +y, -y, +z, -z)
     let faces = [
@@ -353,7 +353,7 @@ fn demo_quad_plots(ui: &Ui, plot_ui: &Plot3DUi) {
 
     // Quad flags
     thread_local! {
-        static FLAGS: Cell<Quad3DFlags> = Cell::new(Quad3DFlags::NONE);
+        static FLAGS: Cell<Quad3DFlags> = const { Cell::new(Quad3DFlags::NONE) };
     }
 
     let mut flags = FLAGS.with(|f| f.get());
@@ -398,14 +398,14 @@ fn demo_quad_plots(ui: &Ui, plot_ui: &Plot3DUi) {
 fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     const N: usize = 20;
     thread_local! {
-        static T: Cell<f32> = Cell::new(0.0);
-        static SELECTED_FILL: Cell<i32> = Cell::new(1); // Colormap by default
-        static SOLID_COLOR: Cell<[f32; 4]> = Cell::new([0.8, 0.8, 0.2, 0.6]);
-        static SEL_COLORMAP: Cell<i32> = Cell::new(5); // Jet by default
-        static CUSTOM_RANGE: Cell<bool> = Cell::new(false);
-        static RANGE_MIN: Cell<f32> = Cell::new(-1.0);
-        static RANGE_MAX: Cell<f32> = Cell::new(1.0);
-        static FLAGS: Cell<Surface3DFlags> = Cell::new(Surface3DFlags::NO_MARKERS);
+        static T: Cell<f32> = const { Cell::new(0.0) };
+        static SELECTED_FILL: Cell<i32> = const { Cell::new(1) }; // Colormap by default
+        static SOLID_COLOR: Cell<[f32; 4]> = const { Cell::new([0.8, 0.8, 0.2, 0.6]) };
+        static SEL_COLORMAP: Cell<i32> = const { Cell::new(5) }; // Jet by default
+        static CUSTOM_RANGE: Cell<bool> = const { Cell::new(false) };
+        static RANGE_MIN: Cell<f32> = const { Cell::new(-1.0) };
+        static RANGE_MAX: Cell<f32> = const { Cell::new(1.0) };
+        static FLAGS: Cell<Surface3DFlags> = const { Cell::new(Surface3DFlags::NO_MARKERS) };
     }
 
     let t = T.with(|t| {
@@ -576,11 +576,11 @@ fn demo_mesh_plots(ui: &Ui, plot_ui: &Plot3DUi) {
 
     // Mesh flags & colors
     thread_local! {
-        static FLAGS: Cell<Mesh3DFlags> = Cell::new(Mesh3DFlags::NONE);
-        static LINE_COLOR: Cell<[f32;4]> = Cell::new([0.5, 0.5, 0.2, 0.6]);
-        static FILL_COLOR: Cell<[f32;4]> = Cell::new([0.8, 0.8, 0.2, 0.6]);
-        static MARKER_COLOR: Cell<[f32;4]> = Cell::new([0.5, 0.5, 0.2, 0.6]);
-        static MESH_ID: Cell<i32> = Cell::new(0); // 0=Tetrahedron, 1=Cube
+        static FLAGS: Cell<Mesh3DFlags> = const { Cell::new(Mesh3DFlags::NONE) };
+        static LINE_COLOR: Cell<[f32;4]> = const { Cell::new([0.5, 0.5, 0.2, 0.6]) };
+        static FILL_COLOR: Cell<[f32;4]> = const { Cell::new([0.8, 0.8, 0.2, 0.6]) };
+        static MARKER_COLOR: Cell<[f32;4]> = const { Cell::new([0.5, 0.5, 0.2, 0.6]) };
+        static MESH_ID: Cell<i32> = const { Cell::new(0) }; // 0=Tetrahedron, 1=Cube
     }
 
     // Mesh selector
@@ -666,8 +666,8 @@ fn demo_realtime_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     ui.bullet_text("Move your mouse to change the data!");
 
     thread_local! {
-        static T: Cell<f32> = Cell::new(0.0);
-        static LAST_T: Cell<f32> = Cell::new(-1.0);
+        static T: Cell<f32> = const { Cell::new(0.0) };
+        static LAST_T: Cell<f32> = const { Cell::new(-1.0) };
         static XS: RefCell<ScrollingBuffer1D> = RefCell::new(ScrollingBuffer1D::new(2000));
         static YS: RefCell<ScrollingBuffer1D> = RefCell::new(ScrollingBuffer1D::new(2000));
         static ZS: RefCell<ScrollingBuffer1D> = RefCell::new(ScrollingBuffer1D::new(2000));
@@ -743,7 +743,7 @@ fn demo_box_scale(ui: &Ui, plot_ui: &Plot3DUi) {
     }
 
     thread_local! {
-        static SCALE: Cell<[f32; 3]> = Cell::new([1.0, 1.0, 1.0]);
+        static SCALE: Cell<[f32; 3]> = const { Cell::new([1.0, 1.0, 1.0]) };
     }
 
     let mut scale = SCALE.with(|s| s.get());
@@ -763,11 +763,11 @@ fn demo_box_scale(ui: &Ui, plot_ui: &Plot3DUi) {
 
 fn demo_box_rotation(ui: &Ui, plot_ui: &Plot3DUi) {
     thread_local! {
-        static ELEVATION: Cell<f32> = Cell::new(45.0);
-        static AZIMUTH: Cell<f32> = Cell::new(-135.0);
-        static ANIMATE: Cell<bool> = Cell::new(false);
-        static INIT_ELEVATION: Cell<f32> = Cell::new(45.0);
-        static INIT_AZIMUTH: Cell<f32> = Cell::new(-135.0);
+        static ELEVATION: Cell<f32> = const { Cell::new(45.0) };
+        static AZIMUTH: Cell<f32> = const { Cell::new(-135.0) };
+        static ANIMATE: Cell<bool> = const { Cell::new(false) };
+        static INIT_ELEVATION: Cell<f32> = const { Cell::new(45.0) };
+        static INIT_AZIMUTH: Cell<f32> = const { Cell::new(-135.0) };
     }
 
     ui.text("Rotation");
@@ -822,8 +822,8 @@ fn demo_box_rotation(ui: &Ui, plot_ui: &Plot3DUi) {
 
 fn demo_tick_labels(ui: &Ui, plot_ui: &Plot3DUi) {
     thread_local! {
-        static CUSTOM_TICKS: Cell<bool> = Cell::new(true);
-        static CUSTOM_LABELS: Cell<bool> = Cell::new(true);
+        static CUSTOM_TICKS: Cell<bool> = const { Cell::new(true) };
+        static CUSTOM_LABELS: Cell<bool> = const { Cell::new(true) };
     }
     let mut custom_ticks = CUSTOM_TICKS.with(|c| c.get());
     let mut custom_labels = CUSTOM_LABELS.with(|c| c.get());
@@ -879,9 +879,9 @@ fn demo_tick_labels(ui: &Ui, plot_ui: &Plot3DUi) {
 
 fn demo_axis_constraints(ui: &Ui, plot_ui: &Plot3DUi) {
     thread_local! {
-        static LIMITS: Cell<[f32;2]> = Cell::new([-10.0, 10.0]);
-        static ZOOMS: Cell<[f32;2]> = Cell::new([1.0, 20.0]);
-        static FLAGS: Cell<Axis3DFlags> = Cell::new(Axis3DFlags::empty());
+        static LIMITS: Cell<[f32;2]> = const { Cell::new([-10.0, 10.0]) };
+        static ZOOMS: Cell<[f32;2]> = const { Cell::new([1.0, 20.0]) };
+        static FLAGS: Cell<Axis3DFlags> = const { Cell::new(Axis3DFlags::empty()) };
     }
 
     let mut limits = LIMITS.with(|c| c.get());
@@ -921,22 +921,22 @@ fn demo_image_plots(ui: &Ui, plot_ui: &Plot3DUi) {
 
     // Parameters
     thread_local! {
-        static CENTER1: Cell<[f32;3]> = Cell::new([0.0, 0.0, 1.0]);
-        static AXIS_U1: Cell<[f32;3]> = Cell::new([1.0, 0.0, 0.0]);
-        static AXIS_V1: Cell<[f32;3]> = Cell::new([0.0, 1.0, 0.0]);
-        static UV0_1: Cell<[f32;2]> = Cell::new([0.0, 0.0]);
-        static UV1_1: Cell<[f32;2]> = Cell::new([1.0, 1.0]);
-        static TINT1: Cell<[f32;4]> = Cell::new([1.0, 1.0, 1.0, 1.0]);
+        static CENTER1: Cell<[f32;3]> = const { Cell::new([0.0, 0.0, 1.0]) };
+        static AXIS_U1: Cell<[f32;3]> = const { Cell::new([1.0, 0.0, 0.0]) };
+        static AXIS_V1: Cell<[f32;3]> = const { Cell::new([0.0, 1.0, 0.0]) };
+        static UV0_1: Cell<[f32;2]> = const { Cell::new([0.0, 0.0]) };
+        static UV1_1: Cell<[f32;2]> = const { Cell::new([1.0, 1.0]) };
+        static TINT1: Cell<[f32;4]> = const { Cell::new([1.0, 1.0, 1.0, 1.0]) };
 
-        static P0: Cell<[f32;3]> = Cell::new([-1.0, -1.0, 0.0]);
-        static P1: Cell<[f32;3]> = Cell::new([ 1.0, -1.0, 0.0]);
-        static P2: Cell<[f32;3]> = Cell::new([ 1.0,  1.0, 0.0]);
-        static P3: Cell<[f32;3]> = Cell::new([-1.0,  1.0, 0.0]);
-        static UV0: Cell<[f32;2]> = Cell::new([0.0, 0.0]);
-        static UV1: Cell<[f32;2]> = Cell::new([1.0, 0.0]);
-        static UV2: Cell<[f32;2]> = Cell::new([1.0, 1.0]);
-        static UV3: Cell<[f32;2]> = Cell::new([0.0, 1.0]);
-        static TINT2: Cell<[f32;4]> = Cell::new([1.0, 1.0, 1.0, 1.0]);
+        static P0: Cell<[f32;3]> = const { Cell::new([-1.0, -1.0, 0.0]) };
+        static P1: Cell<[f32;3]> = const { Cell::new([ 1.0, -1.0, 0.0]) };
+        static P2: Cell<[f32;3]> = const { Cell::new([ 1.0,  1.0, 0.0]) };
+        static P3: Cell<[f32;3]> = const { Cell::new([-1.0,  1.0, 0.0]) };
+        static UV0: Cell<[f32;2]> = const { Cell::new([0.0, 0.0]) };
+        static UV1: Cell<[f32;2]> = const { Cell::new([1.0, 0.0]) };
+        static UV2: Cell<[f32;2]> = const { Cell::new([1.0, 1.0]) };
+        static UV3: Cell<[f32;2]> = const { Cell::new([0.0, 1.0]) };
+        static TINT2: Cell<[f32;4]> = const { Cell::new([1.0, 1.0, 1.0, 1.0]) };
     }
 
     // Plot
@@ -974,8 +974,8 @@ fn demo_image_plots(ui: &Ui, plot_ui: &Plot3DUi) {
 fn demo_markers_and_text(ui: &Ui, plot_ui: &Plot3DUi) {
     // Marker size/weight controls
     thread_local! {
-        static MK_SIZE: Cell<f32> = Cell::new(6.0);
-        static MK_WEIGHT: Cell<f32> = Cell::new(1.5);
+        static MK_SIZE: Cell<f32> = const { Cell::new(6.0) };
+        static MK_WEIGHT: Cell<f32> = const { Cell::new(1.5) };
     }
     let mut mk_size = MK_SIZE.with(|c| c.get());
     let mut mk_weight = MK_WEIGHT.with(|c| c.get());
@@ -1093,8 +1093,8 @@ fn demo_markers_and_text(ui: &Ui, plot_ui: &Plot3DUi) {
 
 fn demo_nan_values(ui: &Ui, plot_ui: &Plot3DUi) {
     thread_local! {
-        static INCLUDE_NAN: Cell<bool> = Cell::new(true);
-        static FLAGS: Cell<Line3DFlags> = Cell::new(Line3DFlags::empty());
+        static INCLUDE_NAN: Cell<bool> = const { Cell::new(true) };
+        static FLAGS: Cell<Line3DFlags> = const { Cell::new(Line3DFlags::empty()) };
     }
     let mut include_nan = INCLUDE_NAN.with(|c| c.get());
     let mut flags = FLAGS.with(|f| f.get());
@@ -1129,10 +1129,10 @@ fn demo_custom_styles(ui: &Ui, plot_ui: &Plot3DUi) {
 
     // Style variables
     thread_local! {
-        static LINE_WEIGHT: Cell<f32> = Cell::new(2.0);
-        static MARKER_SIZE: Cell<f32> = Cell::new(5.0);
-        static MARKER_WEIGHT: Cell<f32> = Cell::new(1.0);
-        static FILL_ALPHA: Cell<f32> = Cell::new(0.5);
+        static LINE_WEIGHT: Cell<f32> = const { Cell::new(2.0) };
+        static MARKER_SIZE: Cell<f32> = const { Cell::new(5.0) };
+        static MARKER_WEIGHT: Cell<f32> = const { Cell::new(1.0) };
+        static FILL_ALPHA: Cell<f32> = const { Cell::new(0.5) };
     }
 
     let mut line_weight = LINE_WEIGHT.with(|w| w.get());
@@ -1299,35 +1299,34 @@ fn demo_custom_rendering(ui: &Ui, plot_ui: &Plot3DUi) {
             // Draw the helix
             Line3D::f32("Helix", &xs, &ys, &zs).plot(plot);
 
-            // Custom rendering: highlight start and end points
-            let draw_list = plot.plot_draw_list();
-
             // Convert 3D points to 2D screen coordinates
             let start_pixel = plot.plot_to_pixels([xs[0], ys[0], zs[0]]);
             let end_pixel = plot.plot_to_pixels([xs[99], ys[99], zs[99]]);
 
-            // Draw circles at start and end
-            draw_list
-                .add_circle([start_pixel[0], start_pixel[1]], 10.0, [0.0, 1.0, 0.0, 1.0])
-                .filled(true)
-                .build();
+            plot.with_plot_draw_list(|draw_list| {
+                // Draw circles at start and end
+                draw_list
+                    .add_circle([start_pixel[0], start_pixel[1]], 10.0, [0.0, 1.0, 0.0, 1.0])
+                    .filled(true)
+                    .build();
 
-            draw_list
-                .add_circle([end_pixel[0], end_pixel[1]], 10.0, [1.0, 0.0, 0.0, 1.0])
-                .filled(true)
-                .build();
+                draw_list
+                    .add_circle([end_pixel[0], end_pixel[1]], 10.0, [1.0, 0.0, 0.0, 1.0])
+                    .filled(true)
+                    .build();
 
-            // Add text labels
-            draw_list.add_text(
-                [start_pixel[0] + 15.0, start_pixel[1]],
-                [0.0, 1.0, 0.0, 1.0],
-                "Start",
-            );
-            draw_list.add_text(
-                [end_pixel[0] + 15.0, end_pixel[1]],
-                [1.0, 0.0, 0.0, 1.0],
-                "End",
-            );
+                // Add text labels
+                draw_list.add_text(
+                    [start_pixel[0] + 15.0, start_pixel[1]],
+                    [0.0, 1.0, 0.0, 1.0],
+                    "Start",
+                );
+                draw_list.add_text(
+                    [end_pixel[0] + 15.0, end_pixel[1]],
+                    [1.0, 0.0, 0.0, 1.0],
+                    "End",
+                );
+            });
         },
     );
 }
@@ -1365,11 +1364,11 @@ fn demo_help(ui: &Ui) {
 // Tools toggles and auxiliary windows (metrics, style editors, demos)
 fn demo_tools(ui: &Ui, plot_ui: &Plot3DUi) {
     thread_local! {
-        static SHOW_IP3D_METRICS: Cell<bool> = Cell::new(false);
-        static SHOW_IP3D_STYLE: Cell<bool> = Cell::new(false);
-        static SHOW_IMGUI_METRICS: Cell<bool> = Cell::new(false);
-        static SHOW_IMGUI_STYLE: Cell<bool> = Cell::new(false);
-        static SHOW_IMGUI_DEMO: Cell<bool> = Cell::new(false);
+        static SHOW_IP3D_METRICS: Cell<bool> = const { Cell::new(false) };
+        static SHOW_IP3D_STYLE: Cell<bool> = const { Cell::new(false) };
+        static SHOW_IMGUI_METRICS: Cell<bool> = const { Cell::new(false) };
+        static SHOW_IMGUI_STYLE: Cell<bool> = const { Cell::new(false) };
+        static SHOW_IMGUI_DEMO: Cell<bool> = const { Cell::new(false) };
     }
 
     let mut ip3d_metrics = SHOW_IP3D_METRICS.with(|c| c.get());

@@ -1,6 +1,9 @@
 use super::manager::ExternalTextureView;
 use super::*;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 static NEXT_TEXTURE_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -17,9 +20,8 @@ impl WgpuTextureManager {
     pub(crate) fn new() -> Self {
         Self {
             external_views: HashMap::new(),
-            managed_textures: HashMap::new(),
+            managed_textures: Default::default(),
             managed_by_texture_id: HashMap::new(),
-            destroyed_managed_textures: HashMap::new(),
         }
     }
 
@@ -77,7 +79,7 @@ impl WgpuTextureManager {
             .get(&id)
             .map(|entry| &entry.view)
             .or_else(|| {
-                let managed = self.managed_by_texture_id.get(&id)?;
+                let managed = *self.managed_by_texture_id.get(&id)?;
                 self.managed_textures
                     .get(managed)
                     .map(|entry| entry.resource.view())
@@ -93,6 +95,12 @@ impl WgpuTextureManager {
             })
     }
 
+    pub(crate) fn managed_recording_lease(&self, id: TextureId) -> Option<Arc<()>> {
+        let managed = *self.managed_by_texture_id.get(&id)?;
+        let entry = self.managed_textures.get(managed)?;
+        Some(entry.resource.recording_lease())
+    }
+
     #[cfg(test)]
     pub(crate) fn contains_texture(&self, id: TextureId) -> bool {
         self.texture_view(id).is_some()
@@ -103,35 +111,37 @@ impl WgpuTextureManager {
     }
 
     pub(crate) fn clear_managed_textures(&mut self) {
-        self.managed_textures.clear();
+        self.managed_textures
+            .extract_resources(|_| true)
+            .for_each(drop);
         self.managed_by_texture_id.clear();
     }
 
     pub(crate) fn managed_texture_id(&self, id: SnapshotTextureId) -> Option<TextureId> {
-        self.managed_textures.get(&id).map(|entry| entry.texture_id)
+        self.managed_textures.get(id).map(|entry| entry.texture_id)
     }
 
     pub(crate) fn clear_destroyed_managed_textures(&mut self) {
-        self.destroyed_managed_textures.clear();
+        self.managed_textures.clear_tombstones(|_| true);
     }
 
     pub(crate) fn prune_destroyed_managed_textures(&mut self, completion_watermark: u64) {
-        self.destroyed_managed_textures
-            .retain(|_, destroy_epoch| *destroy_epoch > completion_watermark);
+        self.managed_textures
+            .prune_tombstones(|_| Some(completion_watermark));
     }
 
     #[cfg(test)]
     pub(super) fn managed_texture_count(&self) -> usize {
-        self.managed_textures.len()
+        self.managed_by_texture_id.len()
     }
 
     #[cfg(test)]
     pub(super) fn texture_count(&self) -> usize {
-        self.external_views.len() + self.managed_textures.len()
+        self.external_views.len() + self.managed_texture_count()
     }
 
     #[cfg(test)]
     pub(crate) fn destroyed_managed_texture_count(&self) -> usize {
-        self.destroyed_managed_textures.len()
+        self.managed_textures.tombstone_count()
     }
 }

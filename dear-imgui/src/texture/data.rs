@@ -1,10 +1,10 @@
-use super::validation::{
-    TextureLayout, non_negative_texture_count_from_i32, require_exact_payload,
-    validate_native_texture_layout,
+use super::{
+    TextureError, TextureFormat, TextureId, TextureRect, TextureRegion, TextureStatus,
+    TextureSubresource,
 };
 use super::{
-    TextureDataError, TextureFormat, TextureId, TextureRect, TextureRegion, TextureStatus,
-    TextureSubresource,
+    TextureLayout, non_negative_texture_count_from_i32, require_exact_payload,
+    validate_native_texture_layout,
 };
 use crate::sys;
 use std::cell::UnsafeCell;
@@ -351,9 +351,9 @@ impl TextureData {
     ///
     /// # Errors
     ///
-    /// Returns [`TextureDataError`] when the texture is not mutable, its native layout is invalid,
+    /// Returns [`TextureError`] when the texture is not mutable, its native layout is invalid,
     /// the payload length is not exact, or a live full update cannot be represented safely.
-    pub fn replace_pixels(&mut self, pixels: &[u8]) -> Result<(), TextureDataError> {
+    pub fn replace_pixels(&mut self, pixels: &[u8]) -> Result<(), TextureError> {
         let raw = self.inner();
         let layout = validate_native_texture_layout(raw.Width, raw.Height, raw.BytesPerPixel)?;
         require_exact_payload(layout.byte_len, pixels.len())?;
@@ -365,8 +365,8 @@ impl TextureData {
                 TextureRegion::from_validated_dimensions(0, 0, layout.width, layout.height);
             Some(
                 validate_live_update_region(raw, layout, region).map_err(|error| match error {
-                    TextureDataError::UpdateRegionNotRepresentable(_) => {
-                        TextureDataError::FullUpdateRectOutOfRange {
+                    TextureError::UpdateRegionNotRepresentable(_) => {
+                        TextureError::FullUpdateRectOutOfRange {
                             width: layout.width,
                             height: layout.height,
                         }
@@ -399,12 +399,12 @@ impl TextureData {
     ///
     /// # Errors
     ///
-    /// Returns [`TextureDataError`] when the texture is not mutable, the region is out of bounds,
+    /// Returns [`TextureError`] when the texture is not mutable, the region is out of bounds,
     /// the row pitch or payload is invalid, or the queued native rectangle is not representable.
     pub fn update_subresource(
         &mut self,
         update: TextureSubresource<'_>,
-    ) -> Result<(), TextureDataError> {
+    ) -> Result<(), TextureError> {
         let raw = self.inner();
         let layout = validate_native_texture_layout(raw.Width, raw.Height, raw.BytesPerPixel)?;
         let status = validate_mutable_texture(raw)?;
@@ -450,16 +450,16 @@ struct ValidatedSubresource {
     queued_rect: Option<sys::ImTextureRect>,
 }
 
-fn validate_mutable_texture(raw: &sys::ImTextureData) -> Result<TextureStatus, TextureDataError> {
+fn validate_mutable_texture(raw: &sys::ImTextureData) -> Result<TextureStatus, TextureError> {
     let status = TextureStatus::from(raw.Status);
     if matches!(
         status,
         TextureStatus::Destroyed | TextureStatus::WantDestroy
     ) {
-        return Err(TextureDataError::InvalidStatus(status));
+        return Err(TextureError::InvalidStatus(status));
     }
     if raw.Pixels.is_null() {
-        return Err(TextureDataError::MissingPixelStorage(status));
+        return Err(TextureError::MissingPixelStorage(status));
     }
     Ok(status)
 }
@@ -469,20 +469,20 @@ fn validate_subresource(
     layout: TextureLayout,
     update: TextureSubresource<'_>,
     status: TextureStatus,
-) -> Result<ValidatedSubresource, TextureDataError> {
+) -> Result<ValidatedSubresource, TextureError> {
     let region = update.region();
     validate_region_bounds(layout, region)?;
 
     let region_width = usize::try_from(region.width()).expect("validated width must fit usize");
     let region_height = usize::try_from(region.height()).expect("validated height must fit usize");
     let tight_row_bytes = region_width.checked_mul(layout.bytes_per_pixel).ok_or(
-        TextureDataError::PayloadSizeOutOfRange {
+        TextureError::PayloadSizeOutOfRange {
             row_pitch: update.row_pitch(),
             height: region.height(),
         },
     )?;
     if update.row_pitch() < tight_row_bytes {
-        return Err(TextureDataError::RowPitchTooSmall {
+        return Err(TextureError::RowPitchTooSmall {
             minimum: tight_row_bytes,
             actual: update.row_pitch(),
         });
@@ -491,7 +491,7 @@ fn validate_subresource(
         .row_pitch()
         .checked_mul(region_height - 1)
         .and_then(|bytes| bytes.checked_add(tight_row_bytes))
-        .ok_or(TextureDataError::PayloadSizeOutOfRange {
+        .ok_or(TextureError::PayloadSizeOutOfRange {
             row_pitch: update.row_pitch(),
             height: region.height(),
         })?;
@@ -501,7 +501,7 @@ fn validate_subresource(
     let y = usize::try_from(region.y()).expect("validated y must fit usize");
     let x_bytes =
         x.checked_mul(layout.bytes_per_pixel)
-            .ok_or(TextureDataError::PayloadSizeOutOfRange {
+            .ok_or(TextureError::PayloadSizeOutOfRange {
                 row_pitch: update.row_pitch(),
                 height: region.height(),
             })?;
@@ -510,7 +510,7 @@ fn validate_subresource(
         .checked_mul(layout.row_pitch)
         .and_then(|offset| offset.checked_add(x_bytes))
         .and_then(|offset| offset.checked_add(tight_row_bytes))
-        .ok_or(TextureDataError::PayloadSizeOutOfRange {
+        .ok_or(TextureError::PayloadSizeOutOfRange {
             row_pitch: update.row_pitch(),
             height: region.height(),
         })?;
@@ -531,13 +531,13 @@ fn validate_subresource(
 fn validate_region_bounds(
     layout: TextureLayout,
     region: TextureRegion,
-) -> Result<(), TextureDataError> {
+) -> Result<(), TextureError> {
     let right = region.x().checked_add(region.width());
     let bottom = region.y().checked_add(region.height());
     if right.is_none_or(|right| right > layout.width)
         || bottom.is_none_or(|bottom| bottom > layout.height)
     {
-        return Err(TextureDataError::UpdateRegionOutOfBounds {
+        return Err(TextureError::UpdateRegionOutOfBounds {
             region,
             width: layout.width,
             height: layout.height,
@@ -550,7 +550,7 @@ fn validate_live_update_region(
     raw: &sys::ImTextureData,
     layout: TextureLayout,
     region: TextureRegion,
-) -> Result<sys::ImTextureRect, TextureDataError> {
+) -> Result<sys::ImTextureRect, TextureError> {
     validate_region_bounds(layout, region)?;
     let right = region
         .x()
@@ -562,22 +562,22 @@ fn validate_live_update_region(
         .expect("validated region endpoint must not overflow");
     let native_endpoint_limit = u32::from(u16::MAX) + 1;
     if right > native_endpoint_limit || bottom > native_endpoint_limit {
-        return Err(TextureDataError::UpdateRegionNotRepresentable(region));
+        return Err(TextureError::UpdateRegionNotRepresentable(region));
     }
     let rect = sys::ImTextureRect {
         x: u16::try_from(region.x())
-            .map_err(|_| TextureDataError::UpdateRegionNotRepresentable(region))?,
+            .map_err(|_| TextureError::UpdateRegionNotRepresentable(region))?,
         y: u16::try_from(region.y())
-            .map_err(|_| TextureDataError::UpdateRegionNotRepresentable(region))?,
+            .map_err(|_| TextureError::UpdateRegionNotRepresentable(region))?,
         w: u16::try_from(region.width())
-            .map_err(|_| TextureDataError::UpdateRegionNotRepresentable(region))?,
+            .map_err(|_| TextureError::UpdateRegionNotRepresentable(region))?,
         h: u16::try_from(region.height())
-            .map_err(|_| TextureDataError::UpdateRegionNotRepresentable(region))?,
+            .map_err(|_| TextureError::UpdateRegionNotRepresentable(region))?,
     };
     if !queued_union_is_representable(raw.UpdateRect, rect, true)
         || !queued_union_is_representable(raw.UsedRect, rect, false)
     {
-        return Err(TextureDataError::UpdateRegionNotRepresentable(region));
+        return Err(TextureError::UpdateRegionNotRepresentable(region));
     }
     Ok(rect)
 }

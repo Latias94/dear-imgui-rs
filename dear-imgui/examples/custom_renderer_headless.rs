@@ -6,22 +6,22 @@
 use std::collections::{HashMap, HashSet};
 
 use dear_imgui_rs::render::{
-    DrawCmd, PendingFrame, RendererConsumerError, SnapshotTextureId, SynchronousRendererConsumer,
-    TextureFeedbackError, TextureOp, TextureUploadIdentity,
+    DrawCmd, FrameError, PendingFrame, SnapshotTextureId, SynchronousRendererConsumer, TextureOp,
+    TextureUploadIdentity,
 };
 use dear_imgui_rs::texture::{
     ManagedTextureId, OwnedTextureData, TextureFormat, TextureRegion, TextureSubresource,
     get_format_bytes_per_pixel,
 };
-use dear_imgui_rs::{BackendFlags, Condition, Context, FrameToken, TextureId};
+use dear_imgui_rs::{BackendFlags, Condition, Context, FrameToken, TextureError, TextureId};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 enum CpuRendererError {
     #[error(transparent)]
-    Consumer(#[from] RendererConsumerError),
+    Consumer(#[from] FrameError),
     #[error(transparent)]
-    Feedback(#[from] TextureFeedbackError),
+    Feedback(#[from] TextureError),
     #[error("texture upload dimensions overflowed usize")]
     UploadSizeOverflow,
     #[error("texture upload row pitch is smaller than one tightly packed row")]
@@ -59,7 +59,7 @@ struct CpuRenderer {
 }
 
 impl CpuRenderer {
-    fn new(context: &mut Context) -> Result<Self, RendererConsumerError> {
+    fn new(context: &mut Context) -> Result<Self, FrameError> {
         context
             .set_renderer_name(Some("headless-cpu-recorder"))
             .expect("the static renderer name contains no NUL bytes");
@@ -197,7 +197,7 @@ impl CpuRenderer {
         Ok(stats)
     }
 
-    fn shutdown(&mut self, context: &mut Context) -> Result<(), RendererConsumerError> {
+    fn shutdown(&mut self, context: &mut Context) -> Result<(), FrameError> {
         let Some(consumer) = self.consumer.as_ref() else {
             return Ok(());
         };

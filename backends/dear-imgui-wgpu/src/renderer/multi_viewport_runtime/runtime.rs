@@ -5,9 +5,8 @@ use std::rc::Rc;
 
 use dear_imgui_rs::render::ReconciledFrame;
 use dear_imgui_rs::{
-    Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
-    ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
-    ContextDestroyed, ContextId, ContextLifecycle, ContextTeardown, FrameToken,
+    Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole, ContextBinding,
+    ContextDestroyed, ContextError, ContextId, ContextLifecycle, ContextTeardown, FrameToken,
 };
 use thiserror::Error;
 
@@ -16,6 +15,7 @@ use super::callbacks::{
     preflight_callbacks, preflight_renderer_viewport_resources, release_callbacks,
     revoke_renderer_viewport_capability_if_owned,
 };
+use super::platform::ViewportPlatform;
 use super::registry::{
     GlobalHandles, drop_orphaned_viewport_data, preflight_runtime, register_runtime,
     renderer_globals, unregister_runtime,
@@ -33,12 +33,9 @@ struct WgpuRendererAttachmentMarker;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum WgpuViewportError {
-    /// The Dear ImGui Context rejected the renderer attachment.
-    #[error(transparent)]
-    Attachment(#[from] ContextAttachmentError),
     /// The originating Context can no longer be entered normally.
     #[error(transparent)]
-    Context(#[from] ContextBindingError),
+    Context(#[from] ContextError),
     /// The underlying WGPU renderer operation failed.
     #[error(transparent)]
     Renderer(#[from] RendererError),
@@ -882,7 +879,7 @@ impl RuntimeControl {
     fn release_renderer_during_context_teardown(
         &self,
         context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         if self.state.get() == RuntimeState::ResourceDropped {
             return Ok(());
         }
@@ -893,7 +890,7 @@ impl RuntimeControl {
         preflight_renderer_viewport_resources(self).map_err(|error| {
             let message = error.to_string();
             self.record_fault(error);
-            ContextAttachmentTeardownError::new(message)
+            ContextError::attachment_teardown(message)
         })?;
 
         if self.renderer.borrow().is_none() {
@@ -904,12 +901,12 @@ impl RuntimeControl {
         }
 
         let mut renderer_slot = self.renderer.try_borrow_mut().map_err(|_| {
-            ContextAttachmentTeardownError::new(
+            ContextError::attachment_teardown(
                 "WGPU renderer was reentered during Context renderer-resource teardown",
             )
         })?;
         let renderer = renderer_slot.as_deref_mut().ok_or_else(|| {
-            ContextAttachmentTeardownError::new(
+            ContextError::attachment_teardown(
                 "WGPU renderer disappeared during Context renderer-resource teardown",
             )
         })?;
@@ -919,12 +916,12 @@ impl RuntimeControl {
             destroy_renderer_viewport_resources(self).map_err(|error| {
                 let message = error.to_string();
                 self.record_fault(error);
-                ContextAttachmentTeardownError::new(message)
+                ContextError::attachment_teardown(message)
             })?;
             release_callbacks(self).map_err(|error| {
                 let message = error.to_string();
                 self.record_fault(error);
-                ContextAttachmentTeardownError::new(message)
+                ContextError::attachment_teardown(message)
             })?;
             self.mark_detached();
             Ok(())
@@ -1100,13 +1097,13 @@ impl RuntimeControl {
 }
 
 impl ContextAttachment for RuntimeControl {
-    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextAttachmentTeardownError> {
+    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         context.with_bound_context(|| {
             self.shutdown_once(ShutdownAction::Quiesce)
                 .map_err(|error| {
                     let message = error.to_string();
                     self.record_fault(error);
-                    ContextAttachmentTeardownError::new(message)
+                    ContextError::attachment_teardown(message)
                 })
         })
     }
@@ -1114,7 +1111,7 @@ impl ContextAttachment for RuntimeControl {
     fn release_renderer_resources(
         &self,
         context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         context.with_bound_context(|| self.release_renderer_during_context_teardown(context))
     }
 
@@ -1273,7 +1270,7 @@ impl OwningViewportRuntime {
     pub(crate) fn attach(
         context: &mut Context,
         renderer: WgpuRenderer,
-        platform: super::platform_adapter::PlatformOwner,
+        platform: ViewportPlatform,
     ) -> Result<Self, WgpuViewportAttachError> {
         // The Context-owned attachment is the first ownership gate. In particular, a wrapper
         // that was dropped without explicit shutdown leaves this runtime alive for Context
@@ -1399,7 +1396,7 @@ impl OwningViewportRuntime {
         let frame = self.control.with_renderer_mut(|renderer| {
             let frame = frame
                 .try_render(renderer.renderer_consumer()?)
-                .map_err(RendererError::from)?;
+                .map_err(|(_frame, error)| RendererError::from(error))?;
             renderer
                 .reconcile_frame(frame)
                 .map_err(WgpuViewportError::from)
@@ -1588,11 +1585,10 @@ impl OwningViewportRuntime {
             .globals()
             .ok_or(WgpuViewportError::RuntimeDetached)
             .and_then(|globals| {
-                super::platform_adapter::target_for_viewport(
-                    &globals.platform,
-                    dear_imgui_rs::Id::from(viewport_id),
-                )?
-                .ok_or(WgpuViewportError::MainViewportHandleUnavailable)
+                globals
+                    .platform
+                    .target_for_viewport(dear_imgui_rs::Id::from(viewport_id))?
+                    .ok_or(WgpuViewportError::MainViewportHandleUnavailable)
             });
         let target = match target {
             Ok(target) => target,
@@ -1738,7 +1734,7 @@ impl OwningViewportRuntime {
             .with_renderer_mut(|renderer| {
                 let pending = frame
                     .try_render(renderer.renderer_consumer()?)
-                    .map_err(RendererError::from)?;
+                    .map_err(|(_frame, error)| RendererError::from(error))?;
                 renderer.reconcile_frame(pending).map_err(Into::into)
             })
             .expect("the test's real WGPU renderer must reconcile its managed frame");

@@ -1,7 +1,7 @@
 use std::ffi::c_void;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 
+use dear_imgui_rs::ffi::guard_native_callback;
 use dear_imgui_rs::sys;
 
 use crate::core::ffi;
@@ -58,6 +58,7 @@ pub(super) unsafe extern "C" fn sdl3_create_window(viewport: *mut sys::ImGuiView
             if !control.validate_platform_ownership_bound()
                 || control.live_viewport(viewport) != Some(live)
                 || control.capture_viewport_platform_state(live) != Some(initial_state)
+                || !validate_viewport_parent(control, live)
             {
                 control.mark_viewport_failed(viewport);
                 return;
@@ -73,7 +74,7 @@ pub(super) unsafe extern "C" fn sdl3_create_window(viewport: *mut sys::ImGuiView
                 control.mark_viewport_failed(viewport);
                 return;
             }
-            callback(viewport);
+            ffi::dear_imgui_sdl3_invoke_viewport(callback, viewport);
             let native_faults = transaction.finish();
             let Some(live) = control.live_viewport(viewport) else {
                 control.record_viewport_creation_failed();
@@ -97,16 +98,15 @@ pub(super) unsafe extern "C" fn sdl3_create_window(viewport: *mut sys::ImGuiView
                 }
                 // Allocation happened, but it was never published. Release the exact sidecar
                 // once now; a later core destroy pass sees empty fields and cannot destroy it again.
-                if !state.user_data.is_null() {
-                    if let (Some(expected), Some(destroy)) = (
+                if !state.user_data.is_null()
+                    && let (Some(expected), Some(destroy)) = (
                         control.take_owned_viewport(viewport),
                         callbacks.destroy_window(),
-                    ) {
-                        if control.capture_viewport_platform_state(viewport) == Some(expected) {
-                            destroy(viewport);
-                            control.clear_viewport_platform_state(viewport);
-                        }
-                    }
+                    )
+                    && control.capture_viewport_platform_state(viewport) == Some(expected)
+                {
+                    ffi::dear_imgui_sdl3_invoke_viewport(destroy, viewport);
+                    control.clear_viewport_platform_state(viewport);
                 }
                 control.mark_viewport_failed(viewport);
                 return;
@@ -146,7 +146,7 @@ pub(super) unsafe extern "C" fn sdl3_destroy_window(viewport: *mut sys::ImGuiVie
 
             if viewport_platform_state_eq(actual, expected) {
                 if !control.defer_native_window_destruction(viewport, native_allocation.as_ref()) {
-                    callback(viewport);
+                    ffi::dear_imgui_sdl3_invoke_viewport(callback, viewport);
                 }
                 control.clear_viewport_platform_state(viewport);
                 return true;
@@ -158,7 +158,7 @@ pub(super) unsafe extern "C" fn sdl3_destroy_window(viewport: *mut sys::ImGuiVie
                 return false;
             }
             if !control.defer_native_window_destruction(viewport, native_allocation.as_ref()) {
-                callback(viewport);
+                ffi::dear_imgui_sdl3_invoke_viewport(callback, viewport);
             }
             control.clear_viewport_platform_state(viewport);
             control.defer_platform_viewport_restore(viewport, actual);
@@ -174,7 +174,7 @@ pub(super) unsafe extern "C" fn sdl3_show_window(viewport: *mut sys::ImGuiViewpo
         (),
         |_, callbacks| unsafe {
             if let Some(callback) = callbacks.show_window() {
-                callback(viewport);
+                ffi::dear_imgui_sdl3_invoke_viewport(callback, viewport);
             }
         },
     );
@@ -186,11 +186,13 @@ pub(super) unsafe extern "C" fn sdl3_update_window(viewport: *mut sys::ImGuiView
         viewport,
         (),
         |control, callbacks| unsafe {
-            if control.native_window_owner_change_blocked(viewport) {
+            if !validate_viewport_parent(control, viewport)
+                || control.native_window_owner_change_blocked(viewport)
+            {
                 return;
             }
             if let Some(callback) = callbacks.update_window() {
-                callback(viewport);
+                ffi::dear_imgui_sdl3_invoke_viewport(callback, viewport);
                 if !control.refresh_native_window_owner(viewport) {
                     control.record_native_window_owner_unavailable();
                 }
@@ -210,8 +212,8 @@ pub(super) unsafe extern "C" fn sdl3_set_window_pos(
         PlatformCallbackSlot::SetWindowPos,
         viewport,
         (),
-        |_, callbacks| {
-            let _ = unsafe { callbacks.invoke_set_window_pos(viewport, pos) };
+        |_, callbacks| unsafe {
+            callbacks.invoke_set_window_pos(viewport, pos);
         },
     );
 }
@@ -252,8 +254,8 @@ pub(super) unsafe extern "C" fn sdl3_set_window_size(
         PlatformCallbackSlot::SetWindowSize,
         viewport,
         (),
-        |_, callbacks| {
-            let _ = unsafe { callbacks.invoke_set_window_size(viewport, size) };
+        |_, callbacks| unsafe {
+            callbacks.invoke_set_window_size(viewport, size);
         },
     );
 }
@@ -328,7 +330,7 @@ pub(super) unsafe extern "C" fn sdl3_set_window_focus(viewport: *mut sys::ImGuiV
         (),
         |_, callbacks| unsafe {
             if let Some(callback) = callbacks.set_window_focus() {
-                callback(viewport);
+                ffi::dear_imgui_sdl3_invoke_viewport(callback, viewport);
             }
         },
     );
@@ -343,10 +345,10 @@ pub(super) unsafe extern "C" fn sdl3_get_window_focus(viewport: *mut sys::ImGuiV
             let Some(live) = control.live_viewport(viewport) else {
                 return false;
             };
-            callbacks.get_window_focus().map_or(
-                (*live).Flags & sys::ImGuiViewportFlags_IsFocused != 0,
-                |callback| callback(viewport),
-            )
+            let fallback = (*live).Flags & sys::ImGuiViewportFlags_IsFocused != 0;
+            callbacks.get_window_focus().map_or(fallback, |callback| {
+                ffi::dear_imgui_sdl3_invoke_viewport_query(callback, viewport, fallback)
+            })
         },
     )
 }
@@ -362,10 +364,12 @@ pub(super) unsafe extern "C" fn sdl3_get_window_minimized(
             let Some(live) = control.live_viewport(viewport) else {
                 return false;
             };
-            callbacks.get_window_minimized().map_or(
-                (*live).Flags & sys::ImGuiViewportFlags_IsMinimized != 0,
-                |callback| callback(viewport),
-            )
+            let fallback = (*live).Flags & sys::ImGuiViewportFlags_IsMinimized != 0;
+            callbacks
+                .get_window_minimized()
+                .map_or(fallback, |callback| {
+                    ffi::dear_imgui_sdl3_invoke_viewport_query(callback, viewport, fallback)
+                })
         },
     )
 }
@@ -383,7 +387,7 @@ pub(super) unsafe extern "C" fn sdl3_set_window_title(
         (),
         |_, callbacks| unsafe {
             if let Some(callback) = callbacks.set_window_title() {
-                callback(viewport, title);
+                ffi::dear_imgui_sdl3_invoke_viewport_title(callback, viewport, title);
             }
         },
     );
@@ -413,7 +417,7 @@ pub(super) unsafe extern "C" fn sdl3_render_window(
                 control.mark_viewport_failed(viewport);
                 return;
             };
-            callback(viewport, render_argument);
+            ffi::dear_imgui_sdl3_invoke_viewport_render(callback, viewport, render_argument);
             if transaction.finish() != 0 {
                 control.mark_viewport_failed(viewport);
             }
@@ -444,7 +448,7 @@ pub(super) unsafe extern "C" fn sdl3_swap_buffers(
                 control.mark_viewport_failed(viewport);
                 return;
             };
-            callback(viewport, render_argument);
+            ffi::dear_imgui_sdl3_invoke_viewport_render(callback, viewport, render_argument);
             if transaction.finish() != 0 {
                 control.mark_viewport_failed(viewport);
             }
@@ -462,7 +466,7 @@ pub(super) unsafe extern "C" fn sdl3_set_window_alpha(
         (),
         |_, callbacks| unsafe {
             if let Some(callback) = callbacks.set_window_alpha() {
-                callback(viewport, alpha);
+                ffi::dear_imgui_sdl3_invoke_viewport_alpha(callback, viewport, alpha);
             }
         },
     );
@@ -484,7 +488,13 @@ pub(super) unsafe extern "C" fn sdl3_create_vk_surface(
         1,
         |_, callbacks| unsafe {
             callbacks.create_vk_surface().map_or(1, |callback| {
-                callback(viewport, instance, allocators, out_surface)
+                ffi::dear_imgui_sdl3_invoke_viewport_vulkan(
+                    callback,
+                    viewport,
+                    instance,
+                    allocators,
+                    out_surface,
+                )
             })
         },
     );
@@ -518,7 +528,7 @@ pub(super) unsafe extern "C" fn sdl3_renderer_create_window(viewport: *mut sys::
         };
         #[cfg(not(feature = "sdlgpu3-renderer"))]
         {
-            callback(viewport);
+            ffi::dear_imgui_sdl3_invoke_viewport(callback, viewport);
             if let Some(renderer_user_data) = control.viewport_renderer_user_data(viewport) {
                 control.remember_owned_renderer_viewport(viewport, renderer_user_data);
             } else {
@@ -530,7 +540,7 @@ pub(super) unsafe extern "C" fn sdl3_renderer_create_window(viewport: *mut sys::
         #[cfg(feature = "sdlgpu3-renderer")]
         {
             if control.native_renderer() != NativeRendererKind::SdlGpu3 {
-                callback(viewport);
+                ffi::dear_imgui_sdl3_invoke_viewport(callback, viewport);
                 if let Some(renderer_user_data) = control.viewport_renderer_user_data(viewport) {
                     control.remember_owned_renderer_viewport(viewport, renderer_user_data);
                 } else {
@@ -545,7 +555,7 @@ pub(super) unsafe extern "C" fn sdl3_renderer_create_window(viewport: *mut sys::
                 control.mark_viewport_failed(viewport);
                 return;
             };
-            callback(viewport);
+            ffi::dear_imgui_sdl3_invoke_viewport(callback, viewport);
             let native_faults = transaction.finish();
             finish_sdlgpu_renderer_create(control, viewport, native_faults);
         }
@@ -641,7 +651,7 @@ pub(super) unsafe extern "C" fn sdl3_renderer_destroy_window(viewport: *mut sys:
         if !control.set_viewport_renderer_user_data(viewport, expected_renderer) {
             return false;
         }
-        callback(viewport);
+        ffi::dear_imgui_sdl3_invoke_viewport(callback, viewport);
         let _ = control.set_viewport_renderer_user_data(viewport, std::ptr::null_mut());
         control.forget_owned_renderer_viewport(viewport);
         true
@@ -675,7 +685,7 @@ pub(super) unsafe extern "C" fn sdl3_renderer_render_window(
             return;
         }
         if let Some(callback) = control.original_renderer_render_window() {
-            callback(viewport, render_argument);
+            ffi::dear_imgui_sdl3_invoke_viewport_render(callback, viewport, render_argument);
         }
     });
 }
@@ -715,7 +725,7 @@ pub(super) unsafe extern "C" fn sdl3_renderer_swap_buffers(
             return;
         }
         if let Some(callback) = control.original_renderer_swap_buffers() {
-            callback(viewport, render_argument);
+            ffi::dear_imgui_sdl3_invoke_viewport_render(callback, viewport, render_argument);
         }
     });
 }
@@ -770,10 +780,40 @@ impl<'a> NativeTransaction<'a> {
 impl Drop for NativeTransaction<'_> {
     fn drop(&mut self) {
         if self.active {
-            let mut first_fault = 0;
-            let faults = unsafe { ffi::dear_imgui_sdl3_native_end(&mut first_fault) };
-            self.control.record_native_faults(faults, first_fault);
+            guard_native_callback(
+                (),
+                || {
+                    let mut first_fault = 0;
+                    let faults = unsafe { ffi::dear_imgui_sdl3_native_end(&mut first_fault) };
+                    self.control.record_native_faults(faults, first_fault);
+                },
+                || {},
+            );
         }
+    }
+}
+
+// SDL_SetWindowParent mutates the provided windows' native hierarchy. Resolve the parent
+// through this session before upstream reads the pointer or passes its SDL ID to SDL.
+unsafe fn validate_viewport_parent(
+    control: &RuntimeControl,
+    viewport: *mut sys::ImGuiViewport,
+) -> bool {
+    let parent = unsafe { (*viewport).ParentViewport };
+    if parent.is_null() {
+        return true;
+    }
+    let Some(parent) = control
+        .resolve_live_viewport(parent)
+        .filter(|&parent| parent != viewport)
+    else {
+        control.record_platform_state_replaced("Viewport.ParentViewport");
+        return false;
+    };
+    // A live parent may still be waiting for a native window.
+    unsafe {
+        ViewportPlatformState::capture(parent).handle.is_null()
+            || validate_platform_viewport_state(control, parent)
     }
 }
 
@@ -850,26 +890,25 @@ fn run_platform_callback<R: Copy>(
     fallback: R,
     callback: impl FnOnce(&RuntimeControl, &PlatformCallbacks) -> R,
 ) -> R {
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        with_current_runtime(|control| {
-            if !control.validate_platform_callback_slot(slot) {
-                return fallback;
-            }
-            let Some(callbacks) = control.original_platform_callbacks() else {
-                control.record_platform_state_replaced("platform callback ownership");
-                return fallback;
-            };
-            callback(control, &callbacks)
-        })
-        .unwrap_or(fallback)
-    }));
-    match result {
-        Ok(result) => result,
-        Err(_) => {
+    guard_native_callback(
+        fallback,
+        || {
+            with_current_runtime(|control| {
+                if !control.validate_platform_callback_slot(slot) {
+                    return fallback;
+                }
+                let Some(callbacks) = control.original_platform_callbacks() else {
+                    control.record_platform_state_replaced("platform callback ownership");
+                    return fallback;
+                };
+                callback(control, &callbacks)
+            })
+            .unwrap_or(fallback)
+        },
+        || {
             let _ = with_current_runtime(|control| control.record_callback_panicked(slot.name()));
-            fallback
-        }
-    }
+        },
+    )
 }
 
 fn run_owned_platform_callback<R: Copy>(
@@ -895,23 +934,23 @@ fn run_callback<R: Copy>(
     fallback: R,
     callback: impl FnOnce(&RuntimeControl) -> R,
 ) -> R {
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        with_current_runtime(|control| {
-            if control.validate_platform_ownership_bound() || control.callback_teardown_active() {
-                callback(control)
-            } else {
-                fallback
-            }
-        })
-        .unwrap_or(fallback)
-    }));
-    match result {
-        Ok(result) => result,
-        Err(_) => {
+    guard_native_callback(
+        fallback,
+        || {
+            with_current_runtime(|control| {
+                if control.validate_platform_ownership_bound() || control.callback_teardown_active()
+                {
+                    callback(control)
+                } else {
+                    fallback
+                }
+            })
+            .unwrap_or(fallback)
+        },
+        || {
             let _ = with_current_runtime(|control| control.record_callback_panicked(name));
-            fallback
-        }
-    }
+        },
+    )
 }
 
 #[cfg(test)]

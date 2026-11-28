@@ -240,7 +240,8 @@ impl AppWindow {
         };
 
         // Init WGPU
-        let (device, queue, surface, surface_desc) = wgpu_init::init_wgpu_for_window(&window)?;
+        let (device, queue, surface, surface_desc) =
+            wgpu_init::init_wgpu_for_window(event_loop, &window)?;
 
         // ImGui context
         let mut context = Context::create();
@@ -446,15 +447,16 @@ impl AppWindow {
                 let off_y = (avail_h - disp_h) * 0.5;
                 ui.set_cursor_pos([cur[0] + off_x, cur[1] + off_y]);
 
-                let draw_list = ui.get_window_draw_list();
-                if self.use_nearest_sampler {
-                    draw_list.set_sampler_nearest();
-                } else {
+                ui.with_window_draw_list(|draw_list| {
+                    if self.use_nearest_sampler {
+                        draw_list.set_sampler_nearest();
+                    } else {
+                        draw_list.set_sampler_linear();
+                    }
+                    ui.image(self.rtt.texture_id.texture_id(), [disp_w, disp_h]);
+                    self.game_view_hovered = ui.is_item_hovered();
                     draw_list.set_sampler_linear();
-                }
-                ui.image(self.rtt.texture_id.texture_id(), [disp_w, disp_h]);
-                self.game_view_hovered = ui.is_item_hovered();
-                draw_list.set_sampler_linear();
+                });
             });
 
         if want_toggle_sampler {
@@ -471,7 +473,7 @@ impl AppWindow {
                 label: Some("Main Encoder"),
             });
 
-        platform.prepare_render(&ui, &self.window)?;
+        platform.prepare_render(ui, &self.window)?;
         let pending_frame = context.render(renderer.renderer_consumer()?);
 
         {

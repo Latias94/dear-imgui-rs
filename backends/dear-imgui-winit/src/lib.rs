@@ -47,7 +47,7 @@ mod test_util;
 #[cfg(feature = "multi-viewport")]
 pub use platform::WinitWindowRenderLease;
 pub use platform::{
-    HiDpiMode, WinitPlatform, WinitPlatformError, WinitWindowCapabilities,
+    HiDpiMode, WinitContextFailure, WinitPlatform, WinitPlatformError, WinitWindowCapabilities,
     WinitWindowLifecycleEvent, WinitWindowNativeState, WinitWindowPolicySupport,
     WinitWindowSnapshot,
 };

@@ -13,34 +13,22 @@ use super::{RuntimeBatch, RuntimeBatchKind};
 /// One native worker owned by a scan session.
 pub(super) struct ScanWorker {
     state: Arc<ScanSessionState>,
-    wake_sender: Option<mpsc::SyncSender<()>>,
-    handle: Option<thread::JoinHandle<()>>,
+    wake_sender: mpsc::SyncSender<()>,
 }
 
 impl ScanWorker {
     pub(super) fn spawn(state: Arc<ScanSessionState>) -> io::Result<Self> {
         let (wake_sender, wake_receiver) = mpsc::sync_channel(1);
         let worker_state = Arc::clone(&state);
-        let handle = thread::Builder::new()
+        thread::Builder::new()
             .name("dear-file-browser-scan".to_owned())
             .spawn(move || worker_loop(worker_state, wake_receiver))?;
 
-        Ok(Self {
-            state,
-            wake_sender: Some(wake_sender),
-            handle: Some(handle),
-        })
+        Ok(Self { state, wake_sender })
     }
 
     pub(super) fn wake(&self) -> io::Result<()> {
-        let Some(wake_sender) = self.wake_sender.as_ref() else {
-            return Err(io::Error::new(
-                io::ErrorKind::BrokenPipe,
-                "background scan worker is closed",
-            ));
-        };
-
-        match wake_sender.try_send(()) {
+        match self.wake_sender.try_send(()) {
             Ok(()) | Err(mpsc::TrySendError::Full(())) => Ok(()),
             Err(mpsc::TrySendError::Disconnected(())) => Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
@@ -48,19 +36,11 @@ impl ScanWorker {
             )),
         }
     }
-
-    pub(super) fn close(&mut self) {
-        self.state.close();
-        self.wake_sender.take();
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
-    }
 }
 
 impl Drop for ScanWorker {
     fn drop(&mut self) {
-        self.close();
+        self.state.close();
     }
 }
 

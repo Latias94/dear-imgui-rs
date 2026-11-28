@@ -26,18 +26,18 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn node<R>(&self, node: NodeId, f: impl FnOnce(&NodeToken<'_>) -> R) -> R {
-        self.scoped(|| unsafe { self.begin_node(node) }, f)
+        self.scoped(|| unsafe { self.begin_node(node) }, |token| f(token))
     }
 
     /// Draws the group hint when upstream offers one at the current zoom level.
     pub fn group_hint<R>(
         &self,
         node: NodeId,
-        f: impl FnOnce(&GroupHintToken<'_>) -> R,
+        f: impl FnOnce(&mut GroupHintToken<'_>) -> R,
     ) -> Option<R> {
         self.scoped(
             || unsafe { self.begin_group_hint(node) },
-            |hint| hint.as_ref().map(f),
+            |hint| hint.as_mut().map(f),
         )
     }
 
@@ -54,18 +54,46 @@ impl<'ui> NodeEditorFrame<'ui> {
         })
     }
 
-    /// Returns a node's background draw list after that node has been ended.
+    /// Draw with a node's background draw list after that node has ended.
     ///
     /// Returns `None` when the node was not submitted in this frame or the host
     /// window skips rendering. Requires the editor canvas outside a build or suspension scope.
-    pub fn node_background_draw_list(&self, node: NodeId) -> Option<DrawListMut<'_>> {
-        self.require_scope(None, "NodeEditorFrame::node_background_draw_list()");
-        let draw_list = self
-            .with_canvas("NodeEditorFrame::node_background_draw_list()", || unsafe {
-                sys::dne_get_node_background_draw_list(node.raw())
-            });
-        // Upstream selects a channel on the host window's draw list.
-        (!draw_list.is_null()).then(|| self._ui.get_window_draw_list())
+    pub fn with_node_background_draw_list<R>(
+        &self,
+        node: NodeId,
+        draw: impl FnOnce(&DrawListMut<'_>) -> R,
+    ) -> Option<R> {
+        let caller = "NodeEditorFrame::with_node_background_draw_list()";
+        self.require_scope(None, caller);
+        self.with_channel_draw_list(
+            caller,
+            || unsafe { sys::dne_get_node_background_draw_list(node.raw()) },
+            draw,
+        )
+    }
+
+    /// Reserve the window draw list before asking native code to change its
+    /// channel. Check the returned pointer before using the window-bound wrapper.
+    fn with_channel_draw_list<R>(
+        &self,
+        caller: &'static str,
+        select: impl FnOnce() -> *mut sys::ImDrawList,
+        draw: impl FnOnce(&DrawListMut<'_>) -> R,
+    ) -> Option<R> {
+        self.with_canvas(caller, || {
+            self.ui.with_window_draw_list(|draw_list| {
+                let selected = select();
+                if selected.is_null() {
+                    return None;
+                }
+                assert_eq!(
+                    selected,
+                    unsafe { dear_imgui_rs::sys::igGetWindowDrawList() },
+                    "{caller} returned a draw list other than the editor's host"
+                );
+                Some(draw(draw_list))
+            })
+        })
     }
 
     #[doc(alias = "GetStyle")]
@@ -234,7 +262,7 @@ impl NodeToken<'_> {
     pub fn pin<R>(&self, pin: PinId, kind: PinKind, f: impl FnOnce(&PinToken<'_>) -> R) -> R {
         self.scope
             .frame
-            .scoped(|| unsafe { self.begin_pin(pin, kind) }, f)
+            .scoped(|| unsafe { self.begin_pin(pin, kind) }, |token| f(token))
     }
 
     pub fn end(self) {}
@@ -295,7 +323,7 @@ pub struct GroupHintToken<'a> {
     scope: FrameToken<'a>,
 }
 
-impl<'a> GroupHintToken<'a> {
+impl GroupHintToken<'_> {
     pub fn min(&self) -> [f32; 2] {
         self.scope.frame.with_canvas("GroupHintToken::min()", || {
             from_vec2(unsafe { sys::dne_get_group_min() })
@@ -308,22 +336,35 @@ impl<'a> GroupHintToken<'a> {
         })
     }
 
-    pub fn foreground_draw_list(&self) -> DrawListMut<'_> {
+    /// Selects the foreground hint channel until the draw-list borrow ends.
+    ///
+    /// ```compile_fail
+    /// # use dear_node_editor::GroupHintToken;
+    /// fn overlap(hint: &mut GroupHintToken<'_>) {
+    ///     hint.with_foreground_draw_list(|_| hint.with_background_draw_list(|_| {}));
+    /// }
+    /// ```
+    pub fn with_foreground_draw_list<R>(&mut self, draw: impl FnOnce(&DrawListMut<'_>) -> R) -> R {
         self.scope
             .frame
-            .with_canvas("GroupHintToken::foreground_draw_list()", || unsafe {
-                sys::dne_get_hint_foreground_draw_list()
-            });
-        self.scope.frame._ui.get_window_draw_list()
+            .with_channel_draw_list(
+                "GroupHintToken::with_foreground_draw_list()",
+                || unsafe { sys::dne_get_hint_foreground_draw_list() },
+                draw,
+            )
+            .expect("active group hint returned no foreground draw list")
     }
 
-    pub fn background_draw_list(&self) -> DrawListMut<'_> {
+    /// Draw on the background channel of the active group hint.
+    pub fn with_background_draw_list<R>(&mut self, draw: impl FnOnce(&DrawListMut<'_>) -> R) -> R {
         self.scope
             .frame
-            .with_canvas("GroupHintToken::background_draw_list()", || unsafe {
-                sys::dne_get_hint_background_draw_list()
-            });
-        self.scope.frame._ui.get_window_draw_list()
+            .with_channel_draw_list(
+                "GroupHintToken::with_background_draw_list()",
+                || unsafe { sys::dne_get_hint_background_draw_list() },
+                draw,
+            )
+            .expect("active group hint returned no background draw list")
     }
 
     pub fn end(self) {}

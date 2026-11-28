@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 
-use dear_imgui_rs::{NumericFormat, NumericFormatError};
+use dear_imgui_rs::{ContextError, NumericFormat};
 
 /// A validated floating-point format for ImPlot values.
 ///
@@ -75,11 +75,11 @@ impl FromStr for FloatFormat<'static> {
 }
 
 /// Describes why an ImPlot floating-point format was rejected.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum FloatFormatError {
     /// The C-style numeric directive is invalid for a promoted `double` value.
-    Numeric(NumericFormatError),
+    Numeric(ContextError),
     /// ImPlot forwards the complete string to a locale-sensitive native formatter.
     NonAscii { byte_offset: usize },
 }
@@ -105,8 +105,8 @@ impl std::error::Error for FloatFormatError {
     }
 }
 
-impl From<NumericFormatError> for FloatFormatError {
-    fn from(error: NumericFormatError) -> Self {
+impl From<ContextError> for FloatFormatError {
+    fn from(error: ContextError) -> Self {
         Self::Numeric(error)
     }
 }
@@ -191,7 +191,7 @@ impl FromStr for AxisFormat<'static> {
 }
 
 /// Describes why an ImPlot axis format was rejected.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum AxisFormatError {
     /// The underlying numeric format is invalid.

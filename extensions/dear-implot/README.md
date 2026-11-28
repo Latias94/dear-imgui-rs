@@ -106,12 +106,34 @@ passes a configured `PlotScope`. Use `with_plot_clip_rect` for clipped drawing
 and `LegendManager::with_popup` for a legend entry's ImGui controls. Context
 styles also use closures, such as `plot_ui.with_colormap(map, || { ... })`.
 
-Set next-plot limits on `PlotUi` before opening a plot. For live writeback,
-`PlotSetup::setup_axis_links` requires stable, distinct values until the plot
-ends, including unwinding. The wrapper clears the cached pointers after
-native writeback. `PlotUi::set_next_axis_links` also requires the values to
-survive while the links are pending. Clear pending links explicitly if the
-plot that would consume them is skipped. Both link methods are `unsafe`.
+Set next-plot limits on `PlotUi` before opening a plot. Use
+`PlotSetup::setup_axis_links` inside `with_plot_setup` to share a range between
+plots. Create the `Cell<f64>` values outside the setup closure so they live
+until the plot ends, including on unwind. ImPlot does not borrow these cells
+directly. Setup reads their values and the wrapper writes back the final valid
+limits after `EndPlot`. Non-finite values are ignored. An invalid range leaves
+the current limits unchanged.
+
+```rust,no_run
+use dear_implot::{Axis, PlotUi};
+use std::cell::Cell;
+
+fn draw_linked_plots(plots: &PlotUi<'_>) {
+    let min = Cell::new(0.0);
+    let max = Cell::new(1.0);
+    for title in ["First", "Second"] {
+        plots.with_plot_setup(
+            title,
+            [240.0, 180.0],
+            |setup| setup.setup_axis_links(Axis::X1, Some(&min), Some(&max)),
+            |plot| plot.plot_line("series", &[0.0, 1.0], &[0.0, 1.0]),
+        );
+    }
+}
+```
+
+Axis limits must be increasing and have a finite width. Use
+`AxisFlags::INVERT` to reverse the display direction.
 
 ### Validated numeric formats
 

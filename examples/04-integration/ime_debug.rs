@@ -120,16 +120,15 @@ impl AppWindow {
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
         // Create window and WGPU surface using the shared helper
         let window: Arc<Window> = Arc::new(
-            event_loop
-                .create_window(
-                    Window::default_attributes()
-                        .with_title("Dear ImGui IME Debug (winit + WGPU)")
-                        .with_inner_size(LogicalSize::new(960.0, 540.0)),
-                )?
-                .into(),
+            event_loop.create_window(
+                Window::default_attributes()
+                    .with_title("Dear ImGui IME Debug (winit + WGPU)")
+                    .with_inner_size(LogicalSize::new(960.0, 540.0)),
+            )?,
         );
 
-        let (device, queue, surface, surface_desc) = wgpu_init::init_wgpu_for_window(&window)?;
+        let (device, queue, surface, surface_desc) =
+            wgpu_init::init_wgpu_for_window(event_loop, &window)?;
 
         // ImGui + winit platform
         let mut context = Context::create();
@@ -266,12 +265,12 @@ impl AppWindow {
 
                 ui.separator();
                 ui.text("IO / backend state:");
-                ui.bullet_text(&format!("io.want_text_input = {}", io.want_text_input()));
-                ui.bullet_text(&format!(
+                ui.bullet_text(format!("io.want_text_input = {}", io.want_text_input()));
+                ui.bullet_text(format!(
                     "io.want_capture_keyboard = {}",
                     io.want_capture_keyboard()
                 ));
-                ui.bullet_text(&format!(
+                ui.bullet_text(format!(
                     "ime_enabled() = {}",
                     self.imgui.platform.ime_enabled()
                 ));
@@ -314,7 +313,7 @@ impl AppWindow {
             });
 
         // Let the platform backend update IME/cursor state based on the UI we just built.
-        self.imgui.platform.prepare_render(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(ui, &self.window)?;
         if let Some(error) = ime_error {
             return Err(error.into());
         }

@@ -114,6 +114,10 @@ impl<'ui> Plot3DScope<'ui> {
     /// }
     /// ```
     #[must_use = "surface plot errors must be handled"]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Retains the public flattened-grid call with explicit inputs, dimensions, and scale"
+    )]
     pub fn surface_f32_flat<S: AsRef<str>>(
         &self,
         label: S,
@@ -165,6 +169,10 @@ impl<'ui> Plot3DScope<'ui> {
     /// }
     /// ```
     #[must_use = "surface plot errors must be handled"]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Preserves the explicit native inputs, dimensions, scale, and layout at the unsafe boundary"
+    )]
     pub unsafe fn surface_f32_raw<S: AsRef<str>>(
         &self,
         label: S,
@@ -182,7 +190,13 @@ impl<'ui> Plot3DScope<'ui> {
         let shape = SurfaceGridShape::checked(x_count, y_count)?.validate_layout(flags, layout)?;
         unsafe {
             submit_surface_raw(
-                self, label, xs, ys, zs, shape, scale_min, scale_max, flags, layout,
+                self,
+                label,
+                [xs, ys, zs],
+                shape,
+                [scale_min, scale_max],
+                flags,
+                layout,
             )
         }
     }

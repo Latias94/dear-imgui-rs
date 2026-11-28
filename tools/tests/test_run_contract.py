@@ -136,33 +136,18 @@ class ContractRunnerTests(unittest.TestCase):
         self.assertIn("prebuilt,test-engine", observed["command"])
         self.assertFalse(observed["fixture"].exists())
 
-    def test_clippy_places_only_explicit_allowances_after_deny_warnings(self):
-        with (
-            patch.dict(
-                os.environ,
-                {"CLIPPY_HISTORICAL_LINTS": "-A dead_code -A clippy::needless_borrow"},
-            ),
-            patch.object(CONTRACTS, "run") as runner,
-        ):
+    def test_clippy_denies_all_warnings(self):
+        with patch.object(CONTRACTS, "run") as runner:
             CONTRACTS.run_clippy(("--", "-p", "dear-imgui-rs", "--lib"))
 
-        command = tuple(runner.call_args.args[0])
-        self.assertEqual(command[:2], ("cargo", "clippy"))
-        divider = command.index("--")
-        self.assertEqual(command[divider + 1 : divider + 3], ("-D", "warnings"))
         self.assertEqual(
-            command[divider + 3 :],
-            ("-A", "dead_code", "-A", "clippy::needless_borrow"),
+            tuple(runner.call_args.args[0]),
+            ("cargo", "clippy", "-p", "dear-imgui-rs", "--lib", "--", "-D", "warnings"),
         )
 
-    def test_clippy_rejects_non_allowance_flags(self):
-        with (
-            patch.dict(os.environ, {"CLIPPY_HISTORICAL_LINTS": "-W dead_code"}),
-            self.assertRaisesRegex(
-                CONTRACTS.VerificationError, "may contain only -A allowances"
-            ),
-        ):
-            CONTRACTS.run_clippy(("--", "--workspace"))
+    def test_clippy_rejects_a_second_delimiter(self):
+        with self.assertRaisesRegex(CONTRACTS.VerificationError, "owns the Clippy"):
+            CONTRACTS.run_clippy(("--", "--workspace", "--", "-A", "dead_code"))
 
     def test_release_notes_use_the_validated_workspace_version(self):
         with TemporaryDirectory() as temporary:

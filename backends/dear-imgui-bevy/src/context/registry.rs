@@ -1,9 +1,10 @@
+use dear_imgui_rs::error::context::Operation;
 use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroU64;
 
 use bevy_ecs::message::Message;
-use dear_imgui_rs::{Context, ContextId, SuspendedContext};
+use dear_imgui_rs::{Context, ContextId, FrameLifecycleState};
 
 use super::lifecycle::ImguiAppLifecycle;
 use super::{
@@ -180,27 +181,27 @@ pub enum ImguiContextError {
     TeardownInProgress { context_id: ContextId },
     /// Raw Context mutation was requested while its UI frame was live.
     RawMutationWhileFrameOpen { context_id: ContextId },
-    /// A temporary active-Context scope could not be entered or completed.
-    ScopedActivation {
+    /// A scoped Context operation could not be entered or completed.
+    ContextScope {
         context_id: ContextId,
         source: super::ImguiContextScopeError,
     },
     /// The legacy/headless font-atlas capability could not be acquired before opening a frame.
     FontAtlasMode {
         context_id: ContextId,
-        source: dear_imgui_rs::FontAtlasModeError,
+        source: dear_imgui_rs::FontError,
     },
     /// Managed renderer admission failed before backend fields were mutated.
     #[cfg(feature = "render")]
     RendererAdmission {
         context_id: ContextId,
-        source: dear_imgui_rs::render::RendererConsumerError,
+        source: dear_imgui_rs::FrameError,
     },
     /// Device recovery could not reset this Context's renderer generation.
     #[cfg(feature = "render")]
     RendererRecovery {
         context_id: ContextId,
-        source: dear_imgui_rs::render::RendererConsumerError,
+        source: dear_imgui_rs::FrameError,
     },
     /// Renderer fields changed after this backend acquired them.
     #[cfg(feature = "render")]
@@ -212,19 +213,19 @@ pub enum ImguiContextError {
     #[cfg(feature = "render")]
     RendererCompletion {
         context_id: ContextId,
-        source: dear_imgui_rs::render::RendererConsumerError,
+        source: dear_imgui_rs::FrameError,
     },
     /// Render-world delivery of a detached snapshot outcome failed for this Context.
     #[cfg(feature = "render")]
     SnapshotCommit {
         context_id: ContextId,
-        source: dear_imgui_rs::render::snapshot::SnapshotCommitError,
+        source: dear_imgui_rs::FrameError,
     },
     /// The completed Dear ImGui frame could not be captured for the render world.
     #[cfg(feature = "render")]
     SnapshotCapture {
         context_id: ContextId,
-        source: dear_imgui_rs::render::snapshot::SnapshotError,
+        source: dear_imgui_rs::FrameError,
     },
     /// Native viewport callbacks or their deferred command bridge failed for this Context.
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -243,7 +244,7 @@ pub enum ImguiContextError {
     /// Native multi-viewport was requested, but this build cannot provide native windows.
     NativeMultiViewportUnavailable { context_id: ContextId },
     /// Core Context construction failed.
-    ContextCreation(dear_imgui_rs::ImGuiError),
+    ContextCreation(dear_imgui_rs::ContextError),
     /// The registry exhausted its monotonic slot generations.
     ContextGenerationExhausted,
     /// Managed removal was requested before the plugin installed its retirement queue.
@@ -256,14 +257,14 @@ pub enum ImguiContextError {
 }
 
 impl ImguiContextError {
-    pub(crate) fn from_scoped_activation<E>(
+    pub(crate) fn from_context_operation<E>(
         context_id: ContextId,
-        error: dear_imgui_rs::ScopedActivationError<E>,
+        error: Operation<E>,
         map_closure: impl FnOnce(E) -> Self,
     ) -> Self {
-        match super::backend_contract::separate_scoped_error(error) {
-            Ok(source) => Self::ScopedActivation { context_id, source },
-            Err(error) => map_closure(error),
+        match error.into_closure_error() {
+            Ok(error) => map_closure(error),
+            Err(source) => Self::ContextScope { context_id, source },
         }
     }
 }
@@ -305,9 +306,9 @@ impl fmt::Display for ImguiContextError {
                 formatter,
                 "Context {context_id:?} cannot be configured while its Ui is live"
             ),
-            Self::ScopedActivation { context_id, source } => write!(
+            Self::ContextScope { context_id, source } => write!(
                 formatter,
-                "Context {context_id:?} could not complete an active access scope: {source}"
+                "Context {context_id:?} could not complete a scoped operation: {source}"
             ),
             Self::FontAtlasMode { context_id, source } => write!(
                 formatter,
@@ -396,7 +397,7 @@ impl std::error::Error for ImguiContextError {
             Self::SnapshotCapture { source, .. } => Some(source),
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
             Self::ViewportBridge { source, .. } => Some(source),
-            Self::ScopedActivation { source, .. } => Some(source),
+            Self::ContextScope { source, .. } => Some(source),
             Self::FontAtlasMode { source, .. } => Some(source),
             Self::ContextCreation(error) => Some(error),
             Self::PassRegistry(error) => Some(error),
@@ -406,14 +407,14 @@ impl std::error::Error for ImguiContextError {
     }
 }
 
-/// Admission failure that returns ownership of the rejected suspended Context.
+/// Admission failure that returns ownership of the rejected Context.
 pub struct ImguiContextAdmissionError {
     inner: Box<ImguiContextAdmissionFailure>,
 }
 
 struct ImguiContextAdmissionFailure {
     error: ImguiContextError,
-    context: SuspendedContext,
+    context: Context,
 }
 
 impl ImguiContextAdmissionError {
@@ -423,17 +424,30 @@ impl ImguiContextAdmissionError {
         &self.inner.error
     }
 
-    /// Recover the rejected suspended Context.
+    /// Recover the rejected Context.
     #[must_use]
-    pub fn into_context(self) -> SuspendedContext {
+    pub fn into_context(self) -> Context {
         let ImguiContextAdmissionFailure { context, .. } = *self.inner;
         context
     }
 
-    pub(crate) fn new(error: ImguiContextError, context: SuspendedContext) -> Self {
+    pub(crate) fn new(error: ImguiContextError, context: Context) -> Self {
         Self {
             inner: Box::new(ImguiContextAdmissionFailure { error, context }),
         }
+    }
+
+    pub(super) fn require_idle(context: Context) -> Result<Context, Self> {
+        if context.frame_lifecycle_state() == FrameLifecycleState::InFrame {
+            return Err(Self::new(
+                ImguiContextError::ContextScope {
+                    context_id: context.id(),
+                    source: super::ImguiContextScopeError::FrameAlreadyOpen,
+                },
+                context,
+            ));
+        }
+        Ok(context)
     }
 
     fn into_error(self) -> ImguiContextError {
@@ -482,9 +496,9 @@ pub(crate) struct ContextSlot {
 
 /// Main-thread registry that owns all Bevy-managed Dear ImGui Contexts.
 ///
-/// Slots retain Contexts as [`SuspendedContext`] owners. The private driver removes one owner at a
-/// time before activating it, so running a private pass never overlaps a registry borrow with a
-/// live Dear ImGui `Ui`.
+/// Slots own [`Context`] values. The private driver takes one owner at a time and temporarily
+/// binds its Context, so running a private pass never overlaps a registry borrow with a live
+/// Dear ImGui `Ui`.
 pub struct ImguiContexts {
     lifecycle: ImguiAppLifecycle,
     pass_registry_id: u64,
@@ -499,7 +513,7 @@ pub struct ImguiContexts {
 
 impl ImguiContexts {
     pub(crate) fn with_primary(
-        primary: SuspendedContext,
+        primary: Context,
         pass: ImguiPass<ImguiPrimaryPass>,
         lifecycle: ImguiAppLifecycle,
     ) -> Self {
@@ -617,21 +631,23 @@ impl ImguiContexts {
             .ok_or(ImguiContextError::UnknownContext { context_id })
     }
 
-    /// Create and insert an independent suspended Context.
+    /// Create and insert an independent Context.
     pub fn create(&mut self, config: ImguiContextConfig) -> Result<ContextId, ImguiContextError> {
         self.ensure_active()?;
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
         }
-        let context = SuspendedContext::try_create().map_err(ImguiContextError::ContextCreation)?;
-        self.insert_suspended(context, config)
+        let context = Context::try_create().map_err(ImguiContextError::ContextCreation)?;
+        self.insert_context(context, config)
             .map_err(ImguiContextAdmissionError::into_error)
     }
 
-    /// Insert an existing suspended Context without sharing a managed font atlas implicitly.
-    pub fn insert_suspended(
+    /// Take ownership of an existing Context without sharing a managed font atlas implicitly.
+    ///
+    /// A Context with an open frame is returned to the caller without ending its frame.
+    pub fn insert_context(
         &mut self,
-        context: SuspendedContext,
+        context: Context,
         config: ImguiContextConfig,
     ) -> Result<ContextId, ImguiContextAdmissionError> {
         if let Err(error) = self.ensure_active() {
@@ -668,6 +684,7 @@ impl ImguiContexts {
             ));
         }
 
+        let context = ImguiContextAdmissionError::require_idle(context)?;
         let generation = match self.allocate_slot_generation() {
             Ok(generation) => generation,
             Err(error) => return Err(ImguiContextAdmissionError::new(error, context)),
@@ -706,13 +723,13 @@ impl ImguiContexts {
         Ok(context_id)
     }
 
-    /// Admit a suspended Context and select it as primary in one transaction.
+    /// Admit a Context and select it as primary in one transaction.
     ///
     /// The previous primary remains registered under its existing pass. If admission fails, the
     /// registry is unchanged and the returned [`ImguiContextAdmissionError`] retains `context`.
     pub fn replace_primary(
         &mut self,
-        context: SuspendedContext,
+        context: Context,
         config: ImguiContextConfig,
     ) -> Result<ImguiPrimaryChange, ImguiContextAdmissionError> {
         if let Err(error) = self.ensure_active() {
@@ -726,12 +743,12 @@ impl ImguiContexts {
         }
         let current = context.id();
         let previous = self.primary;
-        self.insert_suspended(context, config)?;
+        self.insert_context(context, config)?;
         self.primary = Some(current);
         Ok(ImguiPrimaryChange { previous, current })
     }
 
-    /// Run an outside-frame configuration closure against one Context.
+    /// Run an outside-frame configuration closure with one Context temporarily current.
     ///
     /// A Context whose immediate removal is pending remains configurable so the integration that
     /// changed an owned backend field can restore it before [`Self::try_remove_immediately`] is
@@ -760,11 +777,9 @@ impl ImguiContexts {
             .as_mut()
             .ok_or(ImguiContextError::TeardownInProgress { context_id })?;
         owner
-            .try_with_active_context(|context| {
-                Ok::<_, std::convert::Infallible>(configure(context))
-            })
+            .try_with_current(|context| Ok::<_, std::convert::Infallible>(configure(context)))
             .map_err(|error| {
-                ImguiContextError::from_scoped_activation(context_id, error, |never| match never {})
+                ImguiContextError::from_context_operation(context_id, error, |never| match never {})
             })
     }
 
@@ -839,7 +854,7 @@ impl ImguiContexts {
         }
     }
 
-    /// Attempt synchronous teardown and return the suspended Context to the caller.
+    /// Attempt synchronous teardown and return the Context to the caller.
     ///
     /// This is an advanced retry-oriented escape hatch for integrations that must recover the
     /// native Context owner. A pending renderer or viewport acknowledgement returns
@@ -848,7 +863,7 @@ impl ImguiContexts {
     pub fn try_remove_immediately(
         &mut self,
         context_id: ContextId,
-    ) -> Result<SuspendedContext, ImguiContextError> {
+    ) -> Result<Context, ImguiContextError> {
         self.ensure_active()?;
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
@@ -876,7 +891,7 @@ impl ImguiContexts {
         Ok(slot
             .owner
             .expect("removed Context slot must retain its owner")
-            .into_suspended())
+            .into_context())
     }
 
     /// Validate every registered Context before terminal shutdown commits world changes.
@@ -1013,18 +1028,18 @@ impl ImguiContexts {
             .expect("a ready Context slot must retain its owner");
         match owner.try_recover_renderer() {
             Ok(()) => Ok(()),
-            Err(super::ImguiActiveRendererContextError::Operation(source)) => {
+            Err(super::ImguiRendererContextError::Operation(source)) => {
                 Err(ImguiContextError::RendererRecovery { context_id, source })
             }
-            Err(super::ImguiActiveRendererContextError::ContextScope(source)) => {
-                Err(ImguiContextError::ScopedActivation { context_id, source })
+            Err(super::ImguiRendererContextError::ContextScope(source)) => {
+                Err(ImguiContextError::ContextScope { context_id, source })
             }
-            Err(super::ImguiActiveRendererContextError::RendererOwnership(source)) => {
+            Err(super::ImguiRendererContextError::RendererOwnership(source)) => {
                 slot.state = ContextSlotState::Teardown;
                 Err(ImguiContextError::RendererOwnership { context_id, source })
             }
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-            Err(super::ImguiActiveRendererContextError::ViewportBridge(source)) => {
+            Err(super::ImguiRendererContextError::ViewportBridge(source)) => {
                 slot.state = ContextSlotState::Teardown;
                 Err(ImguiContextError::ViewportBridge { context_id, source })
             }
@@ -1077,7 +1092,7 @@ impl ImguiContexts {
     pub(crate) fn record_renderer_completion_error(
         &mut self,
         context_id: ContextId,
-        source: dear_imgui_rs::render::RendererConsumerError,
+        source: dear_imgui_rs::FrameError,
     ) {
         let slot = self
             .slots
@@ -1112,7 +1127,7 @@ impl ImguiContexts {
     pub(crate) fn record_snapshot_commit_error(
         &mut self,
         context_id: ContextId,
-        source: dear_imgui_rs::render::snapshot::SnapshotCommitError,
+        source: dear_imgui_rs::FrameError,
     ) {
         let Some(slot) = self.slots.get_mut(&context_id) else {
             return;
@@ -1243,7 +1258,7 @@ mod retirement_generation_tests {
         let mut app = bevy_app::App::new();
         let primary_pass = super::super::pass::primary_pass(&mut app).unwrap();
         let lifecycle = super::super::pass::lifecycle(app.world());
-        let primary = SuspendedContext::create();
+        let primary = Context::create();
         let context_id = primary.id();
         let mut contexts = ImguiContexts::with_primary(primary, primary_pass, lifecycle);
         let stale = ImguiContextRetirementId::new(context_id, NonZeroU64::MIN);

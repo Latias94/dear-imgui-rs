@@ -1,11 +1,15 @@
-use crate::{GlBuffer, shaders::Shaders, texture::TextureRegistry, versions::GlVersion};
+use crate::{
+    GlBuffer, shaders::Shaders, state::BindProgramPipeline, texture::TextureRegistry,
+    versions::GlVersion,
+};
+use dear_imgui_backend_support::ManagedTextureTable;
 use dear_imgui_rs::ContextBinding;
-use dear_imgui_rs::render::{SnapshotTextureId, SynchronousRendererConsumer};
-use std::collections::HashMap;
-use std::ffi::c_void;
+use dear_imgui_rs::render::SynchronousRendererConsumer;
+use std::rc::Rc;
 
+use super::init::RendererPublication;
 use super::sampler::SamplerObjects;
-use super::texture::{ManagedTextureBinding, ManagedTextureTombstone};
+use super::texture::ManagedTextureBinding;
 
 /// Clip origin used by the application-owned OpenGL context.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -19,11 +23,7 @@ pub enum GlowClipOrigin {
     Auto,
 }
 
-/// Stable marker stored in `BackendRendererUserData` while Glow owns renderer state.
-#[derive(Debug, Default)]
-pub(super) struct GlowBackendUserData {
-    _marker: u8,
-}
+pub(super) type ActivateGlContext = Box<dyn Fn() -> Result<(), String>>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RendererStateFault {
@@ -44,10 +44,11 @@ impl RendererStateFault {
 
 /// Main renderer for Dear ImGui using Glow (OpenGL)
 ///
-/// This renderer provides a unified API similar to the WGPU backend while maintaining
-/// flexibility for advanced use cases. It can retain a Glow function table and own texture
-/// resources (simple usage) or borrow the function table on each operation (advanced usage).
-/// It never owns or switches the native OpenGL context.
+/// On native platforms, [`Self::with_owned_context`] retains the application-provided context
+/// owner and uses it to make the correct context current for automatic resource release.
+/// [`Self::new`] and [`Self::with_shared_context`] retain a Glow function table, and
+/// [`Self::with_external_context`] borrows it per operation. When the application manages the
+/// native current context directly, it also arranges explicit shutdown.
 pub struct GlowRenderer {
     // Core rendering state
     pub(super) shaders: Shaders,
@@ -59,20 +60,18 @@ pub struct GlowRenderer {
     pub(super) clip_origin: GlowClipOrigin,
     pub(super) has_separate_polygon_modes: bool,
     pub(super) has_sampler_object_support: bool,
+    pub(super) bind_program_pipeline: Option<BindProgramPipeline>,
 
     // Resource management
-    pub(super) gl_context: Option<std::rc::Rc<glow::Context>>, // None = externally managed
+    pub(super) gl_context: Option<Rc<glow::Context>>, // None = externally managed
+    pub(super) context_owner: Option<ActivateGlContext>,
     pub(super) context_binding: Option<ContextBinding>,
-    pub(super) backend_user_data: Box<GlowBackendUserData>,
-    pub(super) renderer_name_ptr: *const std::ffi::c_char,
-    pub(super) renderer_texture_max: [i32; 2],
+    pub(super) publication: Option<RendererPublication>,
     pub(super) renderer_state_fault: Option<RendererStateFault>,
     #[cfg(test)]
     pub(super) synthetic_test_renderer: bool,
     pub(super) texture_registry: TextureRegistry,
-    pub(super) managed_textures: HashMap<SnapshotTextureId, ManagedTextureBinding>,
-    /// Identities sealed by Destroy until a matching `Destroyed` outcome is acknowledged.
-    pub(super) destroyed_managed_textures: HashMap<SnapshotTextureId, ManagedTextureTombstone>,
+    pub(super) managed_textures: ManagedTextureTable<ManagedTextureBinding>,
     pub(super) renderer_consumer: Option<SynchronousRendererConsumer>,
     // Optional: enable GL_FRAMEBUFFER_SRGB during ImGui rendering
     pub(super) framebuffer_srgb: bool,
@@ -127,6 +126,24 @@ impl GlowRenderer {
         self.has_sampler_object_support
     }
 
+    /// Supplies a native OpenGL binding function for preserving program pipeline state.
+    ///
+    /// Use `glBindProgramPipeline` for core or ARB support, or `glBindProgramPipelineEXT` for
+    /// an OpenGL ES context that exposes only `GL_EXT_separate_shader_objects`. Glow does not
+    /// expose this entry point. The renderer uses it only on contexts with pipeline support.
+    ///
+    /// # Safety
+    ///
+    /// `bind` must be the corresponding GL entry point from the application's context loader.
+    /// It must remain valid for all supported contexts used by this renderer, including viewports.
+    #[cfg(any(not(target_family = "wasm"), target_os = "emscripten"))]
+    pub unsafe fn set_bind_program_pipeline(
+        &mut self,
+        bind: Option<unsafe extern "system" fn(u32)>,
+    ) {
+        self.bind_program_pipeline = bind;
+    }
+
     pub(super) fn device_objects_ready(&self) -> bool {
         self.shaders.program.is_some()
             && self.vbo_handle.is_some()
@@ -134,9 +151,25 @@ impl GlowRenderer {
             && (!self.has_sampler_object_support || self.samplers.is_some())
     }
 
-    pub(super) fn backend_user_data_ptr(&self) -> *mut c_void {
-        std::ptr::from_ref(self.backend_user_data.as_ref())
-            .cast_mut()
-            .cast()
+    pub(super) fn has_owned_gl_cleanup(&self) -> bool {
+        // In browser WebGL, the retained Glow table owns a WebGL rendering context object.
+        self.context_owner.is_some()
+            || (cfg!(all(target_family = "wasm", not(target_os = "emscripten")))
+                && self.gl_context.is_some())
+    }
+
+    pub(super) fn activate_gl_context(&self, gl: &glow::Context) -> crate::RenderResult<()> {
+        if self.has_owned_gl_cleanup()
+            && !self
+                .gl_context
+                .as_deref()
+                .is_some_and(|owned| std::ptr::eq(owned, gl))
+        {
+            return Err(crate::RenderError::GlContextMismatch);
+        }
+        if let Some(activate) = &self.context_owner {
+            activate().map_err(crate::RenderError::ActivateGlContext)?;
+        }
+        Ok(())
     }
 }

@@ -25,7 +25,9 @@ pub(crate) use cleanup::ManagedRequestOutcome;
 pub(crate) use manager::WgpuTextureManager;
 pub(crate) use resource::OwnedWgpuTexture;
 #[cfg(test)]
-pub(crate) use tests::{external_test_texture, request_test_device};
+pub(crate) use tests::{
+    external_test_texture, request_test_device, request_test_device_and_adapter,
+};
 
 /// Opaque handle for an application-owned WGPU texture view registered with a renderer.
 ///

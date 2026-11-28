@@ -16,10 +16,9 @@ mod window_registry;
 pub(crate) mod window_render_lease;
 mod window_state;
 
-use dear_imgui_rs::{
-    ContextAttachmentError, ContextBindingError, ContextPlatformAttachmentReleaseError,
-    ContextPlatformWindowTeardownError,
-};
+use std::sync::Arc;
+
+use dear_imgui_rs::ContextError;
 use thiserror::Error;
 
 pub use event_outcome::{
@@ -49,12 +48,6 @@ pub use window_render_lease::WinitWindowRenderLease;
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 #[non_exhaustive]
 pub enum WinitPlatformError {
-    /// The Dear ImGui Context rejected the platform attachment.
-    #[error(transparent)]
-    Attachment(#[from] ContextAttachmentError),
-    /// The process-wide native window registration identity space was exhausted.
-    #[error(transparent)]
-    NativeWindowIdentity(#[from] dear_imgui_rs::NativeWindowIdentityExhausted),
     /// The application supplied invalid bounded native creation settings.
     #[error("invalid Winit window configuration `{field}`: {reason}")]
     InvalidWindowConfiguration {
@@ -76,15 +69,9 @@ pub enum WinitPlatformError {
     },
     #[error("engine pointer control is already active; cancel it before requesting another grab")]
     PointerControlAlreadyOwned,
-    /// The Context rejected release of the active platform attachment generation.
-    #[error(transparent)]
-    PlatformAttachmentRelease(#[from] ContextPlatformAttachmentReleaseError),
     /// The originating Dear ImGui Context can no longer be entered normally.
     #[error(transparent)]
-    Context(#[from] ContextBindingError),
-    /// Dear ImGui rejected an explicit platform-window teardown transaction.
-    #[error(transparent)]
-    PlatformWindowTeardown(#[from] ContextPlatformWindowTeardownError),
+    Context(#[from] WinitContextFailure),
     /// The supplied Context is not the Context owned by this platform backend.
     #[error("the Winit platform backend belongs to a different Dear ImGui context")]
     ContextMismatch,
@@ -199,15 +186,69 @@ pub enum WinitPlatformError {
     InjectedConstructionFailure { stage: &'static str },
 }
 
+impl From<ContextError> for WinitPlatformError {
+    fn from(error: ContextError) -> Self {
+        Self::Context(WinitContextFailure(Arc::new(error)))
+    }
+}
+
+/// The original Context failure, shared by terminal fault reports.
+///
+/// Binding and attachment contract failures compare by value. Errors carrying more complex
+/// diagnostics compare by identity, so a cloned report compares equal without erasing its source.
+#[derive(Clone, Debug, Error)]
+#[error("{0}")]
+pub struct WinitContextFailure(#[source] Arc<ContextError>);
+
+impl WinitContextFailure {
+    /// Returns the source error from Dear ImGui.
+    pub fn context_error(&self) -> &ContextError {
+        &self.0
+    }
+}
+
+impl PartialEq for WinitContextFailure {
+    fn eq(&self, other: &Self) -> bool {
+        if Arc::ptr_eq(&self.0, &other.0) {
+            return true;
+        }
+        match (self.context_error(), other.context_error()) {
+            (ContextError::Binding(left), ContextError::Binding(right)) => left == right,
+            (
+                ContextError::AttachmentRoleOccupied(left),
+                ContextError::AttachmentRoleOccupied(right),
+            ) => left == right,
+            (ContextError::ContextDropping, ContextError::ContextDropping)
+            | (ContextError::DuplicateAttachment, ContextError::DuplicateAttachment)
+            | (ContextError::MissingPlatformAttachment, ContextError::MissingPlatformAttachment)
+            | (ContextError::PlatformReleaseInProgress, ContextError::PlatformReleaseInProgress)
+            | (ContextError::RendererAttachmentActive, ContextError::RendererAttachmentActive)
+            | (
+                ContextError::PlatformAttachmentInactive,
+                ContextError::PlatformAttachmentInactive,
+            )
+            | (ContextError::NotPlatformAttachment, ContextError::NotPlatformAttachment)
+            | (
+                ContextError::PlatformGenerationMismatch,
+                ContextError::PlatformGenerationMismatch,
+            )
+            | (
+                ContextError::NativeWindowIdentityExhausted,
+                ContextError::NativeWindowIdentityExhausted,
+            ) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for WinitContextFailure {}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::{CStr, CString};
     use std::rc::Rc;
 
-    use dear_imgui_rs::{
-        BackendFlags, Context, ContextAttachment, ContextAttachmentRole,
-        ContextPlatformAttachmentReleaseError,
-    };
+    use dear_imgui_rs::{BackendFlags, Context, ContextAttachment, ContextAttachmentRole};
     use winit::event::{Event, WindowEvent};
 
     use super::ownership::{
@@ -262,9 +303,8 @@ mod tests {
 
         assert!(matches!(
             platform.shutdown(&mut context),
-            Err(WinitPlatformError::PlatformAttachmentRelease(
-                ContextPlatformAttachmentReleaseError::RendererActive
-            ))
+            Err(WinitPlatformError::Context(error))
+                if matches!(error.context_error(), dear_imgui_rs::ContextError::RendererAttachmentActive)
         ));
         assert_eq!(
             unsafe { (*io).BackendPlatformUserData },
@@ -272,7 +312,7 @@ mod tests {
         );
         assert!(platform.control.attachment_handle().unwrap().is_attached());
 
-        assert_eq!(renderer.detach(), Ok(true));
+        assert!(renderer.detach().unwrap());
         platform.shutdown(&mut context).unwrap();
     }
 
@@ -297,7 +337,7 @@ mod tests {
             control.token_ptr()
         );
         assert!(control.attachment_handle().unwrap().is_attached());
-        assert_eq!(renderer.detach(), Ok(true));
+        assert!(renderer.detach().unwrap());
         drop(context);
         assert_eq!(control.state.get(), PlatformState::ContextDestroyed);
     }

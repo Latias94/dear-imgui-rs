@@ -1,10 +1,5 @@
 //! Vulkan (Ash) renderer implementation.
 
-#[cfg(all(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-compile_error!(
-    "dear-imgui-ash cannot enable both `multi-viewport-winit` and `multi-viewport-sdl3`; select one platform surface adapter"
-);
-
 #[cfg(doctest)]
 mod removed_renderer_api_contracts {
     /// ```compile_fail
@@ -93,9 +88,9 @@ mod context_state;
 mod core;
 mod draw;
 mod lifecycle;
-#[cfg(all(feature = "multi-viewport-winit", not(feature = "multi-viewport-sdl3")))]
+#[cfg(feature = "multi-viewport-winit")]
 pub mod multi_viewport;
-#[cfg(all(feature = "multi-viewport-sdl3", not(feature = "multi-viewport-winit")))]
+#[cfg(feature = "multi-viewport-sdl3")]
 pub mod multi_viewport_sdl3;
 mod options;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -107,36 +102,33 @@ mod tests;
 mod texture;
 mod uploads;
 mod vulkan;
-#[cfg(all(
-    any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"),
-    not(all(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))
-))]
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 mod vulkan_viewport;
 
 use crate::TextureUpdateResult;
 use crate::{RendererError, RendererResult};
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 use ash::Instance;
 use ash::{Device, vk};
-use dear_imgui_rs::Context;
+use dear_imgui_backend_support::ScopedRenderState as RendererRenderStateGuard;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 use dear_imgui_rs::ViewportFlags;
 use dear_imgui_rs::render::{
-    PendingFrame, ReconciledFrame, RendererRenderStateGuard, RendererRenderStateGuardError,
-    SnapshotTextureId, SynchronousRendererConsumer, TextureFeedback, TextureOp, TextureRequest,
-    TextureUploadIdentity, TextureUploadRect,
+    PendingFrame, ReconciledFrame, SnapshotTextureId, SynchronousRendererConsumer, TextureFeedback,
+    TextureOp, TextureRequest, TextureUploadRect,
 };
+use dear_imgui_rs::{Context, FrameError};
 use dear_imgui_rs::{TextureData, TextureFormat as ImGuiTextureFormat, TextureId, TextureStatus};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use self::allocator::{Allocate, Allocator, Memory};
-pub use self::callbacks::{AshRenderState, AshRenderStateAccessError};
+pub use self::callbacks::AshRenderState;
 use self::callbacks::{
     AshRenderStateStorage, draw_callback_reset_render_state, draw_callback_set_sampler_linear,
     draw_callback_set_sampler_nearest,
 };
 use self::context_state::RendererContextState;
 pub use self::core::AshRenderer;
+use self::core::RendererAllocator;
 use self::draw::Frames;
 #[cfg(feature = "dynamic-rendering")]
 pub use self::options::DynamicRendering;
@@ -148,32 +140,28 @@ pub use self::options::{AshRendererConfig, Options, RenderTarget};
     feature = "render-pass"
 ))]
 use self::pipeline::create_viewport_render_pass;
-#[cfg(all(
-    any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"),
-    not(all(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))
-))]
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 use self::pipeline::viewport_attachment_load_op;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 use self::pipeline::{ViewportPipeline, ViewportRenderTarget, is_srgb_format};
 pub use self::retirement::TextureRetirementBatch;
 use self::retirement::{RetirementQueue, RetirementRequest, RetirementReservation};
 use self::texture::TextureManager;
-use self::uploads::{
-    InFlightUpload, ManagedUploadDecision, ManagedUploadTracker, finish_destroy_upload_gate,
-};
+use self::uploads::{UploadRing, grown_buffer_capacity};
 use self::vulkan::*;
 
-fn map_renderer_render_state_error(error: RendererRenderStateGuardError) -> RendererError {
+fn map_renderer_render_state_error(error: FrameError) -> RendererError {
     match error {
-        RendererRenderStateGuardError::MissingPlatformIo => RendererError::InvalidRenderState(
+        FrameError::MissingPlatformIo => RendererError::InvalidRenderState(
             "bound Dear ImGui context has no PlatformIO".to_owned(),
         ),
-        RendererRenderStateGuardError::AlreadyOccupied => RendererError::InvalidRenderState(
+        FrameError::AlreadyOccupied => RendererError::InvalidRenderState(
             "Dear ImGui Renderer_RenderState is already occupied".to_owned(),
         ),
-        RendererRenderStateGuardError::Drift => RendererError::RendererStateDrift {
+        FrameError::Drift => RendererError::RendererStateDrift {
             field: "Renderer_RenderState",
         },
+        error => RendererError::Frame(error),
     }
 }
 

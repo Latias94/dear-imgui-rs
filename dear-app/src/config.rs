@@ -120,11 +120,13 @@ impl WgpuConfig {
                 ..Self::default()
             },
             WgpuPreset::DownlevelCompatible => Self {
+                backends: wgpu::Backends::all(),
                 power_preference: wgpu::PowerPreference::None,
                 required_limits: wgpu::Limits::downlevel_defaults(),
                 ..Self::default()
             },
             WgpuPreset::SoftwareFallback => Self {
+                backends: wgpu::Backends::all(),
                 power_preference: wgpu::PowerPreference::None,
                 force_fallback_adapter: true,
                 required_limits: wgpu::Limits::downlevel_defaults(),
@@ -223,7 +225,7 @@ pub enum Theme {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppConfig, DockingConfig};
+    use super::{AppConfig, DockingConfig, WgpuConfig, WgpuPreset};
 
     #[test]
     fn default_app_does_not_enable_docking() {
@@ -239,5 +241,17 @@ mod tests {
         assert!(application_managed.full_viewport_host().is_none());
         assert!(full_viewport.is_enabled());
         assert!(full_viewport.full_viewport_host().is_some());
+    }
+
+    #[test]
+    fn downlevel_and_software_presets_include_gl_backend() {
+        assert_eq!(WgpuConfig::default().backends, wgpu::Backends::PRIMARY);
+        assert_eq!(
+            WgpuConfig::from_preset(WgpuPreset::DownlevelCompatible).backends,
+            wgpu::Backends::all()
+        );
+        let software = WgpuConfig::from_preset(WgpuPreset::SoftwareFallback);
+        assert_eq!(software.backends, wgpu::Backends::all());
+        assert!(software.force_fallback_adapter);
     }
 }

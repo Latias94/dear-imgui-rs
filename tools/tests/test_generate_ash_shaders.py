@@ -17,6 +17,12 @@ import generate_ash_shaders  # noqa: E402
 
 
 class EmbeddedShaderSourceTests(unittest.TestCase):
+    def test_fragment_decodes_vertex_rgb_before_texture_modulation(self) -> None:
+        source = (generate_ash_shaders.SHADER_ROOT / "shader.frag").read_text(encoding="utf-8")
+        self.assertIn("max(oColor.rgb, vec3(0.0))", source)
+        self.assertIn("greaterThan(rgb, vec3(0.04045))", source)
+        self.assertIn("finalColor = vec4(rgb, oColor.a) * texel", source)
+
     def test_shader_sources_use_canonical_lf_checkouts(self) -> None:
         for name in generate_ash_shaders.SHADERS:
             source = generate_ash_shaders.SHADER_ROOT / name

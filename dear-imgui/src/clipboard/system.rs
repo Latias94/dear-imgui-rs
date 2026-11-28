@@ -1,18 +1,6 @@
-use super::ClipboardBackend;
+use crate::error::context::ContextError;
 
-/// Failure to initialize or access the optional desktop text clipboard.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum SystemClipboardError {
-    #[error("system clipboard integration is unavailable on this target")]
-    UnsupportedPlatform,
-    #[error("failed to initialize the system clipboard: {0}")]
-    Initialization(String),
-    #[error("failed to read the system clipboard: {0}")]
-    Read(String),
-    #[error("failed to write the system clipboard: {0}")]
-    Write(String),
-}
+use super::ClipboardBackend;
 
 /// Optional desktop text clipboard adapter for both Winit and SDL applications.
 ///
@@ -34,39 +22,39 @@ pub struct SystemClipboard {
 }
 
 impl SystemClipboard {
-    pub fn new() -> Result<Self, SystemClipboardError> {
+    pub fn new() -> Result<Self, ContextError> {
         #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
         {
             let clipboard = arboard::Clipboard::new()
-                .map_err(|error| SystemClipboardError::Initialization(error.to_string()))?;
+                .map_err(|error| ContextError::ClipboardInitialization(Box::new(error)))?;
             Ok(Self { clipboard })
         }
         #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-        Err(SystemClipboardError::UnsupportedPlatform)
+        Err(ContextError::ClipboardUnsupportedPlatform)
     }
 
-    pub fn get_text(&mut self) -> Result<String, SystemClipboardError> {
+    pub fn get_text(&mut self) -> Result<String, ContextError> {
         #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
         {
             self.clipboard
                 .get_text()
-                .map_err(|error| SystemClipboardError::Read(error.to_string()))
+                .map_err(|error| ContextError::ClipboardRead(Box::new(error)))
         }
         #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-        Err(SystemClipboardError::UnsupportedPlatform)
+        Err(ContextError::ClipboardUnsupportedPlatform)
     }
 
-    pub fn set_text(&mut self, text: &str) -> Result<(), SystemClipboardError> {
+    pub fn set_text(&mut self, text: &str) -> Result<(), ContextError> {
         #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
         {
             self.clipboard
                 .set_text(text)
-                .map_err(|error| SystemClipboardError::Write(error.to_string()))
+                .map_err(|error| ContextError::ClipboardWrite(Box::new(error)))
         }
         #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
         {
             let _ = text;
-            Err(SystemClipboardError::UnsupportedPlatform)
+            Err(ContextError::ClipboardUnsupportedPlatform)
         }
     }
 }

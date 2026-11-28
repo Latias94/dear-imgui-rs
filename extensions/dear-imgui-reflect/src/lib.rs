@@ -5,7 +5,7 @@
 //! C++ ImReflect library.
 //!
 //! At a high level:
-//! - derive [`ImGuiReflect`](trait.ImGuiReflect.html) for your structs/enums;
+//! - derive [`trait@ImGuiReflect`] for your structs/enums;
 //! - keep a [`ReflectSession`] beside the owning Dear ImGui context;
 //! - import [`ImGuiReflectExt`], then create an [`Inspector`] each frame with
 //!   [`ImGuiReflectExt::inspector`] and call [`Inspector::input`];
@@ -96,7 +96,7 @@
 //!
 //! fn configure_reflect(
 //!     session: &mut reflect::ReflectSession,
-//! ) -> Result<(), reflect::imgui::NumericFormatError> {
+//! ) -> Result<(), reflect::imgui::ContextError> {
 //!     {
 //!         let s = session.settings_mut();
 //!         // Make all Vec<T> non-reorderable by default.
@@ -123,7 +123,7 @@
 //!
 //! fn configure_per_field(
 //!     session: &mut reflect::ReflectSession,
-//! ) -> Result<(), reflect::imgui::NumericFormatError> {
+//! ) -> Result<(), reflect::imgui::ContextError> {
 //!     {
 //!         let s = session.settings_mut();
 //!         // For Settings::weights, allow reordering only.
@@ -232,7 +232,7 @@
 //!             // Left side: list of enemies with selection.
 //!             ui.child_window("EnemyList")
 //!                 .size([200.0, 0.0])
-//!                 .build(ui, || {
+//!                 .build(|| {
 //!                     for (i, enemy) in self.enemies.iter().enumerate() {
 //!                         let label = format!("{i}: {}", enemy.name);
 //!                         if ui.selectable_config(&label)
@@ -249,7 +249,7 @@
 //!             // Right side: reflected editor for the selected enemy.
 //!             ui.child_window("EnemyInspector")
 //!                 .size([0.0, 0.0])
-//!                 .build(ui, || {
+//!                 .build(|| {
 //!                     if let Some(enemy) = self.enemies.get_mut(self.selected) {
 //!                         inspector.input("Enemy", enemy);
 //!                     } else {
@@ -280,6 +280,7 @@ use std::sync::Arc;
 pub use dear_imgui_rs as imgui;
 
 mod containers;
+mod numeric;
 mod response;
 mod session;
 mod settings;
@@ -310,16 +311,35 @@ pub use settings::{
 };
 pub use values::imgui_tuple_body;
 
+#[doc(hidden)]
+pub mod __private {
+    pub use super::numeric::{NumericWidget, render_numeric};
+    pub use super::values::{TextWidget, render_bool, render_enum_selection, render_text};
+}
+
 /// Trait for values that can render themselves as a single ImGui input widget.
 ///
 /// This is implemented for common primitive types and can be implemented
 /// manually for your own types. Most users will interact with
-/// [`ImGuiReflect`](trait.ImGuiReflect.html) instead of this trait directly.
+/// [`trait@ImGuiReflect`] instead of this trait directly.
 pub trait ImGuiValue {
     /// Draw a widget for this value.
     ///
     /// Returns `true` if the value was modified.
     fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool;
+
+    /// Draws this value with the effective settings for the enclosing member.
+    ///
+    /// The default implementation delegates to [`Self::imgui_value`]. Built-in
+    /// editors use this hook to layer member overrides on top of session defaults.
+    fn imgui_value_with_member(
+        inspector: &mut Inspector<'_, '_>,
+        label: &str,
+        value: &mut Self,
+        _member: Option<&MemberSettings>,
+    ) -> bool {
+        Self::imgui_value(inspector, label, value)
+    }
 }
 
 /// Trait for complex types (structs/enums) that can generate ImGui controls

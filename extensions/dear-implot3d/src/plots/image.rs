@@ -74,8 +74,7 @@ impl<'a, T: Into<TextureRef<'a>> + Copy> Plot3D for Image3DByAxes<'a, T> {
             .uv(self.uv0, self.uv1)
             .tint(self.tint)
             .flags(self.flags)
-            .plot();
-        Ok(())
+            .try_plot()
     }
 }
 
@@ -153,7 +152,6 @@ impl<'a, T: Into<TextureRef<'a>> + Copy> Plot3D for Image3DByCorners<'a, T> {
             .uvs(self.uv0, self.uv1, self.uv2, self.uv3)
             .tint(self.tint)
             .flags(self.flags)
-            .plot();
-        Ok(())
+            .try_plot()
     }
 }

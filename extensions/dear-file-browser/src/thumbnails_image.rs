@@ -1,13 +1,21 @@
-use image::GenericImageView;
+use std::fs::File;
+use std::io::{self, Cursor, Read};
+use std::path::Path;
+
 use image::imageops::FilterType;
+use image::{DynamicImage, ImageDecoder, ImageReader, Limits};
 
 use crate::{DecodedRgbaImage, ThumbnailProvider, ThumbnailRequest};
+
+const MAX_DECODE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_DIMENSION: u32 = 32_768;
 
 /// Default thumbnail decoder using the `image` crate.
 ///
 /// This provider:
-/// - reads `req.path` using `std::fs`,
-/// - decodes the file via `image::load_from_memory`,
+/// - accepts regular files with a `.png`, `.jpg`, or `.jpeg` extension (case insensitive),
+/// - reads up to the configured input size limit using `std::fs`,
+/// - checks dimensions and decoded pixel bytes before allocating the full image,
 /// - downscales to fit `req.max_size` (no upscaling),
 /// - returns an RGBA8 buffer.
 ///
@@ -18,12 +26,15 @@ use crate::{DecodedRgbaImage, ThumbnailProvider, ThumbnailRequest};
 pub struct ImageThumbnailProvider {
     /// Downscale filter.
     pub filter: FilterType,
+    /// Maximum input file size in bytes. Defaults to 32 MiB.
+    pub max_bytes: u64,
 }
 
 impl Default for ImageThumbnailProvider {
     fn default() -> Self {
         Self {
             filter: FilterType::Triangle,
+            max_bytes: 32 * 1024 * 1024,
         }
     }
 }
@@ -36,25 +47,100 @@ impl ImageThumbnailProvider {
 
     /// Create a provider with the given resize filter.
     pub fn with_filter(filter: FilterType) -> Self {
-        Self { filter }
+        Self {
+            filter,
+            ..Self::default()
+        }
     }
+}
+
+fn open_thumbnail(path: &Path) -> io::Result<File> {
+    #[cfg(unix)]
+    {
+        use rustix::fs::{Mode, OFlags, open};
+
+        let flags = OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC;
+        Ok(File::from(open(path, flags, Mode::empty())?))
+    }
+    #[cfg(not(unix))]
+    File::open(path)
+}
+
+fn rgba8_fits_decode_budget(width: u32, height: u32) -> bool {
+    let pixels = u64::from(width) * u64::from(height);
+    pixels
+        .checked_mul(4)
+        .is_some_and(|bytes| bytes <= MAX_DECODE_BYTES)
 }
 
 impl ThumbnailProvider for ImageThumbnailProvider {
     fn decode(&mut self, req: &ThumbnailRequest) -> Result<DecodedRgbaImage, String> {
-        let bytes =
-            std::fs::read(&req.path).map_err(|e| format!("read {}: {e}", req.path.display()))?;
-        let mut img = image::load_from_memory(&bytes)
-            .map_err(|e| format!("decode {}: {e}", req.path.display()))?;
+        let path = &req.path;
+        if !path.extension().is_some_and(|ext| {
+            ["png", "jpg", "jpeg"]
+                .into_iter()
+                .any(|allowed| ext.eq_ignore_ascii_case(allowed))
+        }) {
+            return Err(format!(
+                "unsupported thumbnail extension: {}",
+                path.display()
+            ));
+        }
+        let file = open_thumbnail(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+        let metadata = file
+            .metadata()
+            .map_err(|e| format!("inspect {}: {e}", path.display()))?;
+        if !metadata.is_file() {
+            return Err(format!("expected a regular file: {}", path.display()));
+        }
+        let too_large = || {
+            format!(
+                "thumbnail input exceeds {} bytes: {}",
+                self.max_bytes,
+                path.display()
+            )
+        };
+        if metadata.len() > self.max_bytes {
+            return Err(too_large());
+        }
+
+        let mut bytes = Vec::new();
+        // Bound the read even if the opened file grows after the metadata lookup.
+        file.take(self.max_bytes.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("read {}: {e}", path.display()))?;
+        if bytes.len() as u64 > self.max_bytes {
+            return Err(too_large());
+        }
+
+        let mut reader = ImageReader::new(Cursor::new(bytes))
+            .with_guessed_format()
+            .map_err(|e| format!("detect {}: {e}", path.display()))?;
+        let mut limits = Limits::default();
+        limits.max_image_width = Some(MAX_DIMENSION);
+        limits.max_image_height = Some(MAX_DIMENSION);
+        limits.max_alloc = Some(MAX_DECODE_BYTES);
+        reader.limits(limits);
+        let decoder = reader
+            .into_decoder()
+            .map_err(|e| format!("decode {}: {e}", path.display()))?;
+        let (width, height) = decoder.dimensions();
+        if decoder.total_bytes() > MAX_DECODE_BYTES || !rgba8_fits_decode_budget(width, height) {
+            return Err(format!(
+                "decoded thumbnail exceeds {MAX_DECODE_BYTES} bytes: {}",
+                path.display()
+            ));
+        }
 
         let max_w = req.max_size[0].max(1);
         let max_h = req.max_size[1].max(1);
-        let (w, h) = img.dimensions();
-        if w > max_w || h > max_h {
+        let mut img = DynamicImage::from_decoder(decoder)
+            .map_err(|e| format!("decode {}: {e}", path.display()))?;
+        if width > max_w || height > max_h {
             img = img.resize(max_w, max_h, self.filter);
         }
 
-        let rgba = img.to_rgba8();
+        let rgba = img.into_rgba8();
         Ok(DecodedRgbaImage {
             width: rgba.width(),
             height: rgba.height(),
@@ -66,6 +152,8 @@ impl ThumbnailProvider for ImageThumbnailProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs_ops::tests::TempDir;
+    use std::fs;
 
     #[test]
     fn decodes_and_downscales_png() {
@@ -82,20 +170,73 @@ mod tests {
         enc.write_image(&img, img.width(), img.height(), ColorType::Rgba8.into())
             .unwrap();
 
-        let dir = std::env::temp_dir().join("dear-file-browser-tests");
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("thumb_test.png");
-        std::fs::write(&path, &bytes).unwrap();
+        let temp = TempDir::new();
+        let path = temp.path().join("thumb_test.PNG");
+        fs::write(&path, &bytes).unwrap();
 
-        let mut p = ImageThumbnailProvider::default();
-        let out = p
-            .decode(&ThumbnailRequest {
-                path: path.clone(),
-                max_size: [8, 8],
-            })
+        let mut provider = ImageThumbnailProvider::new();
+        provider.max_bytes = bytes.len() as u64;
+        let out = provider
+            .decode(&ThumbnailRequest::new(path, [8, 8]))
             .unwrap();
         assert!(out.width <= 8);
         assert!(out.height <= 8);
         assert_eq!(out.rgba.len() as u32, out.width * out.height * 4);
+    }
+
+    #[test]
+    fn rejects_unsupported_extensions_before_accessing_the_file() {
+        let temp = TempDir::new();
+        let error = ImageThumbnailProvider::default()
+            .decode(&ThumbnailRequest::new(
+                temp.path().join("missing.txt"),
+                [8, 8],
+            ))
+            .unwrap_err();
+        assert!(error.starts_with("unsupported thumbnail extension"));
+    }
+
+    #[test]
+    fn rejects_files_over_the_default_size_limit_before_decoding() {
+        let temp = TempDir::new();
+        let path = temp.path().join("large.jpeg");
+        let max_bytes = 32 * 1024 * 1024;
+        File::create(&path).unwrap().set_len(max_bytes + 1).unwrap();
+        let mut provider = ImageThumbnailProvider::default();
+        assert_eq!(provider.max_bytes, max_bytes);
+        let error = provider
+            .decode(&ThumbnailRequest::new(path, [8, 8]))
+            .unwrap_err();
+        assert!(error.starts_with("thumbnail input exceeds 33554432 bytes"));
+    }
+
+    #[test]
+    fn rejects_rgba_sizes_over_the_budget_including_overflow() {
+        assert!(rgba8_fits_decode_budget(8_192, 4_096));
+        assert!(!rgba8_fits_decode_budget(8_192, 4_097));
+        assert!(!rgba8_fits_decode_budget(u32::MAX, u32::MAX));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn rejects_fifo_without_waiting_for_a_writer() {
+        use rustix::fs::{CWD, Mode, mkfifoat};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let temp = TempDir::new();
+        let path = temp.path().join("pipe.png");
+        mkfifoat(CWD, &path, Mode::RUSR | Mode::WUSR).unwrap();
+        let (finished, result) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = finished.send(
+                ImageThumbnailProvider::default().decode(&ThumbnailRequest::new(path, [8, 8])),
+            );
+        });
+        let error = result
+            .recv_timeout(Duration::from_secs(5))
+            .expect("thumbnail decoder blocked opening a FIFO")
+            .unwrap_err();
+        assert!(error.starts_with("expected a regular file"));
     }
 }

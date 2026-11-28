@@ -142,7 +142,7 @@ impl Places {
 
     /// Creates a places store with default groups and system entries.
     pub fn new() -> Self {
-        let mut p = Self { groups: Vec::new() };
+        let mut p = Self::empty();
         p.ensure_default_groups();
         p.refresh_system_places();
         p
@@ -178,27 +178,47 @@ impl Places {
 
     /// Rebuilds the system places group (home/root/drives).
     ///
-    /// This is a best-effort operation and may produce different results across
-    /// platforms.
+    /// On Windows this snapshots the assigned drive letters without probing
+    /// whether remote drives or removable media are reachable.
     pub fn refresh_system_places(&mut self) {
+        #[cfg(windows)]
+        let drives = {
+            use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
+
+            // SAFETY: This Win32 call takes no arguments and returns a drive bitmask.
+            windows_drive_places(unsafe { GetLogicalDrives() })
+        };
+        #[cfg(not(windows))]
+        let drives = std::iter::empty();
+        self.rebuild_system_places(home_dir(), drives);
+    }
+
+    fn rebuild_system_places(
+        &mut self,
+        home: Option<PathBuf>,
+        drives: impl Iterator<Item = Place>,
+    ) {
         let group = self.ensure_group_mut(Self::SYSTEM_GROUP);
         group.places.clear();
-
-        if let Some(home) = home_dir() {
-            group.places.push(Place::code("Home", home));
-        }
-
-        group.places.push(Place::code(
-            "Root",
-            PathBuf::from(std::path::MAIN_SEPARATOR.to_string()),
-        ));
-
-        #[cfg(target_os = "windows")]
+        let root = Place::code("Root", PathBuf::from(std::path::MAIN_SEPARATOR_STR));
+        for place in home
+            .map(|path| Place::code("Home", path))
+            .into_iter()
+            .chain([root])
+            .chain(drives)
         {
-            for d in windows_drives() {
-                group.places.push(Place::code(d.clone(), PathBuf::from(d)));
+            if !group
+                .places
+                .iter()
+                .any(|existing| existing.path == place.path)
+            {
+                group.places.push(place);
             }
         }
+    }
+
+    fn empty() -> Self {
+        Self { groups: Vec::new() }
     }
 
     /// Adds a place to a group if its path isn't already present in that group.
@@ -363,7 +383,7 @@ impl Places {
     /// Deserializes places from the compact format produced by
     /// [`Places::serialize_compact`].
     pub fn deserialize_compact(input: &str) -> Result<Self, PlacesDeserializeError> {
-        let mut places = Places { groups: Vec::new() };
+        let mut places = Self::empty();
         let mut version_ok = false;
 
         for (line_idx, raw_line) in input.lines().enumerate() {
@@ -597,16 +617,15 @@ fn home_dir() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
 }
 
-#[cfg(target_os = "windows")]
-fn windows_drives() -> Vec<String> {
-    let mut v = Vec::new();
-    for c in b'A'..=b'Z' {
-        let s = format!("{}:\\", c as char);
-        if Path::new(&s).exists() {
-            v.push(s);
-        }
-    }
-    v
+#[cfg(windows)]
+fn windows_drive_places(mask: u32) -> impl Iterator<Item = Place> {
+    (b'A'..=b'Z')
+        .enumerate()
+        .filter(move |(index, _)| mask & (1 << index) != 0)
+        .map(|(_, letter)| {
+            let label = format!("{}:\\", char::from(letter));
+            Place::code(label.clone(), PathBuf::from(label))
+        })
 }
 
 fn default_label_for_path(path: &Path) -> String {
@@ -677,6 +696,33 @@ impl std::error::Error for PlacesDeserializeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn cloned_system_places_keep_the_drive_snapshot_without_duplicate_paths() {
+        let mut places = Places::empty();
+        let home = PathBuf::from(r"C:\");
+        places.rebuild_system_places(
+            Some(home.clone()),
+            windows_drive_places((1 << 2) | (1 << 4)),
+        );
+        let snapshot = places.clone();
+        places.rebuild_system_places(None, windows_drive_places(0));
+
+        let system = snapshot
+            .groups
+            .iter()
+            .find(|g| g.label == Places::SYSTEM_GROUP)
+            .unwrap();
+        assert_eq!(
+            system.places,
+            [
+                Place::code("Home", home),
+                Place::code("Root", PathBuf::from(r"\")),
+                Place::code(r"E:\", PathBuf::from(r"E:\")),
+            ]
+        );
+    }
 
     #[test]
     fn add_bookmark_dedupes_by_path() {

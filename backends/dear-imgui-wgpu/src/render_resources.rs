@@ -39,23 +39,6 @@ impl RenderResources {
 
     /// Initialize render resources
     pub fn initialize(&mut self, device: &Device) -> RendererResult<()> {
-        #[cfg(feature = "wgpu-27")]
-        fn linear_mipmap_filter() -> FilterMode {
-            FilterMode::Linear
-        }
-        #[cfg(feature = "wgpu-27")]
-        fn nearest_mipmap_filter() -> FilterMode {
-            FilterMode::Nearest
-        }
-        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
-        fn linear_mipmap_filter() -> MipmapFilterMode {
-            MipmapFilterMode::Linear
-        }
-        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
-        fn nearest_mipmap_filter() -> MipmapFilterMode {
-            MipmapFilterMode::Nearest
-        }
-
         // Create linear texture sampler (matches imgui_impl_wgpu.cpp sampler setup)
         // Bilinear sampling is required for baked anti-aliased lines and rounded corners.
         // Set both NoBakedLines and NoBakedRoundCorners atlas flags before using
@@ -67,7 +50,7 @@ impl RenderResources {
             address_mode_w: AddressMode::ClampToEdge, // matches WGPUAddressMode_ClampToEdge
             mag_filter: FilterMode::Linear,           // matches WGPUFilterMode_Linear
             min_filter: FilterMode::Linear,           // matches WGPUFilterMode_Linear
-            mipmap_filter: linear_mipmap_filter(),    // matches WGPUMipmapFilterMode_Linear
+            mipmap_filter: MipmapFilterMode::Linear,  // matches WGPUMipmapFilterMode_Linear
             anisotropy_clamp: 1,                      // matches maxAnisotropy = 1
             ..Default::default()
         });
@@ -79,7 +62,7 @@ impl RenderResources {
             address_mode_w: AddressMode::ClampToEdge,
             mag_filter: FilterMode::Nearest,
             min_filter: FilterMode::Nearest,
-            mipmap_filter: nearest_mipmap_filter(),
+            mipmap_filter: MipmapFilterMode::Nearest,
             anisotropy_clamp: 1,
             ..Default::default()
         });

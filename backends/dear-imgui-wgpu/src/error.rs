@@ -147,19 +147,15 @@ pub enum RendererError {
 
     /// Context-owned renderer consumer state rejected the operation.
     #[error(transparent)]
-    RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
+    Frame(#[from] dear_imgui_rs::FrameError),
 
-    /// Managed frame finalization or texture-request capture failed.
+    /// Context attachment registration rejected the renderer's raw publication.
     #[error(transparent)]
-    FrameCapture(#[from] dear_imgui_rs::render::SnapshotError),
-
-    /// Context attachment registration rejected the renderer's deferred-drop cleanup hook.
-    #[error(transparent)]
-    ContextAttachment(#[from] dear_imgui_rs::ContextAttachmentError),
+    ContextAttachment(#[from] dear_imgui_rs::ContextError),
 
     /// A request was completed with the wrong feedback kind.
     #[error(transparent)]
-    TextureFeedback(#[from] dear_imgui_rs::render::TextureFeedbackError),
+    TextureFeedback(#[from] dear_imgui_rs::TextureError),
 }
 
 // Display and Error traits are automatically implemented by thiserror

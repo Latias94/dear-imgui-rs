@@ -4,18 +4,8 @@
 //!
 use crate::sys;
 use crate::ui::Ui;
+use crate::validation::{assert_finite_f32, assert_finite_vec2};
 use std::borrow::Cow;
-
-fn assert_finite_f32(caller: &str, name: &str, value: f32) {
-    assert!(value.is_finite(), "{caller} {name} must be finite");
-}
-
-fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
-    assert!(
-        value[0].is_finite() && value[1].is_finite(),
-        "{caller} {name} must contain finite values"
-    );
-}
 
 /// # Progress Bar Widgets
 impl Ui {
@@ -105,13 +95,9 @@ impl<'ui> ProgressBar<'ui> {
         assert_finite_vec2("ProgressBar::build()", "size", self.size);
 
         let size_vec: sys::ImVec2 = self.size.into();
-        let overlay_ptr = self
-            .overlay_text
-            .as_deref()
-            .map_or(std::ptr::null(), |txt| self.ui.scratch_txt(txt));
-
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igProgressBar(self.fraction, size_vec, overlay_ptr);
-        });
+        self.ui
+            .with_scratch_txt_opt(self.overlay_text.as_deref(), |overlay_ptr| unsafe {
+                sys::igProgressBar(self.fraction, size_vec, overlay_ptr);
+            });
     }
 }
