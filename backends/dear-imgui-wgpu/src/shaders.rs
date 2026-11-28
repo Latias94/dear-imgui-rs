@@ -59,12 +59,13 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = in.color * textureSample(u_texture, u_sampler, in.uv);
+    let rgb = max(color.rgb, vec3<f32>(0.0));
     if uniforms.gamma < 0.0 {
-        let low = color.rgb / 12.92;
-        let high = pow((color.rgb + 0.055) / 1.055, vec3<f32>(2.4));
-        return vec4<f32>(select(low, high, color.rgb > vec3<f32>(0.04045)), color.a);
+        let low = rgb / 12.92;
+        let high = pow((rgb + 0.055) / 1.055, vec3<f32>(2.4));
+        return vec4<f32>(select(low, high, rgb > vec3<f32>(0.04045)), color.a);
     }
-    let corrected = pow(color.rgb, vec3<f32>(uniforms.gamma));
+    let corrected = pow(rgb, vec3<f32>(uniforms.gamma));
     return vec4<f32>(corrected, color.a);
 }
 "#;

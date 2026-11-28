@@ -50,14 +50,17 @@ var imgui_sampler: sampler;
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.position = uniforms.mvp * vec4<f32>(in.position, 0.0, 1.0);
-    out.color = vec4<f32>(srgb_to_linear(in.color.rgb), in.color.a);
+    // Keep vertex colors in sRGB space so rasterization interpolates perceptually.
+    out.color = in.color;
     out.uv = in.uv;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let color = in.color * textureSample(imgui_texture, imgui_sampler, in.uv);
+    // Decode interpolated sRGB vertex colors to linear light before texture modulation.
+    let vertex_color = vec4<f32>(srgb_to_linear(in.color.rgb), in.color.a);
+    let color = vertex_color * textureSample(imgui_texture, imgui_sampler, in.uv);
     if uniforms.compositing_space == 1u {
         return vec4<f32>(linear_to_srgb(color.rgb), color.a);
     }

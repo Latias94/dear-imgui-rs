@@ -1465,6 +1465,25 @@ fn renderer_prepare_flattens_extracted_snapshot_for_pipeline_consumption() {
     assert_eq!(layout.attributes.len(), 3);
     assert!(IMGUI_SHADER_SOURCE.contains(IMGUI_VERTEX_ENTRY_POINT));
     assert!(IMGUI_SHADER_SOURCE.contains(IMGUI_FRAGMENT_ENTRY_POINT));
+
+    let (_, after_vertex) = IMGUI_SHADER_SOURCE
+        .split_once("@vertex")
+        .expect("embedded ImGui shader must define a vertex stage");
+    let (vertex_stage, fragment_stage) = after_vertex
+        .split_once("@fragment")
+        .expect("embedded ImGui shader must define a fragment stage");
+    assert!(
+        !vertex_stage.contains("srgb_to_linear"),
+        "vertex shader must keep sRGB vertex colors intact so rasterization interpolates in sRGB space"
+    );
+    assert!(
+        fragment_stage.contains("srgb_to_linear(in.color.rgb)"),
+        "fragment shader must decode interpolated sRGB vertex colors to linear light before texture modulation"
+    );
+    assert!(
+        !fragment_stage.contains("1.0 - color.a"),
+        "linear compositing space must preserve alpha without warping anti-aliased UI coverage"
+    );
 }
 
 #[test]

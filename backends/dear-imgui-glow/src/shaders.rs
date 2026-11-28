@@ -238,7 +238,7 @@ uniform float ColorGamma;
 void main()
 {{
     vec4 col = Frag_Color;
-    col.rgb = pow(col.rgb, vec3(ColorGamma));
+    col.rgb = pow(max(col.rgb, vec3(0.0)), vec3(ColorGamma));
     gl_FragColor = col * texture2D(Texture, Frag_UV.st);
 }}
 "#,
@@ -263,7 +263,7 @@ uniform float ColorGamma;
 void main()
 {{
     vec4 col = Frag_Color;
-    col.rgb = pow(col.rgb, vec3(ColorGamma));
+    col.rgb = pow(max(col.rgb, vec3(0.0)), vec3(ColorGamma));
     Out_Color = col * texture(Texture, Frag_UV.st);
 }}
 "#,
