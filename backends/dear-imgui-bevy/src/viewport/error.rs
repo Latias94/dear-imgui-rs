@@ -3,6 +3,8 @@ use super::protocol::ImguiViewportId;
 /// Native viewport runtime failure reported through Context lifecycle operations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ImguiViewportRuntimeError {
+    /// A native callback panicked inside the Bevy viewport runtime.
+    CallbackPanicked,
     /// A native callback re-entered the Bevy viewport runtime before its prior call completed.
     CallbackReentered,
     /// A native backend field changed after the Bevy viewport bridge claimed it.
@@ -18,6 +20,9 @@ pub enum ImguiViewportRuntimeError {
 impl std::fmt::Display for ImguiViewportRuntimeError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::CallbackPanicked => {
+                formatter.write_str("a Dear ImGui viewport callback panicked in the Bevy runtime")
+            }
             Self::CallbackReentered => {
                 formatter.write_str("a Dear ImGui viewport callback re-entered the Bevy runtime")
             }

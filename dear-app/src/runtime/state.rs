@@ -768,12 +768,11 @@ impl WgpuRuntimeFactory {
         });
 
         let format = window.configure_surface(&adapter, &device, config)?;
-        let init_info = dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), format);
+        let init_info = dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), format)
+            .with_adapter(adapter.clone());
         #[cfg(feature = "multi-viewport")]
         let init_info = if config.multi_viewport {
-            init_info
-                .with_instance(window.instance.clone())
-                .with_adapter(adapter.clone())
+            init_info.with_instance(window.instance.clone())
         } else {
             init_info
         };

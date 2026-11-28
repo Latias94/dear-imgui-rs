@@ -308,10 +308,9 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
     let cache_root = prebuilt_cache_root(cfg);
     let lib_name = expected_lib_name(&cfg.target_env);
     for url in urls {
-        if let Ok(dir) =
-            build_support::download_prebuilt(&cache_root, &url, &lib_name, &cfg.target_env)
-        {
-            return Some(dir);
+        match build_support::download_prebuilt(&cache_root, &url, &lib_name, &cfg.target_env) {
+            Ok(dir) => return Some(dir),
+            Err(error) => println!("cargo:warning=Skipping prebuilt candidate {url}: {error}"),
         }
     }
     None

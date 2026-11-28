@@ -129,7 +129,8 @@ impl AppWindow {
                 .into(),
         );
 
-        let (device, queue, surface, surface_desc) = wgpu_init::init_wgpu_for_window(&window)?;
+        let (device, queue, surface, surface_desc) =
+            wgpu_init::init_wgpu_for_window(event_loop, &window)?;
 
         // ImGui + winit platform
         let mut context = Context::create();

@@ -1,15 +1,10 @@
 use super::*;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 
-fn guard_viewport_callback<R: Copy>(fallback: R, callback: impl FnOnce() -> R) -> R {
-    match catch_unwind(AssertUnwindSafe(callback)) {
-        Ok(result) => result,
-        Err(payload) => {
-            // A custom panic payload can panic when dropped.
-            std::mem::forget(payload);
-            fallback
-        }
-    }
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(super) fn guard_viewport_callback<R: Copy>(fallback: R, callback: impl FnOnce() -> R) -> R {
+    imgui::ffi::guard_native_callback(fallback, callback, || {
+        unsafe { latch_current_viewport_runtime_fault(ImguiViewportRuntimeError::CallbackPanicked) };
+    })
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

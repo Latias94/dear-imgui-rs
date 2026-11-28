@@ -297,8 +297,9 @@ fn try_download_prebuilt_from_release(
         &tags,
         std::slice::from_ref(&profile.archive_name),
     ) {
-        if let Ok(directory) = try_download_prebuilt(&cache_root, &url, &config.target_env) {
-            return Some(directory);
+        match try_download_prebuilt(&cache_root, &url, &config.target_env) {
+            Ok(directory) => return Some(directory),
+            Err(error) => println!("cargo:warning=Skipping prebuilt candidate {url}: {error}"),
         }
     }
     None

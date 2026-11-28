@@ -394,7 +394,8 @@ impl AppWindow {
             )?,
         );
 
-        let (device, queue, surface, surface_desc) = wgpu_init::init_wgpu_for_window(&window)?;
+        let (device, queue, surface, surface_desc) =
+            wgpu_init::init_wgpu_for_window(event_loop, &window)?;
 
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();

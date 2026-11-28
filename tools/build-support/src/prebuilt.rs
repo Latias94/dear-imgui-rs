@@ -632,9 +632,10 @@ fn stage_or_extract_local(
         .and_then(|s| s.to_str())
         .is_some_and(|s| s == lib_name)
     {
-        let Some(parent) = path.parent() else {
-            return Err("local prebuilt path had no parent directory".to_string());
-        };
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
         return Ok(parent.to_path_buf());
     }
 
@@ -1657,6 +1658,14 @@ mod tests {
         .unwrap();
         assert_eq!(fs::read(lib_dir.join("libcore.a")).unwrap(), b"archive");
         assert_eq!(fs::read(outside_library).unwrap(), b"other");
+    }
+
+    #[test]
+    fn stage_or_extract_local_resolves_bare_relative_library_filename_to_dot() {
+        let root = tempfile::tempdir().unwrap();
+        let resolved = stage_or_extract_local(root.path(), Path::new("libcore.a"), "libcore.a")
+            .expect("bare relative filename matching lib_name should resolve to `.`");
+        assert_eq!(resolved, PathBuf::from("."));
     }
 
     #[cfg(windows)]

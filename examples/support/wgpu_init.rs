@@ -5,17 +5,18 @@
 //! wrap rendering or ImGui — they only cover common WGPU boilerplate.
 //!
 //! Usage pattern (inside an example):
-//! - call `init_wgpu_for_window(&window)` to get `(device, queue, surface, config)`
+//! - call `init_wgpu_for_window(event_loop, &window)` to get `(device, queue, surface, config)`
 //! - on resize, call `reconfigure_surface(...)`
 //! - per frame, acquire a frame with `surface.get_current_texture()` as usual
 //!
 //! Keeping this module small helps preserve explicit API usage in examples.
 
-use winit::{dpi::PhysicalSize, window::Window};
+use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 /// Create a WGPU device/queue/surface configured for the given window.
 /// Returns `(device, queue, surface, surface_config)`.
 pub fn init_wgpu_for_window(
+    event_loop: &ActiveEventLoop,
     window: &std::sync::Arc<Window>,
 ) -> Result<
     (
@@ -26,7 +27,9 @@ pub fn init_wgpu_for_window(
     ),
     Box<dyn std::error::Error>,
 > {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(
+        Box::new(event_loop.owned_display_handle()),
+    ));
 
     // The surface retains its own Arc<Window>, keeping the native window alive for its lifetime.
     let surface = instance.create_surface(window.clone())?;

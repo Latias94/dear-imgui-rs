@@ -890,6 +890,35 @@ fn viewport_callback_returns_fallback_after_registry_panic() {
 }
 
 #[test]
+fn viewport_callback_panic_latches_fault_and_returns_fallback() {
+    let mut context = imgui::Context::create();
+    let mut bridge = ImguiViewportBridge::default();
+    let keepalive = bridge.keepalive();
+    unsafe { install_owned_platform_callbacks(&mut context, &keepalive).unwrap() };
+
+    let dpi_scale = context.binding().with_bound_context(|| {
+        callbacks::guard_viewport_callback(1.0, || -> f32 {
+            panic!("simulated Bevy viewport callback panic");
+        })
+    });
+    assert_eq!(dpi_scale, 1.0);
+    assert_eq!(
+        bridge.callback_error(),
+        Some(ImguiViewportRuntimeError::CallbackPanicked)
+    );
+    assert_eq!(
+        bridge.drain_commands(),
+        Err(ImguiViewportRuntimeError::CallbackPanicked)
+    );
+
+    unsafe {
+        context
+            .io_mut()
+            .set_backend_platform_user_data(std::ptr::null_mut());
+    }
+}
+
+#[test]
 fn direct_callback_skips_foreign_userdata_without_dereferencing_it() {
     let mut context = imgui::Context::create();
     let bridge = ImguiViewportBridge::default();

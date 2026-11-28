@@ -311,9 +311,12 @@ struct App {
 
 impl AppWindow {
     fn setup_gpu(event_loop: &ActiveEventLoop) -> AppResult<Self> {
+        let descriptor = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
+            event_loop.owned_display_handle(),
+        ));
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
+            ..descriptor
         });
         let version = env!("CARGO_PKG_VERSION");
         let window = Arc::new(

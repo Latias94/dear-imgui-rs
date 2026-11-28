@@ -481,6 +481,7 @@ fn draw_file_table_view(
 
         let row_count = state.core.entries().len().min(i32::MAX as usize - 1);
         if row_count == 0 {
+            let _ = resolve_reveal_index(state, 0);
             if state.ui.config.empty_hint_enabled {
                 ui.table_next_row();
                 if show_preview {
@@ -527,13 +528,7 @@ fn draw_file_table_view(
         let mut clipper = ListClipper::new(row_count)
             .items_height(row_height)
             .begin(ui);
-        if let Some(index) = state
-            .ui
-            .operations
-            .reveal_id_next
-            .and_then(|id| state.core.row_index(id))
-            .filter(|index| *index < row_count)
-        {
+        if let Some(index) = resolve_reveal_index(state, row_count) {
             clipper.include_item_by_index(index);
         }
         let mut row_ids = Vec::new();
@@ -755,11 +750,7 @@ fn draw_file_grid_view(
                 let mut clipper = ListClipper::new(row_count)
                     .items_height(row_height)
                     .begin(ui);
-                if let Some(row) = state
-                    .ui
-                    .operations
-                    .reveal_id_next
-                    .and_then(|id| state.core.row_index(id))
+                if let Some(row) = resolve_reveal_index(state, entry_count)
                     .map(|index| index / cols)
                     .filter(|row| *row < row_count)
                 {
@@ -945,6 +936,22 @@ fn draw_thumbnail_cell(ui: &Ui, view: &mut FileDialogUiState, e: &DirEntry) {
     }
 }
 
+fn resolve_reveal_index(state: &mut FileDialogState, max_count: usize) -> Option<usize> {
+    let id = state.ui.operations.reveal_id_next?;
+    if let Some(index) = state.core.row_index(id).filter(|index| *index < max_count) {
+        return Some(index);
+    }
+    match state.core.scan_status() {
+        crate::ScanStatus::Scanning { .. } | crate::ScanStatus::Partial { .. } => {}
+        crate::ScanStatus::Idle
+        | crate::ScanStatus::Complete { .. }
+        | crate::ScanStatus::Failed { .. } => {
+            state.ui.operations.reveal_id_next = None;
+        }
+    }
+    None
+}
+
 fn move_focus_and_reveal(state: &mut FileDialogState, delta: i32, modifiers: Modifiers) {
     if let Some(id) = state.core.move_focus(delta, modifiers) {
         state.ui.operations.reveal_id_next = Some(id);
@@ -1102,6 +1109,15 @@ mod tests {
         update_type_select(&mut state, Some('z'), now);
         assert_eq!(state.ui.operations.reveal_id_next.take(), Some(target));
         update_type_select(&mut state, Some('q'), now);
+        assert_eq!(state.ui.operations.reveal_id_next, None);
+
+        // Once scanning is idle, a target hidden by search/filters is cleared so it cannot
+        // trigger an unexpected scroll jump later when filters change.
+        state.ui.operations.reveal_id_next = Some(target);
+        state.core.search = "apple".to_string();
+        state.tick_scan();
+        let entry_count = state.core.entries().len();
+        assert_eq!(resolve_reveal_index(&mut state, entry_count), None);
         assert_eq!(state.ui.operations.reveal_id_next, None);
     }
 }
