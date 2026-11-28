@@ -30,7 +30,7 @@ use crate::internal::RawWrapper;
 use crate::scope::NativeScopeTracker;
 use crate::string::{ScratchBuffers, UiBuffer};
 use crate::sys;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 pub use crate::scope::NativeWindowScope;
 
@@ -44,6 +44,7 @@ pub struct Ui {
     pub(crate) texture_registry: SharedTextureRegistry,
     pub(crate) ime: std::rc::Rc<RefCell<crate::context::ime::ImeState>>,
     pub(crate) native_scopes: RefCell<NativeScopeTracker>,
+    pub(crate) scope_recovery_pending: Cell<bool>,
     /// Reused in stack order so nested label conversions and callbacks have independent storage.
     scratch_buffers: ScratchBuffers,
 }

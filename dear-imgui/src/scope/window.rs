@@ -170,7 +170,7 @@ impl Drop for WindowBoundaryGuard<'_> {
                     .expect("active native window scope")
                     .first_id;
                 tracker.abandon_since(first);
-                tracker.refresh_pending_recovery();
+                tracker.refresh_pending_recovery(&ui.scope_recovery_pending);
             }
             ui.finish_abandoned_native_scopes();
             {
@@ -179,7 +179,7 @@ impl Drop for WindowBoundaryGuard<'_> {
                     .window_boundaries
                     .pop()
                     .expect("active native window scope");
-                tracker.refresh_pending_recovery();
+                tracker.refresh_pending_recovery(&ui.scope_recovery_pending);
             }
             // The native extension has finished its work at this depth. Restore the clipper
             // temporary stack before releasing any enclosing window or table that was deferred.

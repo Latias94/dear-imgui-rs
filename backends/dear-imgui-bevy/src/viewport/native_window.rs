@@ -1,5 +1,5 @@
 #[cfg(target_os = "linux")]
-use std::cell::Cell;
+use std::{cell::Cell, sync::OnceLock};
 
 use bevy_ecs::prelude::Entity;
 #[cfg(test)]
@@ -222,6 +222,9 @@ fn with_xlib_window<T>(
 ) -> Option<T> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
+    // Reuse the function table across windows. Raw handles stay within the Winit borrow.
+    static XLIB: OnceLock<Option<x11_dl::xlib::Xlib>> = OnceLock::new();
+
     WINIT_WINDOWS.with_borrow(|windows| {
         let window = windows.get_window(entity)?;
         let RawDisplayHandle::Xlib(display) = window.display_handle().ok()?.as_raw() else {
@@ -231,8 +234,10 @@ fn with_xlib_window<T>(
             return None;
         };
         let display = display.display?.as_ptr().cast::<x11_dl::xlib::Display>();
-        let xlib = x11_dl::xlib::Xlib::open().ok()?;
-        Some(operation(&xlib, display, window_handle.window))
+        let xlib = XLIB
+            .get_or_init(|| x11_dl::xlib::Xlib::open().ok())
+            .as_ref()?;
+        Some(operation(xlib, display, window_handle.window))
     })
 }
 

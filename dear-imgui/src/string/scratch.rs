@@ -1,6 +1,8 @@
 use super::UiBuffer;
 use std::cell::RefCell;
+use std::mem::MaybeUninit;
 use std::os::raw::c_char;
+use std::ptr;
 
 const SCRATCH_LIMIT: usize = 1024;
 
@@ -24,12 +26,25 @@ impl ScratchBuffers {
     pub(crate) fn with_c_string<R>(&self, text: &str, f: impl FnOnce(*const c_char) -> R) -> R {
         let bytes = text.as_bytes();
         if bytes.len() < 64 {
-            let mut buffer = [0; 64];
-            for (slot, &byte) in buffer.iter_mut().zip(bytes) {
-                *slot = if byte == 0 { b'?' } else { byte };
+            let mut buffer = MaybeUninit::<[u8; 64]>::uninit();
+            let start = buffer.as_mut_ptr().cast::<u8>();
+            // SAFETY: `bytes` fits with room for a terminator. Initialize every byte
+            // that the C string can read, leaving the unused tail uninitialized.
+            unsafe {
+                if bytes.contains(&0) {
+                    copy_replacing_nul(bytes, start);
+                } else {
+                    ptr::copy_nonoverlapping(bytes.as_ptr(), start, bytes.len());
+                }
+                start.add(bytes.len()).write(0);
             }
-            return f(buffer.as_ptr().cast());
+            return f(start.cast());
         }
+        self.with_long_c_string(text, f)
+    }
+
+    #[inline(never)]
+    fn with_long_c_string<R>(&self, text: &str, f: impl FnOnce(*const c_char) -> R) -> R {
         self.with(|buffer| f(buffer.scratch_txt(text)))
     }
 
@@ -43,6 +58,14 @@ impl ScratchBuffers {
             .unwrap_or_else(|| UiBuffer::new(SCRATCH_LIMIT));
         let mut scratch = ScratchBuffer { pool: self, buffer };
         f(&mut scratch.buffer)
+    }
+}
+
+// The caller provides space for all of `bytes` without overlapping it.
+#[cold]
+unsafe fn copy_replacing_nul(bytes: &[u8], start: *mut u8) {
+    for (index, &byte) in bytes.iter().enumerate() {
+        unsafe { start.add(index).write(if byte == 0 { b'?' } else { byte }) };
     }
 }
 

@@ -59,6 +59,8 @@ pub struct ModalHostConfig {
     /// Modal popup label/title (supports `###` id suffix).
     pub popup_label: String,
     /// Initial modal size (used with `size_condition`).
+    ///
+    /// Non-finite or negative dimensions are treated as zero for auto-fit.
     pub initial_size: [f32; 2],
     /// Condition used when setting the popup size.
     pub size_condition: dear_imgui_rs::Condition,
@@ -200,55 +202,41 @@ impl<'ui> FileBrowser<'ui> {
         &self,
         state: &mut FileDialogState,
         cfg: &ModalHostConfig,
-        mut custom_pane: Option<&mut dyn CustomPane>,
-        mut thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
+        custom_pane: Option<&mut dyn CustomPane>,
+        thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
     ) -> Option<Result<Selection, FileDialogError>> {
         if !state.ui.visible {
             return None;
         }
 
-        if !self.ui.is_popup_open(&cfg.popup_label) {
-            self.ui.open_popup(&cfg.popup_label);
-        }
-
-        if let Some((min_size, max_size)) =
-            resolve_host_size_constraints(cfg.min_size, cfg.max_size)
-        {
-            unsafe {
-                let min_vec = sys::ImVec2_c {
-                    x: min_size[0],
-                    y: min_size[1],
-                };
-                let max_vec = sys::ImVec2_c {
-                    x: max_size[0],
-                    y: max_size[1],
-                };
-                sys::igSetNextWindowSizeConstraints(min_vec, max_vec, None, std::ptr::null_mut());
+        // The modal body also stages next-window options for its path popup.
+        self.ui.with_bound_context(|| {
+            if !self.ui.is_popup_open(&cfg.popup_label) {
+                self.ui.open_popup(&cfg.popup_label);
             }
-        }
 
-        unsafe {
-            let size_vec = sys::ImVec2 {
-                x: cfg.initial_size[0],
-                y: cfg.initial_size[1],
-            };
-            sys::igSetNextWindowSize(size_vec, cfg.size_condition as i32);
-        }
+            let size = sanitize_host_size(cfg.initial_size, 0.0);
+            let constraints = resolve_host_size_constraints(cfg.min_size, cfg.max_size);
+            unsafe {
+                if let Some((min, max)) = constraints {
+                    sys::igSetNextWindowSizeConstraints(
+                        min.into(),
+                        max.into(),
+                        None,
+                        std::ptr::null_mut(),
+                    );
+                }
+                sys::igSetNextWindowSize(size.into(), cfg.size_condition as i32);
+            }
 
-        let Some(_popup) = self.ui.begin_modal_popup(&cfg.popup_label) else {
-            return None;
-        };
+            let _popup = self.ui.begin_modal_popup(&cfg.popup_label)?;
 
-        let out = draw_contents_with_hooks(
-            self.ui,
-            state,
-            custom_pane.take(),
-            thumbnails_backend.take(),
-        );
-        if out.is_some() {
-            self.ui.close_current_popup();
-        }
-        out
+            let out = draw_contents_with_hooks(self.ui, state, custom_pane, thumbnails_backend);
+            if out.is_some() {
+                self.ui.close_current_popup();
+            }
+            out
+        })
     }
 }
 
@@ -260,26 +248,19 @@ fn resolve_host_size_constraints(
         return None;
     }
 
-    let sanitize = |value: f32, fallback: f32| -> f32 {
+    let min = sanitize_host_size(min_size.unwrap_or([0.0; 2]), 0.0);
+    let max = sanitize_host_size(max_size.unwrap_or([f32::MAX; 2]), f32::MAX);
+    Some((min, [max[0].max(min[0]), max[1].max(min[1])]))
+}
+
+fn sanitize_host_size(size: [f32; 2], fallback: f32) -> [f32; 2] {
+    size.map(|value| {
         if value.is_finite() {
             value.max(0.0)
         } else {
             fallback
         }
-    };
-
-    let mut min = min_size.unwrap_or([0.0, 0.0]);
-    min[0] = sanitize(min[0], 0.0);
-    min[1] = sanitize(min[1], 0.0);
-
-    let mut max = max_size.unwrap_or([f32::MAX, f32::MAX]);
-    max[0] = sanitize(max[0], f32::MAX);
-    max[1] = sanitize(max[1], f32::MAX);
-
-    max[0] = max[0].max(min[0]);
-    max[1] = max[1].max(min[1]);
-
-    Some((min, max))
+    })
 }
 
 fn draw_contents_with_hooks(
@@ -583,6 +564,78 @@ mod tests {
                 .unwrap();
         assert_eq!(min, [300.0, 0.0]);
         assert_eq!(max, [300.0, f32::MAX]);
+    }
+
+    #[test]
+    fn show_modal_with_binds_owner_context_and_sanitizes_initial_size() {
+        use super::{FileDialogExt, ModalHostConfig};
+        use dear_imgui_rs::{Condition, Context, FrameLifecycleState, sys};
+
+        let mut owner = Context::create();
+        let mut foreign = Context::create();
+        for context in [&mut owner, &mut foreign] {
+            context.set_ini_filename(None::<String>).unwrap();
+            context
+                .font_atlas()
+                .try_claim_legacy_renderer()
+                .unwrap()
+                .build();
+            context.io_mut().set_display_size([800.0, 600.0]);
+            context.io_mut().set_delta_time(1.0 / 60.0);
+        }
+
+        let label = c"File browser modal context regression";
+        let cfg = ModalHostConfig {
+            popup_label: label.to_str().unwrap().to_owned(),
+            initial_size: [f32::NAN, 420.0],
+            size_condition: Condition::Always,
+            min_size: Some([360.0, f32::NAN]),
+            max_size: Some([f32::NAN, 360.0]),
+        };
+        let mut state = FileDialogState::with_blocking_filesystem(
+            DialogMode::OpenFile,
+            Box::<UiTestFs>::default(),
+        );
+
+        let foreign_raw = foreign.as_raw();
+        let owner_frame = owner.begin_frame();
+        let foreign_frame = foreign.begin_frame();
+        let current = || unsafe { sys::igGetCurrentContext() };
+        assert_eq!(current(), foreign_raw);
+
+        let pending = unsafe {
+            sys::igSetNextWindowSize([240.0, 180.0].into(), Condition::Once as i32);
+            sys::igSetNextWindowSizeConstraints(
+                [120.0, 100.0].into(),
+                [320.0, 240.0].into(),
+                None,
+                std::ptr::null_mut(),
+            );
+            (*foreign_raw).NextWindowData
+        };
+
+        let result = owner_frame
+            .ui()
+            .file_browser()
+            .show_modal_with(&mut state, &cfg, None, None);
+        assert!(result.is_none());
+        assert_eq!(current(), foreign_raw);
+        assert_eq!(unsafe { (*foreign_raw).NextWindowData }, pending);
+
+        owner_frame.with_ui(|_| {
+            let window = unsafe { sys::igFindWindowByName(label.as_ptr()).as_ref() }
+                .expect("the file browser modal should have opened on its owner");
+            assert!(window.Active);
+            assert_ne!(window.Flags & sys::ImGuiWindowFlags_Modal, 0);
+            assert!(window.AutoFitFramesX > 0, "the NaN width should auto-fit");
+            assert_eq!([window.Size.x, window.Size.y], [360.0, 360.0]);
+        });
+
+        drop(owner_frame);
+        assert_eq!(current(), foreign_raw);
+        drop(foreign_frame);
+        assert_eq!(owner.frame_lifecycle_state(), FrameLifecycleState::Idle);
+        assert_eq!(foreign.frame_lifecycle_state(), FrameLifecycleState::Idle);
     }
 
     #[test]

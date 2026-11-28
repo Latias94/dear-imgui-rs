@@ -17,6 +17,7 @@ impl Ui {
             texture_registry,
             ime,
             native_scopes: std::cell::RefCell::new(crate::scope::NativeScopeTracker::default()),
+            scope_recovery_pending: std::cell::Cell::new(false),
             scratch_buffers: ScratchBuffers::default(),
         }
     }
@@ -45,18 +46,25 @@ impl Ui {
     #[inline]
     pub(crate) fn with_live_context<R>(&self, f: impl FnOnce() -> R) -> R {
         let current = unsafe {
-            if self.native_current.is_null() {
-                sys::igGetCurrentContext()
-            } else {
+            if sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS {
+                // The native shim returns the address of the live GImGui slot.
                 self.native_current.read()
+            } else {
+                sys::igGetCurrentContext()
             }
         };
         if current == self.ctx {
             f()
         } else {
-            let _bound = crate::context::binding::RawBoundContextGuard::bind(self.ctx);
-            f()
+            self.with_other_context_current(f)
         }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn with_other_context_current<R>(&self, f: impl FnOnce() -> R) -> R {
+        let _bound = crate::context::binding::RawBoundContextGuard::bind(self.ctx);
+        f()
     }
 
     pub(crate) fn resolve_texture_ref(
@@ -128,6 +136,7 @@ impl Ui {
         self.scratch_buffers.with(f)
     }
 
+    #[inline]
     pub(crate) fn with_scratch_c_string<R>(
         &self,
         text: &str,

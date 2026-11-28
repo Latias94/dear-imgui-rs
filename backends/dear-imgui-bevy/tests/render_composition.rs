@@ -4,8 +4,10 @@
 use bevy::ecs::schedule::ScheduleLabel;
 #[cfg(feature = "bevy-ui")]
 use bevy::ecs::schedule::{NodeId, ScheduleGraph};
+#[cfg(all(feature = "bevy-ui", not(target_arch = "wasm32")))]
+use bevy::render::pipelined_rendering::PipelinedRenderingPlugin;
 use bevy::{
-    app::App,
+    app::{App, PluginGroupBuilder},
     asset::{Assets, Handle, RenderAssetUsages},
     camera::{ClearColorConfig, CompositingSpace, Hdr, RenderTarget},
     color::LinearRgba,
@@ -23,6 +25,7 @@ use bevy::{
         renderer::{RenderContext, ViewQuery},
         view::{Msaa, Tonemapping, ViewTarget},
     },
+    time::TimeReceiver,
     window::{ExitCondition, PrimaryWindow, WindowPlugin, WindowResolution},
     winit::WinitPlugin,
 };
@@ -40,6 +43,7 @@ use dear_imgui_bevy::{
 use dear_imgui_bevy::{ImguiPrimaryPass, ImguiUiRenderOrder};
 use std::{
     collections::{HashMap, HashSet},
+    panic::{self, AssertUnwindSafe},
     sync::{Mutex, MutexGuard, OnceLock},
     time::{Duration, Instant},
 };
@@ -132,22 +136,14 @@ fn imgui_colors_and_textures_preserve_encoding_in_each_compositing_space() {
         return;
     }
     let _guard = gpu_test_guard();
-    let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: None,
-                exit_condition: ExitCondition::DontExit,
-                ..Default::default()
-            })
-            .disable::<WinitPlugin>(),
-    )
-    .add_plugins(ImguiPlugin::new(
-        ImguiPluginConfig::default().with_docking(false),
-    ))
-    .init_resource::<CompositionReadbacks>()
-    .init_resource::<ColorEncodingFixtures>()
-    .add_observer(collect_readback);
+    let mut app_guard = composition_app(
+        composition_plugins(),
+        ImguiPlugin::new(ImguiPluginConfig::default().with_docking(false)),
+    );
+    let app = &mut app_guard.0;
+    app.init_resource::<CompositionReadbacks>()
+        .init_resource::<ColorEncodingFixtures>()
+        .add_observer(collect_readback);
     app.world_mut().spawn((
         Window {
             resolution: WindowResolution::new(WIDTH, HEIGHT),
@@ -291,10 +287,9 @@ fn imgui_colors_and_textures_preserve_encoding_in_each_compositing_space() {
             CompositionCase(name),
         ));
     }
-    app.finish();
     app.cleanup();
-    install_composition_readbacks(&mut app);
-    wait_for_composition_readbacks(&mut app, 6);
+    install_composition_readbacks(app);
+    wait_for_composition_readbacks(app, 6);
     let readbacks = app.world().resource::<CompositionReadbacks>();
     for (name, blended_gray) in [
         ("color-linear-ldr", 93),
@@ -407,21 +402,13 @@ fn post_process_and_imgui_pixels_coexist_across_camera_msaa_and_hdr_modes() {
     }
     let _guard = gpu_test_guard();
 
-    let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: None,
-                exit_condition: ExitCondition::DontExit,
-                ..Default::default()
-            })
-            .disable::<WinitPlugin>(),
-    )
-    .add_plugins(ImguiPlugin::new(
-        ImguiPluginConfig::default().with_docking(false),
-    ))
-    .init_resource::<CompositionReadbacks>()
-    .add_observer(collect_readback);
+    let mut app_guard = composition_app(
+        composition_plugins(),
+        ImguiPlugin::new(ImguiPluginConfig::default().with_docking(false)),
+    );
+    let app = &mut app_guard.0;
+    app.init_resource::<CompositionReadbacks>()
+        .add_observer(collect_readback);
 
     app.world_mut().spawn((
         Window {
@@ -447,7 +434,7 @@ fn post_process_and_imgui_pixels_coexist_across_camera_msaa_and_hdr_modes() {
     for kind in [CameraKind::Core2d, CameraKind::Core3d] {
         for msaa in [Msaa::Off, Msaa::Sample4] {
             for hdr in [false, true] {
-                spawn_case(&mut app, kind, msaa, hdr);
+                spawn_case(app, kind, msaa, hdr);
             }
         }
     }
@@ -473,10 +460,9 @@ fn post_process_and_imgui_pixels_coexist_across_camera_msaa_and_hdr_modes() {
             );
     }
 
-    app.finish();
     app.cleanup();
-    install_composition_readbacks(&mut app);
-    wait_for_composition_readbacks(&mut app, REQUIRED_CASES);
+    install_composition_readbacks(app);
+    wait_for_composition_readbacks(app, REQUIRED_CASES);
 
     let readbacks = app.world().resource::<CompositionReadbacks>();
     let mut failures = Vec::new();
@@ -552,6 +538,8 @@ fn bevy_ui_order_modes_control_overlap_pixels() {
 #[cfg(feature = "bevy-ui")]
 #[test]
 fn bevy_ui_order_modes_define_complete_overlay_topology() {
+    let _guard = gpu_test_guard();
+
     for (order, expected) in [
         (
             ImguiUiRenderOrder::ImguiAboveBevyUi,
@@ -572,23 +560,21 @@ fn bevy_ui_order_modes_define_complete_overlay_topology() {
             ],
         ),
     ] {
-        let mut app = App::new();
-        app.add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: None,
-                    exit_condition: ExitCondition::DontExit,
-                    ..Default::default()
-                })
-                .disable::<WinitPlugin>(),
-        )
-        .add_plugins(
+        // Keep RenderApp available for schedule inspection after Bevy's startup frame.
+        let plugins = composition_plugins();
+        #[cfg(not(target_arch = "wasm32"))]
+        let plugins = plugins.disable::<PipelinedRenderingPlugin>();
+        let mut app_guard = composition_app(
+            plugins,
             ImguiPlugin::new(ImguiPluginConfig::default().with_docking(false))
                 .with_ui_render_order(order),
         );
+        let app = &mut app_guard.0;
+        app.cleanup();
+        app.update();
 
-        assert_render_dependency_chain(&app, Core2d, expected);
-        assert_render_dependency_chain(&app, Core3d, expected);
+        assert_render_dependency_chain(app, Core2d, expected);
+        assert_render_dependency_chain(app, Core3d, expected);
     }
 }
 
@@ -603,21 +589,13 @@ fn multiple_contexts_compose_in_route_order_on_one_camera() {
     }
     let _guard = gpu_test_guard();
 
-    let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: None,
-                exit_condition: ExitCondition::DontExit,
-                ..Default::default()
-            })
-            .disable::<WinitPlugin>(),
-    )
-    .add_plugins(ImguiPlugin::new(
-        ImguiPluginConfig::default().with_docking(false),
-    ))
-    .init_resource::<CompositionReadbacks>()
-    .add_observer(collect_readback);
+    let mut app_guard = composition_app(
+        composition_plugins(),
+        ImguiPlugin::new(ImguiPluginConfig::default().with_docking(false)),
+    );
+    let app = &mut app_guard.0;
+    app.init_resource::<CompositionReadbacks>()
+        .add_observer(collect_readback);
 
     let primary_pass = app.imgui_primary_pass().unwrap();
     let secondary_pass = app.declare_imgui_pass::<SameCameraSecondaryPass>().unwrap();
@@ -693,10 +671,9 @@ fn multiple_contexts_compose_in_route_order_on_one_camera() {
         CompositionCase("same-camera-context-order"),
     ));
 
-    app.finish();
     app.cleanup();
-    install_composition_readbacks(&mut app);
-    wait_for_composition_readbacks(&mut app, 1);
+    install_composition_readbacks(app);
+    wait_for_composition_readbacks(app, 1);
 
     let readbacks = app.world().resource::<CompositionReadbacks>();
     let pixels = readbacks
@@ -719,22 +696,14 @@ fn multiple_contexts_compose_in_route_order_on_one_camera() {
 
 #[cfg(feature = "bevy-ui")]
 fn render_ui_order(order: ImguiUiRenderOrder, expectation: CompositionExpectation) -> [u8; 4] {
-    let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: None,
-                exit_condition: ExitCondition::DontExit,
-                ..Default::default()
-            })
-            .disable::<WinitPlugin>(),
-    )
-    .add_plugins(
+    let mut app_guard = composition_app(
+        composition_plugins(),
         ImguiPlugin::new(ImguiPluginConfig::default().with_docking(false))
             .with_ui_render_order(order),
-    )
-    .init_resource::<CompositionReadbacks>()
-    .add_observer(collect_readback);
+    );
+    let app = &mut app_guard.0;
+    app.init_resource::<CompositionReadbacks>()
+        .add_observer(collect_readback);
 
     let primary_pass = app.imgui_primary_pass().unwrap();
     app.add_imgui_systems(
@@ -796,10 +765,9 @@ fn render_ui_order(order: ImguiUiRenderOrder, expectation: CompositionExpectatio
         CompositionCase("ui-order"),
     ));
 
-    app.finish();
     app.cleanup();
-    install_composition_readbacks(&mut app);
-    wait_for_composition_readbacks(&mut app, 1);
+    install_composition_readbacks(app);
+    wait_for_composition_readbacks(app, 1);
 
     let readbacks = app.world().resource::<CompositionReadbacks>();
     let pixels = readbacks
@@ -1065,6 +1033,41 @@ fn assert_dominant_red(pixel: [u8; 4], message: &str) {
 
 fn assert_dominant_blue(pixel: [u8; 4], message: &str) {
     assert!(is_dominant_blue(pixel), "{message}: {pixel:?}");
+}
+
+struct ShutdownAppGuard(App);
+
+impl Drop for ShutdownAppGuard {
+    fn drop(&mut self) {
+        let mut shutdown = || {
+            // The main time system is idle during shutdown. Disconnect the time channel so
+            // a full queue cannot interrupt the render drain.
+            drop(self.0.world_mut().remove_resource::<TimeReceiver>());
+            self.0.shutdown_imgui()
+        };
+        if std::thread::panicking() {
+            let _ = panic::catch_unwind(AssertUnwindSafe(shutdown));
+        } else {
+            shutdown().expect("composition fixture must release its Dear ImGui leases");
+        }
+    }
+}
+
+fn composition_plugins() -> PluginGroupBuilder {
+    DefaultPlugins
+        .set(WindowPlugin {
+            primary_window: None,
+            exit_condition: ExitCondition::DontExit,
+            ..Default::default()
+        })
+        .disable::<WinitPlugin>()
+}
+
+fn composition_app(plugins: PluginGroupBuilder, imgui: ImguiPlugin) -> ShutdownAppGuard {
+    let mut app = ShutdownAppGuard(App::new());
+    app.0.add_plugins(plugins).add_plugins(imgui);
+    app.0.finish();
+    app
 }
 
 fn gpu_test_guard() -> MutexGuard<'static, ()> {

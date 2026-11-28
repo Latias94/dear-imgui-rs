@@ -110,6 +110,7 @@ bool capture_active(ImGuiTestEngine* engine) noexcept {
            engine->CaptureTool._StateIsPickingWindow;
 }
 
+#if IMGUI_TEST_ENGINE_ENABLE_CAPTURE
 bool screen_capture_trampoline(
     ImGuiID viewport_id,
     int x,
@@ -157,6 +158,7 @@ bool screen_capture_trampoline(
     }
     return captured;
 }
+#endif
 
 std::atomic<std::uint64_t>& counter_ref(Counter counter) noexcept {
     switch (counter) {

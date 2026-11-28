@@ -543,7 +543,6 @@ pub(crate) struct NativeScopeTracker {
     stacks: [Vec<ScopeTokenId>; ScopeStack::Table as usize + 1],
     window_boundaries: Vec<WindowBoundary>,
     abandoned_count: usize,
-    pending_recovery: bool,
     #[cfg(feature = "stack-layout")]
     stack_layout_frame: i32,
     #[cfg(feature = "stack-layout")]
@@ -606,19 +605,16 @@ impl NativeScopeTracker {
         order: NativeScopeOrder,
         raw_scope: ScopeSnapshot,
     ) -> (NativeScopeKeys, ScopeTokenId) {
-        assert!(
-            !self.pending_recovery,
-            "cannot enter `{label}` after a native scope order violation; finish the remaining scopes first"
-        );
         let generation = self.next_id;
         self.next_id = self
             .next_id
             .checked_add(1)
             .expect("native scope identity space is exhausted");
-        let mut scope = self.resolve_scope(raw_scope);
-        if pop.ends_window() {
-            scope = scope.with_window_owner(Some(generation));
-        }
+        let scope = if pop.ends_window() {
+            raw_scope.with_window_owner(Some(generation))
+        } else {
+            self.resolve_scope(raw_scope)
+        };
         let keys = pop.keys(scope);
         let slot = self.first_free_slot.unwrap_or(self.slots.len());
         let id = ScopeTokenId { slot, generation };
@@ -651,6 +647,7 @@ impl NativeScopeTracker {
         id: ScopeTokenId,
         label: &'static str,
         raw_current: ScopeSnapshot,
+        recovery_pending: &std::cell::Cell<bool>,
     ) -> Result<bool, ScopeOrderError> {
         let first = self.first_unprotected_id();
         let Some(&entry) = self.active(id) else {
@@ -666,14 +663,14 @@ impl NativeScopeTracker {
         let current = self.resolve_scope(raw_current);
         if let Some(reason) = self.violation(entry, current) {
             self.abandon(id);
-            self.refresh_pending_recovery();
+            self.refresh_pending_recovery(recovery_pending);
             return match entry.order {
                 NativeScopeOrder::StrictLifo => Err(ScopeOrderError { label, reason }),
                 NativeScopeOrder::ProvenanceOnly => Ok(false),
             };
         }
         self.remove_ready(entry);
-        self.refresh_pending_recovery();
+        self.refresh_pending_recovery(recovery_pending);
         Ok(true)
     }
 
@@ -795,7 +792,11 @@ impl NativeScopeTracker {
         self.abandoned_count -= usize::from(entry.abandoned);
     }
 
-    fn take_ready_abandoned(&mut self, raw_current: ScopeSnapshot) -> Option<NativeScopePop> {
+    fn take_ready_abandoned(
+        &mut self,
+        raw_current: ScopeSnapshot,
+        recovery_pending: &std::cell::Cell<bool>,
+    ) -> Option<NativeScopePop> {
         let current = self.resolve_scope(raw_current);
         let first = self.first_unprotected_id();
         let ready = self
@@ -805,13 +806,13 @@ impl NativeScopeTracker {
             .max_by_key(|entry| entry.id.generation)
             .copied()?;
         self.remove_ready(ready);
-        self.refresh_pending_recovery();
+        self.refresh_pending_recovery(recovery_pending);
         Some(ready.pop)
     }
 
-    fn refresh_pending_recovery(&mut self) {
+    fn refresh_pending_recovery(&self, recovery_pending: &std::cell::Cell<bool>) {
         if self.abandoned_count == 0 {
-            self.pending_recovery = false;
+            recovery_pending.set(false);
             return;
         }
         let first = self.first_unprotected_id();
@@ -820,7 +821,7 @@ impl NativeScopeTracker {
                 && entry.abandoned
                 && entry.order == NativeScopeOrder::StrictLifo
         });
-        self.pending_recovery = pending_recovery;
+        recovery_pending.set(pending_recovery);
     }
 
     fn abandon(&mut self, id: ScopeTokenId) {
@@ -853,14 +854,6 @@ impl NativeScopeTracker {
             .into_iter()
             .filter_map(|key| Some(self.top(key)?.id.generation))
             .fold(boundary.first_id, u64::max)
-    }
-
-    #[inline]
-    fn assert_usable(&self) {
-        assert!(
-            !self.pending_recovery,
-            "native scope order was violated; use closure-based scopes or finish the remaining native tokens before calling Dear ImGui again"
-        );
     }
 
     fn resolve_scope(&self, raw_scope: ScopeSnapshot) -> ScopeSnapshot {
@@ -903,6 +896,10 @@ impl<'ui> NativeScopeToken<'ui> {
         label: &'static str,
         order: NativeScopeOrder,
     ) -> Self {
+        assert!(
+            !ui.native_scope_recovery_pending(),
+            "cannot enter `{label}` after a native scope order violation; finish the remaining scopes first"
+        );
         let (keys, id) = ui.with_live_context(|| {
             let scope = unsafe { ScopeSnapshot::current_raw(ui) };
             ui.native_scopes
@@ -926,12 +923,13 @@ impl<'ui> NativeScopeToken<'ui> {
         self.finished = true;
         self.ui.with_live_context(|| {
             let current = unsafe { ScopeSnapshot::current_raw(self.ui) };
-            let should_pop = match self
-                .ui
-                .native_scopes
-                .borrow_mut()
-                .prepare_pop(self.keys, self.id, self.label, current)
-            {
+            let should_pop = match self.ui.native_scopes.borrow_mut().prepare_pop(
+                self.keys,
+                self.id,
+                self.label,
+                current,
+                &self.ui.scope_recovery_pending,
+            ) {
                 Ok(should_pop) => should_pop,
                 Err(error) => {
                     if !std::thread::panicking() {
@@ -981,7 +979,7 @@ impl Ui {
             let Some(pop) = self
                 .native_scopes
                 .borrow_mut()
-                .take_ready_abandoned(current)
+                .take_ready_abandoned(current, &self.scope_recovery_pending)
             else {
                 break;
             };
@@ -1005,13 +1003,16 @@ impl Ui {
         NativeScopeToken::new_with_order(self, pop, label, NativeScopeOrder::ProvenanceOnly)
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn assert_native_scopes_usable(&self) {
-        self.native_scopes.borrow().assert_usable();
+        if self.native_scope_recovery_pending() {
+            panic_native_scopes_unusable();
+        }
     }
 
+    #[inline]
     pub(crate) fn native_scope_recovery_pending(&self) -> bool {
-        self.native_scopes.borrow().pending_recovery
+        self.scope_recovery_pending.get()
     }
 
     pub(crate) fn assert_table_cell_can_change(&self, operation: &'static str) {
@@ -1063,6 +1064,14 @@ impl Ui {
         let current = unsafe { ScopeSnapshot::current_raw(self) };
         self.native_scopes.borrow().resolve_scope(current)
     }
+}
+
+#[cold]
+#[inline(never)]
+fn panic_native_scopes_unusable() -> ! {
+    panic!(
+        "native scope order was violated; use closure-based scopes or finish the remaining native tokens before calling Dear ImGui again"
+    );
 }
 
 #[cfg(test)]

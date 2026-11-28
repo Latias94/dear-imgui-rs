@@ -10,6 +10,7 @@ use std::borrow::Cow;
 impl Ui {
     /// Creates a button with the given label
     #[doc(alias = "Button")]
+    #[inline]
     pub fn button(&self, label: impl AsRef<str>) -> bool {
         self.with_scratch_txt(label, |label_ptr| unsafe {
             sys::igButton(label_ptr, [0.0, 0.0].into())

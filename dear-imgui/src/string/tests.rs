@@ -30,6 +30,20 @@ fn scoped_c_strings_sanitize_interior_nul_on_both_paths() {
 }
 
 #[test]
+fn scoped_c_strings_terminate_at_the_label_length() {
+    let scratch = ScratchBuffers::default();
+    for label in [String::new(), "é".repeat(31) + "x", "x".repeat(64)] {
+        scratch.with_c_string(&label, |ptr| {
+            scratch.with_c_string("nested", |nested| {
+                assert_eq!(unsafe { CStr::from_ptr(nested) }, c"nested");
+            });
+            // SAFETY: The callback keeps this label's C string live.
+            assert_eq!(unsafe { CStr::from_ptr(ptr) }.to_bytes(), label.as_bytes());
+        });
+    }
+}
+
+#[test]
 fn ui_buffer_text_range_preserves_bytes_and_appends_readable_nul() {
     let mut buf = UiBuffer::new(1024);
     let range = buf.scratch_txt_range("a\0b#");
