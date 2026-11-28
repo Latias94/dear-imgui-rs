@@ -108,7 +108,7 @@ pub use draw_data::{
 pub use frame::{PendingFrame, ReconciledFrame};
 pub use snapshot::{
     DetachedRendererConsumer, DrawCmdSnapshot, DrawDataSnapshot, DrawListSnapshot, FrameSnapshot,
-    RendererConsumerCapability, RendererConsumerError, SnapshotCommitError,
+    RendererConsumerCapability, RendererConsumerError, RendererResetSignal, SnapshotCommitError,
     SnapshotCompletionProgress, SnapshotEpoch, SnapshotError, SnapshotTextureId,
     SynchronousRendererConsumer, TextureBinding, TextureFeedback, TextureFeedbackError, TextureOp,
     TextureRequest, TextureRequestKind, TextureUploadIdentity, TextureUploadRect,

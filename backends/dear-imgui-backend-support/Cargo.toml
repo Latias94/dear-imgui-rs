@@ -1,0 +1,17 @@
+[package]
+name = "dear-imgui-backend-support"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Shared renderer primitives for dear-imgui-rs backends"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+documentation = "https://docs.rs/dear-imgui-backend-support"
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
+
+[dependencies]
+dear-imgui-rs.workspace = true
+thiserror.workspace = true

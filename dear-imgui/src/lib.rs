@@ -392,10 +392,11 @@ pub use self::render::{
     DrawDataSnapshot, DrawIdx, DrawList, DrawListIterator, DrawListSnapshot, DrawRequirements,
     DrawVert, FrameSnapshot, PendingFrame, RawCallbackCommand, ReconciledFrame,
     RendererConsumerCapability, RendererConsumerError, RendererRenderStateGuard,
-    RendererRenderStateGuardError, SnapshotCommitError, SnapshotCompletionProgress, SnapshotEpoch,
-    SnapshotError, SnapshotTextureId, SynchronousRendererConsumer, TextureBinding, TextureFeedback,
-    TextureFeedbackError, TextureOp, TextureRequest, TextureRequestKind, TextureUploadIdentity,
-    TextureUploadRect, ViewportDrawDataSnapshot,
+    RendererRenderStateGuardError, RendererResetSignal, SnapshotCommitError,
+    SnapshotCompletionProgress, SnapshotEpoch, SnapshotError, SnapshotTextureId,
+    SynchronousRendererConsumer, TextureBinding, TextureFeedback, TextureFeedbackError, TextureOp,
+    TextureRequest, TextureRequestKind, TextureUploadIdentity, TextureUploadRect,
+    ViewportDrawDataSnapshot,
 };
 pub use self::stacks::{
     ColorStackToken, FocusScopeToken, FontStackToken, IdStackToken, ItemFlagStackToken, ItemFlags,

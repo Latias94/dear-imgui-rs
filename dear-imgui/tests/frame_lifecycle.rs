@@ -1067,6 +1067,44 @@ fn renderer_reset_commit_is_unit_for_an_empty_context() {
 }
 
 #[test]
+fn next_frame_resets_textures_after_a_synchronous_renderer_releases_them() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let renderer = ctx.create_synchronous_renderer_consumer().unwrap();
+    let reset = renderer.reset_signal();
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255; 4],
+    )
+    .unwrap();
+    let id = ctx.register_texture(texture);
+    let first = ctx.begin_frame();
+    first.ui().image(id, [16.0; 2]);
+    drop(reconcile_test_frame(
+        first.render(&renderer),
+        &[(id, imgui::TextureId::new(91))],
+    ));
+
+    reset.mark_renderer_dropped();
+    ctx.poll_snapshot_completions().unwrap();
+    ctx.with_texture(id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::OK)
+    })
+    .unwrap();
+    drop(renderer);
+
+    drop(ctx.begin_frame());
+    ctx.with_texture(id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert!(texture.texture_id().is_null());
+    })
+    .unwrap();
+}
+
+#[test]
 fn renderer_reset_commit_binds_its_owner_context() {
     let _guard = test_guard();
 

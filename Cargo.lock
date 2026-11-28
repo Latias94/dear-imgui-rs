@@ -2776,6 +2776,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dear-imgui-backend-support"
+version = "0.23.0"
+dependencies = [
+ "dear-imgui-rs",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "dear-imgui-bevy"
 version = "0.23.0"
 dependencies = [

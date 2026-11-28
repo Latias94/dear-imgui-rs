@@ -6,11 +6,11 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use crate::render::snapshot::capture_platform_io;
 use crate::render::snapshot::{
     DetachedRendererConsumer, FrameSnapshot, PendingSnapshot, PendingTextureRequest,
-    RendererConsumerCapability, RendererConsumerError, SnapshotCompletionOutcome,
-    SnapshotCompletionProgress, SnapshotEpoch, SnapshotError, SnapshotMessage, SnapshotTextureId,
-    SynchronousRendererConsumer, TextureFeedback, TextureRequest, TextureRequestKey,
-    capture_draw_data, capture_texture_requests_only, finalize_texture_requests,
-    validate_texture_feedback,
+    RendererConsumerCapability, RendererConsumerError, RendererResetSignal,
+    SnapshotCompletionOutcome, SnapshotCompletionProgress, SnapshotEpoch, SnapshotError,
+    SnapshotMessage, SnapshotTextureId, SynchronousRendererConsumer, TextureFeedback,
+    TextureRequest, TextureRequestKey, capture_draw_data, capture_texture_requests_only,
+    finalize_texture_requests, validate_texture_feedback,
 };
 
 use super::binding::{CTX_MUTEX, RawBoundContextGuard};
@@ -59,7 +59,7 @@ pub(super) struct SnapshotHub {
     receiver: Receiver<SnapshotMessage>,
     phase: ConsumerPhase,
     // A renderer may have uploaded a request even when its completion was lost.
-    texture_owner: Option<NonZeroU64>,
+    texture_owner: Option<RendererResetSignal>,
     next_consumer_generation: Option<NonZeroU64>,
     next_epoch: Option<NonZeroU64>,
     completion_watermark: u64,
@@ -179,8 +179,8 @@ impl SnapshotHub {
             }
         }
         let (snapshot, expected) = pending.into_frame(requests, epoch, self.sender.clone());
-        if !expected.is_empty() {
-            self.texture_owner = Some(generation);
+        if self.texture_owner.is_none() && !expected.is_empty() {
+            self.texture_owner = Some(consumer.reset_signal());
         }
         let previous = self.outstanding.insert(
             sequence.get(),
@@ -213,8 +213,8 @@ impl SnapshotHub {
             }
         }
         let (requests, expected) = finalize_texture_requests(pending, epoch);
-        if !expected.is_empty() {
-            self.texture_owner = Some(generation);
+        if self.texture_owner.is_none() && !expected.is_empty() {
+            self.texture_owner = Some(consumer.reset_signal());
         }
         self.outstanding.insert(
             sequence.get(),
@@ -312,7 +312,11 @@ impl SnapshotHub {
         consumer: &impl RendererConsumerCapability,
     ) -> Result<NonZeroU64, RendererConsumerError> {
         let generation = self.validate_consumer_identity(consumer)?;
-        if self.texture_owner.is_some_and(|owner| owner != generation) {
+        if self
+            .texture_owner
+            .as_ref()
+            .is_some_and(|owner| owner.generation() != generation)
+        {
             return Err(RendererConsumerError::RendererTextureResetRequired);
         }
         Ok(generation)
@@ -348,6 +352,20 @@ impl SnapshotHub {
     ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
         self.drain_messages();
         self.advance(registry, atlas)
+    }
+
+    pub(super) fn renderer_drop_confirmed(&self) -> bool {
+        self.texture_owner
+            .as_ref()
+            .is_some_and(RendererResetSignal::is_marked)
+    }
+
+    fn renderer_reset_ready(&self) -> bool {
+        self.outstanding.is_empty()
+            && self.texture_owner.as_ref().is_some_and(|owner| {
+                !matches!(self.phase, ConsumerPhase::Active(generation) if generation == owner.generation())
+                    && owner.is_marked()
+            })
     }
 
     fn advance(
@@ -548,8 +566,8 @@ impl Context {
     /// before it can enter managed renderer mode. If multiple contexts still share the atlas, this
     /// returns [`RendererConsumerError::SharedFontAtlasRequiresExclusiveContext`]. Multiple-context
     /// shared atlases remain available to legacy renderer-managed texture handling.
-    /// When replacing a renderer that issued texture requests, release its resources and commit
-    /// [`Self::prepare_renderer_texture_reset`] before rendering with the replacement.
+    /// A replacement renderer requires the predecessor to confirm resource release through its
+    /// reset signal or commit [`Self::prepare_renderer_texture_reset`].
     pub fn create_synchronous_renderer_consumer(
         &mut self,
     ) -> Result<SynchronousRendererConsumer, RendererConsumerError> {
@@ -566,8 +584,8 @@ impl Context {
     ///
     /// The generation is fixed to pointer-free snapshot rendering when it is created. Dropping the
     /// capability begins draining any outstanding snapshot epochs.
-    /// If its predecessor issued texture requests, release the old renderer's resources and
-    /// commit [`Self::prepare_renderer_texture_reset`] before capturing with the replacement.
+    /// A replacement renderer requires the predecessor to confirm resource release through its
+    /// reset signal or commit [`Self::prepare_renderer_texture_reset`].
     pub fn create_detached_renderer_consumer(
         &mut self,
     ) -> Result<DetachedRendererConsumer, RendererConsumerError> {
@@ -623,20 +641,25 @@ impl Context {
         &mut self,
         atlas: &FontAtlasSnapshotTarget,
     ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
-        self.snapshot_hub
-            .poll(&mut self.texture_registry.borrow_mut(), atlas)
+        let result = self
+            .snapshot_hub
+            .poll(&mut self.texture_registry.borrow_mut(), atlas);
+        if self.snapshot_hub.renderer_reset_ready() {
+            self.reset_renderer_bindings(atlas, self.snapshot_hub.completion_watermark());
+        }
+        result
     }
 
     /// Validate an idle renderer generation before destroying its complete GPU texture map.
     ///
-    /// This two-phase transaction is the only safe renderer-reset path. Prepare the reset while
-    /// the renderer is still intact, release every GPU resource keyed by this consumer, then call
+    /// Prepare the reset while the renderer is still intact, release every GPU resource keyed by
+    /// this consumer, then call
     /// [`RendererTextureReset::commit`]. If preparation fails, the backend can return without
     /// partially destroying its resource map. Dropping the permit without commit does not mutate
     /// native texture state.
     ///
-    /// A single-call reset is intentionally unavailable because the Context cannot prove that an
-    /// external renderer released its GPU map first:
+    /// A renderer that already released its resources can mark its [`RendererResetSignal`] and
+    /// drop its consumer. The Context then performs the reset once outstanding epochs drain.
     ///
     /// ```compile_fail
     /// use dear_imgui_rs::Context;
@@ -700,6 +723,10 @@ impl Context {
     fn commit_renderer_texture_reset_unlocked(&mut self, watermark: u64) {
         let _bound = RawBoundContextGuard::bind(self.raw);
         let atlas = self.font_atlas_snapshot_target();
+        self.reset_renderer_bindings(&atlas, watermark);
+    }
+
+    fn reset_renderer_bindings(&mut self, atlas: &FontAtlasSnapshotTarget, watermark: u64) {
         atlas.reset_renderer_bindings();
         self.texture_registry
             .borrow_mut()

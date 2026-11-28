@@ -154,6 +154,13 @@ jobs:
       - name: Test cross-platform release tooling
         run: cargo nextest run -p xtask
 
+      - name: Test shared backend contracts
+        run: cargo nextest run -j 1 -p dear-imgui-backend-support
+
+      - name: Inspect the shared backend package on Windows
+        if: runner.os == 'Windows'
+        run: cargo package -p dear-imgui-backend-support --list
+
       - name: Link OpenGL3 backend shim
         run: cargo nextest run -p dear-imgui-sys --no-default-features --features backend-shim-opengl3 --test backend_shims
 
@@ -1054,6 +1061,9 @@ jobs:
       - name: Lint cross-platform release tooling without warnings
         run: cargo clippy -p xtask --all-targets -- -D warnings
 
+      - name: Lint shared backend contracts without warnings
+        run: cargo clippy -p dear-imgui-backend-support --all-targets --no-deps -- -D warnings
+
       - name: Lint core multi-viewport callback ownership
         run: >-
           python3 tools/ci/run_contract.py clippy --
@@ -1871,7 +1881,7 @@ jobs:
       - name: Test native build policy with real Cargo consumers
         run: python3 -B -m unittest discover -s tools/integration_tests -p 'test_*.py' -v
 
-      - name: Package, unpack, and consume core crates
+      - name: Package, unpack, and consume workspace crates
         run: python3 tools/ci/verify_packaged_core.py
 
   fmt:

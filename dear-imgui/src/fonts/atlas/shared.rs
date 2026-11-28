@@ -47,12 +47,12 @@ impl Drop for SharedFontAtlasInner {
 /// requires this atlas to be registered with exactly one context. After that claim succeeds,
 /// attempts to register another context return
 /// [`ImGuiError::SharedFontAtlasManaged`](crate::ImGuiError::SharedFontAtlasManaged).
-/// Before that managed Context is dropped, its renderer must release its complete GPU texture map
-/// and commit [`Context::prepare_renderer_texture_reset`](crate::Context::prepare_renderer_texture_reset).
-/// Otherwise the atlas preserves its old native bindings and rejects later Context registration
-/// with [`ImGuiError::SharedFontAtlasRendererReleasePending`](crate::ImGuiError::SharedFontAtlasRendererReleasePending).
-/// After releasing the external renderer resources, drop and recreate such an atlas rather than
-/// transferring its unproven renderer namespace to another Context.
+/// To reuse the atlas across Contexts, release the renderer's complete GPU texture map and commit
+/// [`Context::prepare_renderer_texture_reset`](crate::Context::prepare_renderer_texture_reset).
+/// A renderer can instead mark its [`RendererResetSignal`](crate::render::RendererResetSignal),
+/// drop its consumer, and drain outstanding epochs before Context teardown. A shared atlas with
+/// unconfirmed renderer bindings rejects later Context registration with
+/// [`ImGuiError::SharedFontAtlasRendererReleasePending`](crate::ImGuiError::SharedFontAtlasRendererReleasePending).
 #[derive(Debug, Clone)]
 pub struct SharedFontAtlas(Rc<SharedFontAtlasInner>);
 

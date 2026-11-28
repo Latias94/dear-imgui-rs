@@ -14,6 +14,7 @@ use std::marker::PhantomData;
 use std::num::NonZeroU64;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 
 use crate::render::draw_data::{
@@ -95,9 +96,38 @@ impl SnapshotEpoch {
     }
 }
 
+/// Confirms that a renderer has released the resources for one consumer generation.
+///
+/// The signal holds no native pointers and may outlive its Context. After the consumer is dropped
+/// and its outstanding epochs drain, the Context resets its managed texture bindings before the
+/// replacement renderer uses them.
+#[derive(Clone, Debug)]
+pub struct RendererResetSignal {
+    generation: NonZeroU64,
+    renderer_dropped: Arc<AtomicBool>,
+}
+
+impl RendererResetSignal {
+    /// Notify the Context once renderer-owned callbacks and texture resources have been released.
+    ///
+    /// The renderer is responsible for keeping resources alive for previously submitted work.
+    /// Drop its consumer capability as well so the Context can drain that generation.
+    pub fn mark_renderer_dropped(&self) {
+        self.renderer_dropped.store(true, Ordering::Release);
+    }
+
+    pub(crate) const fn generation(&self) -> NonZeroU64 {
+        self.generation
+    }
+
+    pub(crate) fn is_marked(&self) -> bool {
+        self.renderer_dropped.load(Ordering::Acquire)
+    }
+}
+
 struct RendererConsumerState {
     context: ContextId,
-    generation: NonZeroU64,
+    reset: RendererResetSignal,
     sender: Sender<SnapshotMessage>,
     _not_send_or_sync: PhantomData<Rc<()>>,
 }
@@ -106,7 +136,10 @@ impl RendererConsumerState {
     fn new(context: ContextId, generation: NonZeroU64, sender: Sender<SnapshotMessage>) -> Self {
         Self {
             context,
-            generation,
+            reset: RendererResetSignal {
+                generation,
+                renderer_dropped: Arc::new(AtomicBool::new(false)),
+            },
             sender,
             _not_send_or_sync: PhantomData,
         }
@@ -117,7 +150,7 @@ impl Drop for RendererConsumerState {
     fn drop(&mut self) {
         let _ = self.sender.send(SnapshotMessage::Detach {
             context: self.context,
-            generation: self.generation,
+            generation: self.reset.generation(),
         });
     }
 }
@@ -163,7 +196,13 @@ impl SynchronousRendererConsumer {
     /// Current consumer generation.
     #[must_use]
     pub const fn generation(&self) -> u64 {
-        self.0.generation.get()
+        self.0.reset.generation().get()
+    }
+
+    /// Get the release signal for this consumer's renderer resources.
+    #[must_use]
+    pub fn reset_signal(&self) -> RendererResetSignal {
+        self.0.reset.clone()
     }
 }
 
@@ -172,7 +211,7 @@ impl std::fmt::Debug for SynchronousRendererConsumer {
         formatter
             .debug_struct("SynchronousRendererConsumer")
             .field("context", &self.0.context)
-            .field("generation", &self.0.generation)
+            .field("generation", &self.generation())
             .finish_non_exhaustive()
     }
 }
@@ -214,7 +253,13 @@ impl DetachedRendererConsumer {
     /// Current consumer generation.
     #[must_use]
     pub const fn generation(&self) -> u64 {
-        self.0.generation.get()
+        self.0.reset.generation().get()
+    }
+
+    /// Get the release signal for this consumer's renderer resources.
+    #[must_use]
+    pub fn reset_signal(&self) -> RendererResetSignal {
+        self.0.reset.clone()
     }
 }
 
@@ -223,7 +268,7 @@ impl std::fmt::Debug for DetachedRendererConsumer {
         formatter
             .debug_struct("DetachedRendererConsumer")
             .field("context", &self.0.context)
-            .field("generation", &self.0.generation)
+            .field("generation", &self.generation())
             .finish_non_exhaustive()
     }
 }

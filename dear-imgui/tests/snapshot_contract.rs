@@ -1272,6 +1272,83 @@ fn replacement_consumer_recreates_textures_before_using_a_new_renderer_namespace
 }
 
 #[test]
+fn confirmed_renderer_drop_waits_for_the_last_epoch_before_admitting_a_replacement() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let id = ctx.register_texture(owned_texture());
+    let renderer = ctx.create_detached_renderer_consumer().unwrap();
+    let reset = renderer.reset_signal();
+    let pending = ctx.begin_frame().render_snapshot(&renderer).unwrap();
+    let feedback = acknowledge_all(&pending, 41);
+
+    reset.mark_renderer_dropped();
+    drop(renderer);
+    assert!(matches!(
+        ctx.create_detached_renderer_consumer(),
+        Err(imgui::render::RendererConsumerError::ConsumerDraining)
+    ));
+
+    pending.commit(feedback).unwrap();
+    let replacement = ctx.create_detached_renderer_consumer().unwrap();
+    ctx.with_texture(id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert!(texture.texture_id().is_null());
+    })
+    .unwrap();
+    let next = ctx.begin_frame().render_snapshot(&replacement).unwrap();
+    assert!(matches!(
+        request_for(&next, id).operation(),
+        imgui::render::TextureOp::Create { pixels, .. } if pixels.len() == 16
+    ));
+    let feedback = acknowledge_all(&next, 100);
+    next.commit(feedback).unwrap();
+    ctx.poll_snapshot_completions().unwrap();
+
+    reset.mark_renderer_dropped();
+    ctx.poll_snapshot_completions().unwrap();
+    ctx.with_texture(id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::OK)
+    })
+    .unwrap();
+}
+
+#[test]
+fn context_drop_applies_the_confirmed_reset_before_releasing_a_shared_atlas() {
+    let _guard = test_guard();
+    let atlas = imgui::SharedFontAtlas::create();
+    let mut ctx = imgui::Context::create_with_shared_font_atlas(atlas.clone());
+    prepare_context(&mut ctx);
+    let renderer = ctx.create_detached_renderer_consumer().unwrap();
+    let frame = ctx.begin_frame();
+    frame.ui().text("managed atlas");
+    let snapshot = frame.render_snapshot(&renderer).unwrap();
+    assert!(snapshot.texture_requests().iter().any(|request| matches!(
+        request.texture(),
+        imgui::render::SnapshotTextureId::FontAtlas { .. }
+    )));
+    let feedback = acknowledge_all(&snapshot, 41);
+    snapshot.commit(feedback).unwrap();
+    renderer.reset_signal().mark_renderer_dropped();
+    drop(renderer);
+    drop(ctx);
+
+    let _replacement = imgui::Context::try_create_with_shared_font_atlas(atlas)
+        .expect("the previous renderer released the shared atlas bindings");
+}
+
+#[test]
+fn renderer_reset_signal_can_outlive_its_context() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    let renderer = ctx.create_synchronous_renderer_consumer().unwrap();
+    let reset = renderer.reset_signal();
+    drop(ctx);
+    reset.mark_renderer_dropped();
+    drop(renderer);
+}
+
+#[test]
 fn foreign_reset_leaves_committed_feedback_for_its_owner() {
     let _guard = test_guard();
     let mut other = imgui::Context::create();

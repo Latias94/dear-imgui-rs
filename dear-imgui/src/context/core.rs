@@ -366,6 +366,9 @@ impl Drop for Context {
                 std::process::abort();
             }
             if phase == ContextAttachmentPhase::RendererResources {
+                if self.snapshot_hub.renderer_drop_confirmed() {
+                    let _ = self.poll_snapshot_completions_unlocked();
+                }
                 // Renderer attachments must still see their active consumer and any detached
                 // epoch while proving that a texture reset is safe. After that phase no native
                 // renderer resource may observe a completion, so close the hub before platform
