@@ -4,8 +4,8 @@
 use bevy::ecs::schedule::ScheduleLabel;
 #[cfg(feature = "bevy-ui")]
 use bevy::ecs::schedule::{NodeId, ScheduleGraph};
-#[cfg(all(feature = "bevy-ui", not(target_arch = "wasm32")))]
-use bevy::render::pipelined_rendering::PipelinedRenderingPlugin;
+#[cfg(feature = "bevy-ui")]
+use bevy::render::{Render, RenderSystems, extract_plugin::ExtractPlugin};
 use bevy::{
     app::{App, PluginGroupBuilder},
     asset::{Assets, Handle, RenderAssetUsages},
@@ -576,18 +576,22 @@ fn bevy_ui_order_modes_define_complete_overlay_topology() {
             ],
         ),
     ] {
-        // Keep RenderApp available for schedule inspection after Bevy's startup frame.
-        let plugins = composition_plugins();
-        #[cfg(not(target_arch = "wasm32"))]
-        let plugins = plugins.disable::<PipelinedRenderingPlugin>();
-        let mut app_guard = composition_app(
-            plugins,
+        // Schedule configuration only needs a RenderApp. The pixel tests run the GPU passes.
+        let mut app_guard = ShutdownAppGuard(App::new());
+        let app = &mut app_guard.0;
+        app.add_plugins(ExtractPlugin::<RenderApp>::new(
+            |_, _| {},
+            Render::base_schedule,
+            Render.intern(),
+            RenderSystems::ExtractCommands.intern(),
+            RenderSystems::PostCleanup.intern(),
+        ));
+        app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+        app.add_plugins(
             ImguiPlugin::new(ImguiPluginConfig::default().with_docking(false))
                 .with_ui_render_order(order),
         );
-        let app = &mut app_guard.0;
-        app.cleanup();
-        app.update();
+        app.finish();
 
         assert_render_dependency_chain(app, Core2d, expected);
         assert_render_dependency_chain(app, Core3d, expected);
