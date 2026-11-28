@@ -14,6 +14,10 @@ The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window i
 
 `dear-imgui-bevy` defaults to the renderer plus deterministic Bevy UI ordering. Native multi-viewport is supported through an explicit feature and runtime opt-in. WASM supports the normal and headless feature sets but cannot create native platform windows.
 
+The manifest pins `bevy_ecs_macro_logic` to `=0.20.1` because `bevy_ecs_macros 0.20.1`
+allows newer compatible releases of its macro implementation. The direct pin keeps the two crates
+on the same Bevy release when an application resolves dependencies with its own lockfile.
+
 ## Installation
 
 Both the `0.23` and `0.22` release trains target Bevy exactly `0.20.1`. Backend `0.21.0` and the `0.20` train target Bevy `0.20.0`. Backend `0.19.0` targets Bevy `0.19.1`.

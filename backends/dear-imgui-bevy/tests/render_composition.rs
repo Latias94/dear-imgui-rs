@@ -10,7 +10,7 @@ use bevy::{
     app::{App, PluginGroupBuilder},
     asset::{Assets, Handle, RenderAssetUsages},
     camera::{ClearColorConfig, CompositingSpace, Hdr, RenderTarget},
-    color::LinearRgba,
+    color::{LinearRgba, Srgba},
     core_pipeline::{Core2d, Core3d},
     ecs::prelude::*,
     image::Image,
@@ -34,6 +34,7 @@ use bevy::{
     color::Color as BevyColor,
     prelude::{BackgroundColor, Node, UiTargetCamera, percent},
 };
+use dear_imgui_backend_support::srgb_vertex_color_to_linear;
 use dear_imgui_bevy::{
     ImguiAppExt, ImguiBevyTextures, ImguiContextConfig, ImguiContexts, ImguiFrame, ImguiPlugin,
     ImguiPluginConfig, ImguiRenderSystems, ImguiTexture,
@@ -365,9 +366,23 @@ fn draw_color_encoding_fixture(
         [1.0; 2],
         [gray, gray, gray, 1.0],
     );
+    let black = [0.0, 0.0, 0.0, 1.0];
+    let white = [1.0; 4];
+    draw.add_rect_filled_multicolor([24.0, 44.0], [40.0, 60.0], black, white, white, black);
 }
 
-fn color_encoding_samples(blended_gray: u8) -> [([u32; 2], [u8; 4]); 7] {
+fn color_encoding_samples(blended_gray: u8) -> [([u32; 2], [u8; 4]); 8] {
+    let gray = 128.0 / 255.0;
+    let [linear_gray, ..] = srgb_vertex_color_to_linear([gray, gray, gray, 1.0]);
+    let encode_gray = |linear| {
+        let encoded = Srgba::from(LinearRgba::new(linear, linear, linear, 1.0));
+        (encoded.red * 255.0).round() as u8
+    };
+    let modulated = encode_gray(linear_gray * linear_gray);
+    // The pixel centered at x = 32.5 is 8.5 pixels into the 16-pixel gradient.
+    let gradient = 8.5 / 16.0;
+    let [gradient, ..] = srgb_vertex_color_to_linear([gradient, gradient, gradient, 1.0]);
+    let gradient = encode_gray(gradient);
     [
         ([12, 12], [128, 128, 128, 255]),
         ([32, 12], [blended_gray, blended_gray, blended_gray, 255]),
@@ -375,7 +390,8 @@ fn color_encoding_samples(blended_gray: u8) -> [([u32; 2], [u8; 4]); 7] {
         ([12, 32], [128, 128, 128, 255]),
         ([32, 32], [128, 128, 128, 255]),
         ([52, 32], [188, 188, 188, 255]),
-        ([12, 52], [61, 61, 61, 255]),
+        ([12, 52], [modulated, modulated, modulated, 255]),
+        ([32, 52], [gradient, gradient, gradient, 255]),
     ]
 }
 

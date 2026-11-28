@@ -18,6 +18,9 @@
 //! window: docking inside the host window works, but detached Dear ImGui viewports are not created
 //! as OS windows because Wayland does not expose the required global pointer model.
 //!
+//! Platform sessions for distinct Contexts and host windows can coexist on the SDL video
+//! thread. Drive them serially and route window events by SDL window ID.
+//!
 //! By default, this crate builds the SDL3 platform backend only. Enable
 //! `opengl3-renderer`, `sdlrenderer3-renderer`, or `sdlgpu3-renderer` to pair
 //! it with the matching official renderer shim.

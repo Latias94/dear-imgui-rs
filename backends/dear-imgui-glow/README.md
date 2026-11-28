@@ -56,15 +56,41 @@ renderer.render_reconciled(reconciled)?;
 resulting linear capability and issues the draw commands. The ordinary `render` entry point is the
 convenience composition of those two operations.
 
-For single-viewport use, explicitly shut down the renderer while its OpenGL context is current.
-Teardown first obtains an idle reset permit from the Context. A pending frame is abandoned by its
-RAII guard if it cannot be reconciled, and teardown only proceeds once the Context has observed
-that completion. Once validated, teardown deletes renderer-owned GPU textures, commits the Context
-binding reset, and releases the consumer so another renderer can attach:
+On native OpenGL, `new` and `with_shared_context` retain the function table. Make its native
+context current and call `shutdown` to release renderer-owned GL resources:
 
 ```rust
 renderer.shutdown(&mut imgui)?;
 ```
+
+For automatic release, pass a native owner to `with_owned_context`. For example, given glutin's
+`PossiblyCurrentContext` and a matching window surface, retain both in the activation closure:
+
+```rust
+use glutin::prelude::*;
+use std::rc::Rc;
+
+let renderer = unsafe {
+    // `gl` is the table loaded for `native_context`, without a Glow-managed GL debug callback.
+    // The closure owns the native context and surface and makes that exact context current.
+    GlowRenderer::with_owned_context(
+        Rc::new(gl),
+        move || {
+            native_context.make_current(&surface).map_err(|error| error.to_string())?;
+            native_context.is_current().then_some(())
+                .ok_or_else(|| "Glow's native context is not current".to_owned())
+        },
+        &mut imgui,
+    )?
+};
+```
+
+The renderer activates the native context for ordinary GL work and release, and leaves it current
+after successful activation. It removes its exact ImGui callback publication in either drop order.
+Releasing the GPU resources and dropping the consumer lets ImGui reset the managed textures for a
+replacement renderer. If native activation fails during `Drop`, GL deletion and the release
+notification are skipped. Call `shutdown` while you can still retry if you need error reporting.
+In browser WebGL, a retained Glow context can release its objects directly through its WebGL handle.
 
 For a renderer created with `with_external_context`, call `shutdown_with_context` with the same
 live function table while its OpenGL context is current. `destroy_device_objects` and
@@ -73,9 +99,9 @@ consumer attached. The next owned or external render recreates device objects tr
 before managed-texture reconciliation. Renderer-owned texture handles become stale during this
 reset because their GL objects are deleted; registered external texture mappings remain valid and
 their GL objects remain application-owned. Final shutdown removes those external mappings without
-deleting the application resources. Dropping an unreconciled `PendingFrame` records abandonment
-before the Context becomes mutably available again, so teardown can retry without a separate
-completion-poll step.
+deleting the application resources. Explicit teardown validates an idle consumer before releasing
+resources and commits the texture reset afterward. Dropping an unreconciled `PendingFrame`
+records abandonment before the Context becomes mutably available again.
 
 Manual texture APIs preserve their ownership at the type level. `register_texture` returns a
 `RendererTextureId`, while `register_external_texture` returns an `ExternalTextureId`. Convert
@@ -194,11 +220,11 @@ The platform contract is stronger than having non-null `Platform_RenderWindow` a
 `Platform_SwapBuffers` callbacks. The platform backend must create GL contexts in the same share
 group and make the correct viewport context current from `Platform_RenderWindow`. Because callback
 preflight cannot prove an OS-level GL share group, `attach` is unsafe and the integration must
-document why it upholds this contract. A compatible share-group context must also be current for
-runtime methods that perform GL work, explicit `shutdown`, and Dear ImGui Context teardown,
-because renderer resources are deleted before the platform-window phase. Dropping the wrapper
-defers that cleanup to the Context attachment; it is not a replacement for explicitly ordered
-shutdown at a known-current GL boundary.
+document why it upholds this contract. For renderers created with `with_shared_context`, make a
+compatible share-group context current for main-viewport GL work, explicit `shutdown`, and Dear
+ImGui Context teardown. `with_owned_context` supplies native activation for those operations. The
+runtime releases renderer resources before the platform-window phase. Dropping the wrapper defers
+cleanup to the Context attachment.
 
 `GlowRenderer::with_external_context` remains a single-viewport API because an unrelated GL
 capability cannot be paired safely after renderer creation. Use `with_shared_context` so the
@@ -212,32 +238,22 @@ proof; shared runtime tests remain the teardown evidence. See the
 
 ## sRGB / Gamma
 
-- Pipeline choice
-  - Linear FB: keep `FRAMEBUFFER_SRGB` disabled (default). Colors are passed through without gamma.
-  - sRGB FB: request an sRGB-capable surface and enable `FRAMEBUFFER_SRGB`.
-    ```rust
-    renderer.set_framebuffer_srgb_enabled(true)?; // enabled during render, then restored
-    ```
-  - Pick exactly one path to avoid double correction.
-  - `set_framebuffer_srgb_enabled(true)` is fallible and returns
-    `RenderError::FramebufferSrgbUnsupported` on OpenGL ES and WebGL, where this desktop state is
-    not a portable renderer contract. Disabling it is always accepted.
+Vertex RGB stays encoded through interpolation. By default, Glow passes the interpolated color
+through. On desktop OpenGL, an sRGB framebuffer can enable linear-light compositing:
 
-- Vertex color gamma (auto + override)
-  - The renderer applies gamma to ImGui vertex colors in the fragment shader via a `ColorGamma` uniform.
-  - Auto (default):
-    - `2.2` when `FRAMEBUFFER_SRGB` is enabled (decode vertex colors from sRGB → linear before write)
-    - `1.0` when `FRAMEBUFFER_SRGB` is disabled (pass-through)
-  - Override if needed:
-    ```rust
-    // Force a custom gamma (e.g., 2.2 or 1.0). Use None to restore auto.
-    renderer.set_color_gamma_override(Some(2.2));
-    renderer.set_color_gamma_override(None);
-    ```
+```rust
+renderer.set_framebuffer_srgb_enabled(true)?;
+```
 
-- Clear color
-  - `gl.clear_color(r,g,b,a)` is specified in linear space. With sRGB FB, the driver encodes it on write,
-    so the on-screen hex may not equal `r,g,b * 255` exactly (this is expected).
+In this mode the fragment shader decodes vertex RGB with the IEC 61966-2-1 curve, keeps vertex
+alpha as-is, and multiplies by the texture sample. Use an sRGB internal format for sRGB-encoded
+application textures so OpenGL decodes them during sampling. The framebuffer encodes the blended
+output and the linear clear color. Glow restores the prior `GL_FRAMEBUFFER_SRGB` state after the
+draw. OpenGL ES and WebGL return `RenderError::FramebufferSrgbUnsupported` when enabling that
+desktop state.
+
+`set_color_gamma_override(Some(gamma))` selects a custom power curve for interpolated vertex RGB.
+Use `Some(1.0)` for pass-through and `None` for the default behavior.
 
 ## Notes
 

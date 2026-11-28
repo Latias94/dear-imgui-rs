@@ -2758,6 +2758,7 @@ dependencies = [
  "bevy_window",
  "bevy_winit",
  "bytemuck",
+ "dear-imgui-backend-support",
  "dear-imgui-rs",
  "dear-imgui-winit",
  "dear-imguizmo",
@@ -2851,6 +2852,7 @@ dependencies = [
 name = "dear-imgui-glow"
 version = "0.23.0"
 dependencies = [
+ "dear-imgui-backend-support",
  "dear-imgui-rs",
  "dear-imgui-winit",
  "env_logger",

@@ -12,6 +12,7 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
+dear-imgui-backend-support.workspace = true
 dear-imgui-rs.workspace = true
 glow.workspace = true
 thiserror.workspace = true

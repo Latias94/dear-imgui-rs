@@ -21,10 +21,20 @@ Typical use cases:
 
 ## Notes
 
-- One SDL3 Dear ImGui platform runtime may be active per process. SDL cursor, capture, IME, and
-  hint state are process-wide in the official backend, so a second runtime returns
-  `Sdl3BackendError::PlatformSessionOccupied` before native initialization mutates that state.
-  After the first runtime shuts down, another Context may acquire the session.
+- Each SDL3 Dear ImGui platform session owns one Context and a distinct host window. Sessions can
+  coexist on the SDL video thread. Run their backend calls serially and follow the renderer's
+  context and device requirements. Pass each window event to its owning session, or offer it to
+  each session and use the returned handled flag. Forward display and gamepad device changes to
+  every session. Gamepad auto modes read the same SDL devices; use per-session manual gamepad
+  selection when assigning separate controllers.
+- Each session retains a copy of its host window, which keeps SDL video initialized through
+  `sdl3`'s shared reference counts. A native window lease can extend that lifetime through
+  retirement. Leave SDL teardown to those owners and keep any externally supplied graphics
+  resources alive for the lifetime specified by the backend constructor.
+- The session with mouse focus updates the cursor, and mouse capture also requires keyboard focus
+  in that session. Text input follows the keyboard-focused window and the backend's own input
+  request. Clipboard, SDL hints, and native focus remain shared application state. Native
+  viewport parenting is scoped to windows in the same session, where the video driver supports it.
 - The upstream SDL3 backend source is compiled from the Dear ImGui tree packaged by
   `dear-imgui-sys`, while this crate keeps the SDL3-specific build logic, Rust API, and SDL3
   wrapper boundary.
@@ -33,6 +43,15 @@ Typical use cases:
 - When `sdlrenderer3-renderer` or `sdlgpu3-renderer` is enabled, this crate compiles the
   matching official renderer source and local SDL3 shim. These renderer shims are not shared
   `dear-imgui-sys` features.
+- SDL3's native bridge catches C++ exceptions from the saved viewport callbacks. Queries use
+  their fallback on error. A callback that may have partially changed native resources fails
+  fast. Application callbacks installed directly into Dear ImGui or SDL must follow the
+  relevant callback ABI's non-unwinding contract.
+
+The SDLGPU3 viewport renderer loads the existing color target when ImGui sets
+`NoRendererClear`. On the clear path, a window created with transparent SDL backing uses
+zero alpha. Visible transparency depends on the SDL renderer driver, swapchain format,
+and system compositor.
 
 ## Features
 

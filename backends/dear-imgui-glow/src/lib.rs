@@ -12,6 +12,7 @@
 //! - **Runtime capabilities**: Select sampler objects and state paths from the live context
 //! - **External texture ownership**: Preserve application-owned texture filtering and GL state
 //! - **Raw callback state**: Expose scoped [`GlowRenderState`] access while callbacks execute
+//! - **Automatic cleanup**: Retain a native activation owner with [`GlowRenderer::with_owned_context`]
 //!
 //! # Example
 //!
@@ -35,6 +36,7 @@
 //! // ui.text("Hello, world!");
 //! // let frame = imgui.render(renderer.renderer_consumer().unwrap());
 //! // renderer.render(frame).unwrap();
+//! // On native platforms, call renderer.shutdown(&mut imgui) while GL is current.
 //! ```
 
 // Re-export glow to make it easier for users to use the correct version.

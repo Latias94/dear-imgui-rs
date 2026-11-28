@@ -79,7 +79,7 @@ fn frame_duration(fps: f32) -> Duration {
 struct Runtime {
     ownership: OrderedRuntimeOwner<RuntimeOwnership>,
     clear_color: wgpu::Color,
-    admitted_frame_count: u64,
+    frame_count: u64,
     wake: crate::AppWakeHandle,
 }
 
@@ -127,7 +127,7 @@ impl Runtime {
                 b: config.clear_color[2] as f64,
                 a: config.clear_color[3] as f64,
             },
-            admitted_frame_count: 0,
+            frame_count: 0,
             wake: wake.clone(),
         };
 
@@ -255,7 +255,7 @@ impl Runtime {
         render_surface_frame(
             self.ownership.get_mut(),
             self.clear_color,
-            &mut self.admitted_frame_count,
+            &mut self.frame_count,
             application,
             config,
             &self.wake,
@@ -437,10 +437,7 @@ pub(super) struct RunnerOwnership<R, A> {
 }
 
 impl<A: Application> Runner<A> {
-    fn drain_gpu_signals(&mut self, event_loop: &ActiveEventLoop, poll: bool) -> bool
-    where
-        A: 'static,
-    {
+    fn drain_gpu_signals(&mut self, event_loop: &ActiveEventLoop, poll: bool) -> bool {
         let before = self
             .ownership
             .runtime
@@ -452,7 +449,7 @@ impl<A: Application> Runner<A> {
             .as_ref()
             .map_or_else(Vec::new, |runtime| runtime.take_pending_gpu_signals(poll));
         for signal in signals {
-            self.user_event(event_loop, signal);
+            self.handle_gpu_signal(event_loop, signal);
             if self.shutdown.started() {
                 break;
             }
@@ -465,6 +462,90 @@ impl<A: Application> Runner<A> {
                     .as_ref()
                     .and_then(Runtime::current_generation)
     }
+
+    fn handle_gpu_signal(&mut self, event_loop: &ActiveEventLoop, event: RuntimeEvent) {
+        let generation = match &event {
+            RuntimeEvent::DeviceLost { generation, .. }
+            | RuntimeEvent::GpuFault { generation, .. } => *generation,
+            RuntimeEvent::Wake => return,
+        };
+
+        if !should_process_runtime_event(self.shutdown.started(), event_loop.exiting()) {
+            warn!(
+                generation = generation.get(),
+                "Ignoring GPU signal after runtime shutdown"
+            );
+            return;
+        }
+
+        let (generation, message) = match event {
+            RuntimeEvent::DeviceLost {
+                generation,
+                message,
+            } => (generation, message),
+            RuntimeEvent::GpuFault {
+                generation,
+                kind,
+                message,
+            } => {
+                let current_generation = self
+                    .ownership
+                    .runtime
+                    .as_ref()
+                    .and_then(Runtime::current_generation);
+                match classify_uncaptured_gpu_fault(current_generation, generation, kind, message) {
+                    GpuFaultDisposition::IgnoreStale => {
+                        warn!(
+                            generation = generation.get(),
+                            "Ignoring stale uncaptured GPU fault"
+                        );
+                    }
+                    GpuFaultDisposition::Terminate(error) => self.terminate(event_loop, error),
+                }
+                return;
+            }
+            RuntimeEvent::Wake => return,
+        };
+
+        let Some(runtime) = self.ownership.runtime.as_mut() else {
+            self.terminate(
+                event_loop,
+                RunError::Recovery {
+                    message: "device loss received before runtime initialization".to_owned(),
+                },
+            );
+            return;
+        };
+        match runtime.recover(
+            &mut self.ownership.application,
+            &self.config,
+            self.event_proxy.clone(),
+            generation,
+        ) {
+            RecoveryOutcome::Ignored => {
+                warn!(
+                    generation = generation.get(),
+                    "Ignoring stale or duplicate device-loss signal"
+                );
+            }
+            RecoveryOutcome::Recovered(replacement) => {
+                warn!(
+                    generation = generation.get(),
+                    replacement = replacement.get(),
+                    %message,
+                    "Recovered lost WGPU device"
+                );
+                runtime.window().window.request_redraw();
+            }
+            RecoveryOutcome::Failed => {
+                let message = runtime.recovery_error_message();
+                error!(%message, "WGPU device recovery failed");
+                self.shutdown_once();
+                event_loop.exit();
+            }
+        }
+    }
+
     fn new(config: AppConfig, application: A, event_proxy: EventLoopProxy<RuntimeEvent>) -> Self {
         let wake = crate::AppWakeHandle::new(event_proxy.clone());
         Self {
@@ -574,6 +655,14 @@ pub(super) fn window_event_requests_redraw(event: &WindowEvent) -> bool {
 pub(super) fn render_rejection_can_follow_device_loss(error: &RunError) -> bool {
     match error {
         RunError::SurfaceValidation => true,
+        #[cfg(feature = "test-engine")]
+        RunError::TestEngineFrame { source, .. } => match source.as_ref() {
+            dear_imgui_test_engine::FrameDriverError::Prepare(error)
+            | dear_imgui_test_engine::FrameDriverError::Render(error) => {
+                render_rejection_can_follow_device_loss(error)
+            }
+            _ => false,
+        },
         #[cfg(feature = "multi-viewport")]
         RunError::ViewportWork(error) => {
             !error.faults().is_empty()
@@ -620,87 +709,12 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: RuntimeEvent) {
         if matches!(event, RuntimeEvent::Wake) {
             self.wake.acknowledge();
-            return;
-        }
-        let generation = match &event {
-            RuntimeEvent::DeviceLost { generation, .. }
-            | RuntimeEvent::GpuFault { generation, .. } => *generation,
-            RuntimeEvent::Wake => return,
-        };
-
-        if !should_process_runtime_event(self.shutdown.started(), event_loop.exiting()) {
-            warn!(
-                generation = generation.get(),
-                "Ignoring GPU signal after runtime shutdown"
-            );
-            return;
-        }
-
-        let (generation, message) = match event {
-            RuntimeEvent::DeviceLost {
-                generation,
-                message,
-            } => (generation, message),
-            RuntimeEvent::GpuFault {
-                generation,
-                kind,
-                message,
-            } => {
-                let current_generation = self
-                    .ownership
-                    .runtime
-                    .as_ref()
-                    .and_then(Runtime::current_generation);
-                match classify_uncaptured_gpu_fault(current_generation, generation, kind, message) {
-                    GpuFaultDisposition::IgnoreStale => {
-                        warn!(
-                            generation = generation.get(),
-                            "Ignoring stale uncaptured GPU fault"
-                        );
-                    }
-                    GpuFaultDisposition::Terminate(error) => self.terminate(event_loop, error),
-                }
-                return;
-            }
-            RuntimeEvent::Wake => return,
-        };
-
-        let Some(runtime) = self.ownership.runtime.as_mut() else {
-            self.terminate(
-                event_loop,
-                RunError::Recovery {
-                    message: "device loss received before runtime initialization".to_owned(),
-                },
-            );
-            return;
-        };
-        match runtime.recover(
-            &mut self.ownership.application,
-            &self.config,
-            self.event_proxy.clone(),
-            generation,
-        ) {
-            RecoveryOutcome::Ignored => {
-                warn!(
-                    generation = generation.get(),
-                    "Ignoring stale or duplicate device-loss signal"
-                );
-            }
-            RecoveryOutcome::Recovered(replacement) => {
-                warn!(
-                    generation = generation.get(),
-                    replacement = replacement.get(),
-                    %message,
-                    "Recovered lost WGPU device"
-                );
-                runtime.window().window.request_redraw();
-            }
-            RecoveryOutcome::Failed => {
-                let message = runtime.recovery_error_message();
-                error!(%message, "WGPU device recovery failed");
-                self.shutdown_once();
-                event_loop.exit();
-            }
+        } else if self.ownership.runtime.is_some() {
+            // A GPU event wakes the runner. Classify the whole generation-local mailbox before
+            // acting on a device-loss notification, which can precede a terminal OOM signal.
+            self.drain_gpu_signals(event_loop, false);
+        } else {
+            self.handle_gpu_signal(event_loop, event);
         }
     }
 

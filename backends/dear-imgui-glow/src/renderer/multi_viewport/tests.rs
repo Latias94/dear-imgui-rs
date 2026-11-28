@@ -14,10 +14,7 @@ use dear_imgui_rs::{
 use super::callbacks::renderer_render_window_sys;
 use super::runtime::RuntimeState;
 use super::{GlowViewportError, GlowViewportRouteFault, GlowViewportRuntime};
-use crate::renderer::callbacks::{
-    draw_callback_reset_render_state, draw_callback_set_sampler_linear,
-    draw_callback_set_sampler_nearest,
-};
+use crate::renderer::init::RendererPublication;
 use crate::shaders::test_support::{
     FakeFailure, TEST_LOCK as DEVICE_TEST_LOCK, fake_gl as device_fake_gl,
     reset as reset_device_gl, snapshot as device_gl_snapshot,
@@ -177,6 +174,7 @@ fn test_renderer(
             program: None,
             attrib_location_tex: None,
             attrib_location_proj_mtx: None,
+            attrib_location_decode_vertex_srgb: None,
             attrib_location_color_gamma: None,
             attrib_location_vtx_pos: 0,
             attrib_location_vtx_uv: 0,
@@ -196,15 +194,13 @@ fn test_renderer(
         has_sampler_object_support: true,
         bind_program_pipeline: None,
         gl_context: gl,
+        context_owner: None,
         context_binding: None,
-        backend_user_data: Box::default(),
-        renderer_name_ptr: std::ptr::null(),
-        renderer_texture_max: [0, 0],
+        publication: None,
         renderer_state_fault: None,
         synthetic_test_renderer: true,
         texture_registry,
-        managed_textures: std::collections::HashMap::new(),
-        destroyed_managed_textures: std::collections::HashMap::new(),
+        managed_textures: Default::default(),
         renderer_consumer: Some(renderer_consumer),
         framebuffer_srgb: false,
         color_gamma_override: None,
@@ -215,25 +211,9 @@ fn test_renderer(
 fn publish_test_renderer_core(context: &mut Context, renderer: &mut GlowRenderer) {
     renderer.synthetic_test_renderer = false;
     renderer.context_binding = Some(context.binding());
-    context
-        .set_renderer_name(Some("dear-imgui-glow test".to_owned()))
-        .unwrap();
-    renderer.renderer_name_ptr = context.io().backend_renderer_name().unwrap().as_ptr();
-    unsafe {
-        context
-            .io_mut()
-            .set_backend_renderer_user_data(renderer.backend_user_data_ptr());
-        let platform_io = context.platform_io_mut();
-        platform_io
-            .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
-        platform_io
-            .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
-        platform_io
-            .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
-        platform_io.set_draw_callback_set_sampler_from_texture_raw(Some(
-            crate::renderer::callbacks::draw_callback_set_sampler_from_texture,
-        ));
-    }
+    let publication = RendererPublication::register(context, [0, 0]).unwrap();
+    publication.publish(context, renderer.gl_version).unwrap();
+    renderer.publication = Some(publication);
 }
 
 fn destroy_returned_renderer(

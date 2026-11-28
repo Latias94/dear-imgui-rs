@@ -62,6 +62,21 @@ builders and `Ui::text_colored` accept `Color`, RGBA arrays, and compatible vect
 | Preparing textures after acquiring a swapchain image | Prepare before acquisition. If the upload ring returns `VK_NOT_READY` as the only fault, skip the frame and retry on the next redraw. |
 | Requiring explicit synchronous `shutdown` to release a single-viewport renderer | Drop the renderer while the Vulkan device, queue, command pool, and loader are live. Use `shutdown` to receive cleanup errors and reset the Context immediately. |
 
+## Glow renderer
+
+| In 0.23 | In 0.24 |
+| --- | --- |
+| Retaining a Glow renderer until explicit shutdown | Use `GlowRenderer::with_owned_context` with a native owner that can make the original GL context current. The renderer releases its GL objects on drop. Applications using a borrowed context still call `shutdown` or `shutdown_with_context` with the correct context current. |
+| Approximating sRGB transfer in the vertex shader | The fragment shader decodes the interpolated vertex tint before modulation. Use an sRGB texture format for application textures containing sRGB-encoded RGB. |
+
+## SDL3 and Bevy
+
+| In 0.23 | In 0.24 |
+| --- | --- |
+| A process-wide Rust SDL3 platform lease | Each ImGui Context can attach its own SDL3 backend to a distinct main window. Feed each session the events it owns. |
+| SDLGPU3 clears every secondary viewport to opaque black | Viewports with `NoRendererClear` load the existing color attachment. Transparent secondary windows clear with zero alpha, while opaque windows still clear to opaque black. |
+| Mixing the ImGui overlay into an sRGB application target | Bevy expects linear HDR compositing by default. For `Camera2d` overlays that should blend in sRGB, select `CompositingSpace::Srgb` explicitly. |
+
 ## Prebuilt archives
 
 | In 0.23 | In 0.24 |

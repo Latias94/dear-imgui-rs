@@ -8,80 +8,33 @@ use dear_imgui_wgpu::{FramebufferExtent, WgpuFrameStage, WgpuViewportObservation
 use winit::event_loop::ActiveEventLoop;
 
 use super::{
-    admission::{
-        SurfaceAcquisition, SurfaceAdmission, SurfaceAdmissionBackend, SurfaceDispatch,
-        SurfaceSkipReason, admit_surface_frame,
-    },
-    lifecycle::{LifecycleAction, LifecycleMachine, SurfaceEvent},
+    admission::{SurfaceAdmission, SurfaceDispatch, SurfaceSkipReason, next_frame_index},
     ownership::RuntimeOwnership,
     renderer::AppRenderer,
-    state::WindowState,
-    surface::build_application_frame,
+    surface::{
+        FrameDriver, MainFrameOutput, MainFrameTarget, RecordedApplicationFrame,
+        RuntimeSurfaceAdmission, drive_frame, record_application_frame,
+    },
 };
 use crate::{AppConfig, Application, ApplicationStage, RunError, ViewportFrameContext};
-
-struct MainAdmission<'a> {
-    window: &'a mut WindowState,
-    lifecycle: &'a mut LifecycleMachine,
-    adapter: &'a wgpu::Adapter,
-    device: &'a wgpu::Device,
-    config: &'a AppConfig,
-}
-
-impl SurfaceAdmissionBackend for MainAdmission<'_> {
-    type Frame = wgpu::SurfaceTexture;
-    fn window_size(&self) -> winit::dpi::PhysicalSize<u32> {
-        self.window.window.inner_size()
-    }
-    fn acquire(&mut self) -> SurfaceAcquisition<Self::Frame> {
-        let Some(surface) = self.window.surface.as_ref() else {
-            return SurfaceAcquisition::Validation;
-        };
-        match surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => SurfaceAcquisition::Success(frame),
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => SurfaceAcquisition::Suboptimal(frame),
-            wgpu::CurrentSurfaceTexture::Lost => SurfaceAcquisition::Lost,
-            wgpu::CurrentSurfaceTexture::Outdated => SurfaceAcquisition::Outdated,
-            wgpu::CurrentSurfaceTexture::Timeout => SurfaceAcquisition::Timeout,
-            wgpu::CurrentSurfaceTexture::Occluded => SurfaceAcquisition::Occluded,
-            wgpu::CurrentSurfaceTexture::Validation => SurfaceAcquisition::Validation,
-        }
-    }
-    fn record_event(&mut self, event: SurfaceEvent) -> LifecycleAction {
-        self.lifecycle.surface_event(event)
-    }
-    fn recover(&mut self, action: LifecycleAction) -> Result<(), RunError> {
-        match action {
-            LifecycleAction::RecreateSurface => {
-                self.window
-                    .recreate_surface(self.adapter, self.device, self.config)
-            }
-            LifecycleAction::ReconfigureSurface => {
-                self.window.reconfigure(self.device);
-                Ok(())
-            }
-            _ => Err(RunError::Recovery {
-                message: format!("invalid native main-surface recovery action: {action:?}"),
-            }),
-        }
-    }
-}
 
 struct MultiFrameDriver<'a> {
     route: &'a WinitViewportRoute,
     event_loop: &'a ActiveEventLoop,
-    main: MainAdmission<'a>,
-    queue: &'a wgpu::Queue,
+    main: RuntimeSurfaceAdmission<'a>,
+    output: MainFrameOutput<'a>,
     producer: Option<wgpu::CommandBuffer>,
     secondary: WgpuViewportFrameReport,
     main_observation: Option<WgpuViewportObservation>,
-    surface_frame: Option<wgpu::SurfaceTexture>,
-    reconfigure_after_present: bool,
     skip: Option<SurfaceSkipReason>,
-    clear_color: wgpu::Color,
 }
 
-impl MultiFrameDriver<'_> {
+impl FrameDriver for MultiFrameDriver<'_> {
+    type Prepared<'frame> = WgpuPreparedMainFrame<'frame>;
+
+    #[cfg(feature = "test-engine")]
+    const MAIN_CAN_SKIP: bool = true;
+
     fn prepare<'frame>(
         &mut self,
         frame: FrameToken<'frame>,
@@ -104,9 +57,13 @@ impl MultiFrameDriver<'_> {
         Ok(main)
     }
 
+    #[cfg(feature = "test-engine")]
+    fn prepared_context_id(frame: &Self::Prepared<'_>) -> dear_imgui_rs::ContextId {
+        frame.context_id()
+    }
+
     fn render_main(&mut self, prepared: WgpuPreparedMainFrame<'_>) -> Result<bool, RunError> {
-        let admission = admit_surface_frame(&mut self.main)?;
-        let admitted = match admission {
+        let admitted = match self.main.admit()? {
             SurfaceAdmission::Skipped(reason) => {
                 self.skip = Some(reason);
                 drop(prepared);
@@ -114,122 +71,43 @@ impl MultiFrameDriver<'_> {
             }
             SurfaceAdmission::Admitted(admitted) => admitted,
         };
-        let view = admitted.frame.texture.create_view(&Default::default());
         let extent = FramebufferExtent::from_texture(&admitted.frame.texture);
-        let mut encoder =
-            self.main
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Dear App main UI consumer"),
-                });
-        let mut observation = {
-            let attachments = [Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                resolve_target: None,
-                depth_slice: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(self.clear_color),
-                    store: wgpu::StoreOp::Store,
-                },
-            })];
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Dear App main viewport"),
-                color_attachments: &attachments,
-                ..Default::default()
+        let encoder = self
+            .output
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Dear App main UI consumer"),
             });
-            self.route
-                .record_main(prepared, &mut pass, extent)
-                .map_err(|error| {
-                    self.main_observation = error
-                        .report()
-                        .observations()
-                        .iter()
-                        .find(|entry| entry.target.is_main)
-                        .cloned();
-                    RunError::ViewportWork(error)
-                })?
-        };
-        self.queue.submit([encoder.finish()]);
+        let mut observation = self.output.record_and_submit(
+            MainFrameTarget::Surface(admitted),
+            encoder,
+            "Dear App main viewport",
+            |pass| {
+                self.route
+                    .record_main(prepared, pass, extent)
+                    .map_err(|error| {
+                        self.main_observation = error
+                            .report()
+                            .observations()
+                            .iter()
+                            .find(|entry| entry.target.is_main)
+                            .cloned();
+                        RunError::ViewportWork(error)
+                    })
+            },
+        )?;
         observation.stage = observation.stage.max(WgpuFrameStage::Submitted);
         self.main_observation = Some(observation);
-        self.reconfigure_after_present = admitted.reconfigure_after_present;
-        self.surface_frame = Some(admitted.frame);
         Ok(true)
     }
 
     fn present(&mut self) -> Result<(), RunError> {
-        let frame = self
-            .surface_frame
-            .take()
-            .ok_or_else(|| RunError::Recovery {
-                message: "native main frame was not recorded or was already presented".to_owned(),
-            })?;
-        self.queue.present(frame);
+        self.output.present()?;
         if let Some(observation) = &mut self.main_observation {
             observation.stage = observation.stage.max(WgpuFrameStage::PresentationRequested);
         }
-        if self.reconfigure_after_present {
-            self.main.window.reconfigure(self.main.device);
-        }
         Ok(())
     }
-}
-
-#[cfg(feature = "test-engine")]
-impl dear_imgui_test_engine::TestFrameDriver for MultiFrameDriver<'_> {
-    type PreparedFrame<'frame> = WgpuPreparedMainFrame<'frame>;
-    type PrepareError = RunError;
-    type RenderError = RunError;
-    type PresentError = RunError;
-    fn prepare<'frame>(
-        &mut self,
-        frame: FrameToken<'frame>,
-        _: u64,
-    ) -> Result<Self::PreparedFrame<'frame>, RunError> {
-        self.prepare(frame)
-    }
-    fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> dear_imgui_rs::ContextId {
-        frame.context_id()
-    }
-    fn render_main(
-        &mut self,
-        frame: Self::PreparedFrame<'_>,
-        _: u64,
-    ) -> Result<dear_imgui_test_engine::MainRenderOutcome, RunError> {
-        Ok(if self.render_main(frame)? {
-            dear_imgui_test_engine::MainRenderOutcome::ReadyToPresent
-        } else {
-            dear_imgui_test_engine::MainRenderOutcome::Skipped
-        })
-    }
-    fn present(&mut self, _: u64) -> Result<(), RunError> {
-        self.present()
-    }
-}
-
-fn drive_frame<A: Application>(
-    application: &mut A,
-    frame: FrameToken<'_>,
-    frame_index: u64,
-    driver: &mut MultiFrameDriver<'_>,
-) -> Result<(), RunError> {
-    #[cfg(feature = "test-engine")]
-    if let Some(engine) = application.test_engine() {
-        engine
-            .drive_frame(frame, frame_index, driver)
-            .map_err(|source| RunError::TestEngineFrame {
-                frame: frame_index,
-                source: Box::new(source),
-            })?;
-        return Ok(());
-    }
-    #[cfg(not(feature = "test-engine"))]
-    let _ = (application, frame_index);
-    let prepared = driver.prepare(frame)?;
-    if driver.render_main(prepared)? {
-        driver.present()?;
-    }
-    Ok(())
 }
 
 pub(super) fn render_frame<A: Application>(
@@ -246,39 +124,27 @@ pub(super) fn render_frame<A: Application>(
         ui,
         generations,
     } = ownership;
-    let (generation, lifecycle) = generations
-        .render_parts()
-        .ok_or_else(|| RunError::Recovery {
-            message: "native frame requested without an active GPU generation".to_owned(),
-        })?;
-    let frame_index = frame_count
-        .checked_add(1)
-        .ok_or_else(|| RunError::Recovery {
-            message: "UI frame counter exhausted".to_owned(),
-        })?;
-    *frame_count = frame_index;
-    let (frame, exit_requested) =
-        build_application_frame(ui, generation, window, application, config, wake)?;
-    let gpu = &mut generation.gpu;
-    let mut encoder = gpu
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Dear App engine producer"),
-        });
-    let size = window.window.inner_size();
-    application
-        .record_render(&mut crate::RenderContext {
-            device: &gpu.device,
-            queue: &gpu.queue,
-            encoder: &mut encoder,
-            window: &window.window,
-            generation: generation.id,
-            frame_index,
-            framebuffer_extent: FramebufferExtent::new(size.width, size.height),
-            surface_format: window.surface_config()?.format,
-            wake,
-        })
-        .map_err(|error| error.during_application_stage(ApplicationStage::RecordRender))?;
+    let (generation, lifecycle) = generations.render_parts();
+    let generation = generation.ok_or_else(|| RunError::Recovery {
+        message: "native frame requested without an active GPU generation".to_owned(),
+    })?;
+    let frame_index = next_frame_index(frame_count, "UI frame counter exhausted")?;
+    let RecordedApplicationFrame {
+        frame,
+        exit_requested,
+        encoder,
+        ..
+    } = record_application_frame(
+        ui,
+        generation,
+        window,
+        application,
+        config,
+        wake,
+        frame_index,
+        None,
+    )?;
+    let gpu = &generation.gpu;
     let AppRenderer::Multi(route) = &gpu.renderer else {
         return Err(RunError::Recovery {
             message: "native frame used a single-window renderer".to_owned(),
@@ -287,23 +153,15 @@ pub(super) fn render_frame<A: Application>(
     let mut driver = MultiFrameDriver {
         route,
         event_loop,
-        main: MainAdmission {
-            window,
-            lifecycle,
-            adapter: &gpu.adapter,
-            device: &gpu.device,
-            config,
-        },
-        queue: &gpu.queue,
+        main: RuntimeSurfaceAdmission::new(window, lifecycle, Some(gpu), config),
+        output: MainFrameOutput::new(&gpu.queue, &gpu.device, clear_color),
         producer: Some(encoder.finish()),
         secondary: WgpuViewportFrameReport::default(),
         main_observation: None,
-        surface_frame: None,
-        reconfigure_after_present: false,
         skip: None,
-        clear_color,
     };
     let result = drive_frame(application, frame, frame_index, &mut driver);
+    let result = driver.output.after_render(driver.main.window(), result);
     // Always publish earlier secondary observations, including when main admission/drawing failed.
     let observed = application
         .viewport_frame(&ViewportFrameContext {

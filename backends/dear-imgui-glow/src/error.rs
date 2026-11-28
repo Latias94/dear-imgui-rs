@@ -88,6 +88,14 @@ pub enum InitError {
     #[error(transparent)]
     RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
 
+    /// The Context could not register the renderer publication's teardown hook.
+    #[error(transparent)]
+    RendererAttachment(#[from] dear_imgui_rs::ContextAttachmentError),
+
+    /// The native context owner could not make the renderer's OpenGL context current.
+    #[error("failed to make the renderer's OpenGL context current: {0}")]
+    ActivateGlContext(String),
+
     /// A renderer-owned Context state slot was already occupied.
     #[error("Glow renderer state slot `{field}` is already occupied")]
     RendererStateOccupied { field: &'static str },
@@ -182,6 +190,14 @@ pub enum RenderError {
         "No OpenGL context available. Use the matching *_with_context method for externally managed contexts."
     )]
     MissingGlContext,
+
+    /// The supplied table differs from the one bound to this renderer's context owner.
+    #[error("the supplied Glow function table does not match the renderer's owned context")]
+    GlContextMismatch,
+
+    /// The native context owner could not make the renderer's OpenGL context current.
+    #[error("failed to make the renderer's OpenGL context current: {0}")]
+    ActivateGlContext(String),
 
     /// Renderer device object initialization failed.
     #[error("Device object initialization failed: {0}")]

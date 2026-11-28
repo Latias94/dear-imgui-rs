@@ -19,6 +19,7 @@ pub const IMGUI_FRAGMENT_ENTRY_POINT: &str = "fs_main";
 ///
 /// Vertex colors stay in sRGB across rasterization for perceptual gradient interpolation and are
 /// decoded to linear light in `fs_main` before texture modulation, while alpha stays linear.
+/// The GPU readbacks use `dear_imgui_backend_support::srgb_vertex_color_to_linear` as a reference.
 /// Output RGB is then encoded to the camera stack's resolved compositing space (`Linear` by default
 /// on `Camera3d` / HDR views, or `Srgb` / `Oklab` on `Camera2d` views that request it).
 pub const IMGUI_SHADER_SOURCE: &str = r#"
@@ -64,7 +65,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Decode interpolated sRGB vertex colors to linear light before texture modulation.
-    let vertex_color = vec4<f32>(srgb_to_linear(in.color.rgb), in.color.a);
+    let vertex_color = vec4<f32>(srgb_to_linear(max(in.color.rgb, vec3<f32>(0.0))), in.color.a);
     let color = vertex_color * textureSample(imgui_texture, imgui_sampler, in.uv);
     if uniforms.compositing_space == 1u {
         return vec4<f32>(linear_to_srgb(color.rgb), color.a);

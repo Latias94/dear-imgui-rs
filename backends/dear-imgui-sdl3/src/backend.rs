@@ -49,6 +49,7 @@ fn prepare_renderer_consumer(
 ))]
 fn prepare_renderer_runtime(
     imgui: &mut Context,
+    window: &Window,
     renderer_shutdown: fn(),
     renderer_device_objects_destroy: fn(),
     renderer_texture_update: fn(&mut dear_imgui_rs::TextureData),
@@ -57,6 +58,7 @@ fn prepare_renderer_runtime(
 ) -> Result<RuntimeRegistration, Sdl3BackendError> {
     let mut runtime = RuntimeRegistration::prepare_with_backend(
         imgui,
+        window,
         Some(renderer_shutdown),
         Some(renderer_device_objects_destroy),
         Some(renderer_texture_update),
@@ -977,6 +979,7 @@ impl Sdl3PlatformBackend {
     ) -> Result<Self, Sdl3BackendError> {
         let mut runtime = RuntimeRegistration::prepare_with_backend(
             imgui,
+            window,
             None,
             None,
             None,
@@ -1260,6 +1263,7 @@ impl Sdl3OpenGl3Backend {
     ) -> Result<Self, Sdl3BackendError> {
         let mut runtime = prepare_renderer_runtime(
             imgui,
+            window,
             shutdown_opengl3_renderer_impl,
             destroy_opengl3_device_objects,
             update_opengl3_texture,
@@ -1317,6 +1321,7 @@ impl Sdl3OpenGl3Backend {
     ) -> Result<Self, Sdl3BackendError> {
         let mut runtime = prepare_renderer_runtime(
             imgui,
+            window,
             shutdown_opengl3_renderer_impl,
             destroy_opengl3_device_objects,
             update_opengl3_texture,
@@ -1570,6 +1575,7 @@ impl SdlGpu3RendererBackend {
     ) -> Result<Self, Sdl3BackendError> {
         let mut runtime = prepare_renderer_runtime(
             imgui,
+            window,
             shutdown_sdlgpu3_renderer_impl,
             destroy_sdlgpu3_device_objects,
             update_sdlgpu3_texture,
@@ -1894,6 +1900,7 @@ impl SdlRenderer3Backend {
     ) -> Result<Self, Sdl3BackendError> {
         let mut runtime = prepare_renderer_runtime(
             imgui,
+            canvas.window(),
             shutdown_sdlrenderer3_renderer_impl,
             destroy_sdlrenderer3_device_objects,
             update_sdlrenderer3_texture,

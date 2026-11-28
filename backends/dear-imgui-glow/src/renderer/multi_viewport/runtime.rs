@@ -762,44 +762,24 @@ impl RuntimeControl {
 
     fn release_renderer_during_context_teardown(
         &self,
-        context: &ContextTeardown<'_>,
     ) -> Result<(), ContextAttachmentTeardownError> {
-        if self.renderer.borrow().is_none() {
-            self.gl.borrow_mut().take();
-            self.set_state(RuntimeState::ResourceDropped);
-            return Ok(());
-        }
-        let gl = self
-            .gl
-            .borrow()
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| context_teardown_error(GlowViewportError::RuntimeDetached))?;
         let mut renderer = self.renderer.try_borrow_mut().map_err(|_| {
             context_teardown_error(GlowViewportError::CallbackReentered {
                 callback: "Context renderer-resource teardown",
             })
         })?;
-        let renderer_ref = renderer
-            .as_deref_mut()
-            .ok_or_else(|| context_teardown_error(GlowViewportError::RuntimeDetached))?;
-        let consumer = renderer_ref.renderer_consumer.take().ok_or_else(|| {
-            ContextAttachmentTeardownError::new(
-                "Glow renderer-resource teardown lost its renderer consumer",
-            )
-        })?;
-        let reset = context.with_renderer_texture_reset(&consumer, || {
-            renderer_ref
-                .destroy_for_context_teardown(&gl)
-                .map_err(|error| context_teardown_error(GlowViewportError::Renderer(error)))
-        });
-        if let Err(error) = reset {
-            renderer_ref.renderer_consumer = Some(consumer);
-            return Err(error);
+        if let Some(renderer) = renderer.as_deref_mut()
+            && !renderer.has_owned_gl_cleanup()
+        {
+            let gl = self.gl.borrow();
+            let gl = gl
+                .as_deref()
+                .ok_or_else(|| context_teardown_error(GlowViewportError::RuntimeDetached))?;
+            // SAFETY: for a table-only renderer, `attach` requires a current share-group context
+            // throughout this teardown phase. An owning renderer activates its context in Drop.
+            unsafe { renderer.destroy_gpu_resources_only(gl) };
         }
-        drop(consumer);
-        let renderer = renderer.take();
-        drop(renderer);
+        drop(renderer.take());
         self.gl.borrow_mut().take();
         self.set_state(RuntimeState::ResourceDropped);
         Ok(())
@@ -861,13 +841,6 @@ impl RuntimeControl {
 
     fn mark_context_destroyed(&self) {
         unregister_runtime(self.binding.id());
-        let gl = self.gl.borrow().as_ref().cloned();
-        if let (Some(gl), Ok(mut renderer)) = (gl, self.renderer.try_borrow_mut()) {
-            if let Some(renderer) = renderer.as_deref_mut() {
-                let _ = renderer.destroy_after_context_destroyed(&gl);
-            }
-            renderer.take();
-        }
         self.gl.borrow_mut().take();
         self.attachment.borrow_mut().take();
         self.set_state(RuntimeState::ResourceDropped);
@@ -934,7 +907,7 @@ impl ContextAttachment for RuntimeControl {
             self.begin_shutdown();
             let callback_error = release_callbacks(self).err().map(context_teardown_error);
             self.mark_detached();
-            let renderer_error = self.release_renderer_during_context_teardown(context).err();
+            let renderer_error = self.release_renderer_during_context_teardown().err();
             callback_error.or(renderer_error).map_or(Ok(()), Err)
         })
     }
@@ -977,11 +950,11 @@ impl GlowViewportRuntime {
     ///
     /// The platform runtime must create every secondary viewport OpenGL context in the renderer's
     /// share group and make the corresponding context current before invoking
-    /// `Platform_RenderWindow`. A compatible share-group context must remain current whenever a
-    /// runtime method performs OpenGL work, during explicit shutdown, when this runtime is dropped,
-    /// and during Context teardown. This lets renderer resources be deleted in the ordered
-    /// renderer-resource phase. Violating these requirements may issue OpenGL operations against
-    /// the wrong native context.
+    /// `Platform_RenderWindow`. For a table-only renderer, a compatible share-group context must
+    /// also be current for main-viewport GL work, explicit shutdown, and the Dear ImGui Context's
+    /// renderer-resource teardown phase. A renderer created with [`GlowRenderer::with_owned_context`]
+    /// activates its context for those operations. The secondary draw still uses the native context
+    /// selected by the platform, and any raw callback that switches it must restore it.
     pub unsafe fn attach(
         context: &mut Context,
         mut renderer: GlowRenderer,
@@ -1239,7 +1212,7 @@ impl GlowViewportRuntime {
     ///
     /// This operation is idempotent and reports deferred callback faults. It intentionally does
     /// not return the consumed renderer because its consumer and GPU resources are terminal. A GL
-    /// context from the renderer's share group must be current for this call.
+    /// context from the renderer's share group must be current for a table-only renderer.
     pub fn shutdown(&mut self, context: &mut Context) -> Result<(), GlowViewportError> {
         self.control.ensure_context(context)?;
         let pending = self.control.detect_and_take_fault();

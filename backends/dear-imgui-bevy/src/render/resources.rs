@@ -1,14 +1,13 @@
 //! Render-world resources and renderer-owned state.
 
-use super::prepare::{
-    create_standard_imgui_sampler, create_texture_sampler_bind_group, write_texture_rows,
+use super::texture::{
+    ImguiRenderTexture, create_standard_imgui_sampler, create_texture_sampler_bind_group,
+    write_texture_rows,
 };
 use super::*;
 use crate::texture::{
     ImguiBevyTextureExtraction, ImguiTextureLeaseEvents, ImguiTextureLeaseIdentity,
 };
-use bevy_render::render_resource::{SamplerId, TextureViewId};
-
 /// Camera/render-target association for an extracted ImGui overlay frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImguiCameraTarget {
@@ -72,6 +71,32 @@ impl From<&Viewport> for ImguiCameraViewport {
             physical_position: [viewport.physical_position.x, viewport.physical_position.y],
             physical_size: [viewport.physical_size.x, viewport.physical_size.y],
         }
+    }
+}
+
+impl ImguiCameraViewport {
+    pub(super) fn matches_extracted_view(
+        viewport: Option<Self>,
+        target_size: [u32; 2],
+        view: &ExtractedView,
+        camera: &ExtractedCamera,
+    ) -> bool {
+        let Some(physical_size) = camera.physical_target_size else {
+            return false;
+        };
+        if physical_size.to_array() != target_size {
+            return false;
+        }
+        let extracted = camera.viewport.clone().map(|mut viewport| {
+            viewport.clamp_to_size(physical_size);
+            Self::from(&viewport)
+        });
+        let (position, size) = viewport.map_or(([0, 0], target_size), |viewport| {
+            (viewport.physical_position, viewport.physical_size)
+        });
+        extracted == viewport
+            && camera.physical_viewport_size == Some(UVec2::from(size))
+            && view.viewport == UVec4::new(position[0], position[1], size[0], size[1])
     }
 }
 
@@ -390,15 +415,14 @@ impl FromWorld for ImguiPipelineGpuResources {
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        assert!(write_texture_rows(
+        write_texture_rows(
             render_queue,
             &fallback_texture,
             Origin3d::ZERO,
-            1,
-            1,
+            [1, 1],
             4,
             &[255, 255, 255, 255],
-        ));
+        );
         let fallback_view = fallback_texture.create_view(&TextureViewDescriptor::default());
         let fallback_bind_group = create_texture_sampler_bind_group(
             render_device,
@@ -497,392 +521,6 @@ fn create_camera_uniform_resources(
     ImguiCameraUniformResources {
         buffer: uniform_buffer,
         bind_group,
-    }
-}
-
-pub(super) struct ImguiRenderTexture {
-    pub(super) texture: Option<Texture>,
-    pub(super) _view: Option<TextureView>,
-    pub(super) extent: Option<[u32; 2]>,
-    pub(super) linear_bind_group: BindGroup,
-    pub(super) nearest_bind_group: BindGroup,
-}
-
-pub(super) struct ImguiTextureUpload<'a> {
-    pub(super) format: imgui::texture::TextureFormat,
-    pub(super) width: u32,
-    pub(super) height: u32,
-    pub(super) row_pitch: usize,
-    pub(super) pixels: &'a [u8],
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct ImguiTextureViewCompatibility {
-    pub(super) texture_usage: TextureUsages,
-    pub(super) view_usage: Option<TextureUsages>,
-    pub(super) sample_count: u32,
-    pub(super) texture_dimension: TextureDimension,
-    pub(super) depth_or_array_layers: u32,
-    pub(super) view_dimension: Option<TextureViewDimension>,
-    pub(super) format: TextureFormat,
-    pub(super) aspect: TextureAspect,
-}
-
-impl ImguiTextureViewCompatibility {
-    pub(super) fn from_gpu_image(gpu_image: &GpuImage) -> Self {
-        let texture_descriptor = &gpu_image.texture_descriptor;
-        let view_descriptor = gpu_image.texture_view_descriptor.as_ref();
-        Self {
-            texture_usage: texture_descriptor.usage,
-            view_usage: view_descriptor.and_then(|descriptor| descriptor.usage),
-            sample_count: texture_descriptor.sample_count,
-            texture_dimension: texture_descriptor.dimension,
-            depth_or_array_layers: texture_descriptor.size.depth_or_array_layers,
-            view_dimension: view_descriptor.and_then(|descriptor| descriptor.dimension),
-            format: view_descriptor
-                .and_then(|descriptor| descriptor.format)
-                .unwrap_or(texture_descriptor.format),
-            aspect: view_descriptor.map_or(TextureAspect::All, |descriptor| descriptor.aspect),
-        }
-    }
-
-    pub(super) fn supports_imgui_sampling(self, device_features: WgpuFeatures) -> bool {
-        if !self
-            .resolved_view_usage()
-            .contains(TextureUsages::TEXTURE_BINDING)
-        {
-            return false;
-        }
-        if self.sample_count != 1 || self.resolved_view_dimension() != TextureViewDimension::D2 {
-            return false;
-        }
-
-        matches!(
-            self.format
-                .sample_type(Some(self.aspect), Some(device_features)),
-            Some(TextureSampleType::Float { filterable: true })
-        )
-    }
-
-    fn resolved_view_usage(self) -> TextureUsages {
-        let usage = self.view_usage.unwrap_or_else(TextureUsages::empty);
-        if usage.is_empty() {
-            self.texture_usage
-        } else {
-            usage
-        }
-    }
-
-    fn resolved_view_dimension(self) -> TextureViewDimension {
-        let default_dimension = match self.texture_dimension {
-            TextureDimension::D1 => TextureViewDimension::D1,
-            TextureDimension::D2 => {
-                if self.depth_or_array_layers == 1 {
-                    TextureViewDimension::D2
-                } else {
-                    TextureViewDimension::D2Array
-                }
-            }
-            TextureDimension::D3 => TextureViewDimension::D3,
-        };
-        self.view_dimension.unwrap_or(default_dimension)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct BevyImageBindingSource {
-    pub(super) texture_view: TextureViewId,
-    pub(super) sampler: SamplerId,
-}
-
-impl From<&GpuImage> for BevyImageBindingSource {
-    fn from(image: &GpuImage) -> Self {
-        Self {
-            texture_view: image.texture_view.id(),
-            sampler: image.sampler.id(),
-        }
-    }
-}
-
-/// Texture bind groups currently known to the Bevy-native ImGui renderer.
-#[derive(Resource, Default)]
-pub struct ImguiTextureBindGroups {
-    pub(super) textures: HashMap<TextureBinding, ImguiRenderTexture>,
-    pub(super) bevy_image_sources: HashMap<TextureBinding, BevyImageBindingSource>,
-    pub(super) managed_texture_ids: HashMap<SnapshotTextureId, imgui::TextureId>,
-    pub(super) managed_texture_aliases: HashMap<imgui::TextureId, SnapshotTextureId>,
-    /// Managed texture identities sealed by a Destroy request until the renderer has completed
-    /// the snapshot epoch that carried that request. Keeping the epoch prevents an older delayed
-    /// snapshot from reviving a texture while allowing high-churn identities to be reclaimed.
-    pub(super) destroyed_managed_textures: HashMap<SnapshotTextureId, u64>,
-    pub(super) next_managed_texture_id: u64,
-}
-
-impl ImguiTextureBindGroups {
-    pub(super) fn remove_binding(&mut self, texture: &TextureBinding) {
-        self.textures.remove(texture);
-        self.bevy_image_sources.remove(texture);
-    }
-
-    /// Number of registered texture bind groups.
-    #[cfg(test)]
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.textures.len()
-    }
-
-    /// Whether no texture bind groups are currently registered.
-    #[cfg(test)]
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.textures.is_empty()
-    }
-
-    pub(super) fn get(
-        &self,
-        texture: &TextureBinding,
-        sampler: ImguiSampler,
-    ) -> Option<&BindGroup> {
-        let managed_alias = match texture {
-            TextureBinding::Legacy(texture_id) => self
-                .managed_texture_aliases
-                .get(texture_id)
-                .copied()
-                .map(TextureBinding::Managed),
-            TextureBinding::Managed(_) => None,
-        };
-        self.textures
-            .get(managed_alias.as_ref().unwrap_or(texture))
-            .map(|texture| match sampler {
-                ImguiSampler::Linear => &texture.linear_bind_group,
-                ImguiSampler::Nearest => &texture.nearest_bind_group,
-            })
-    }
-
-    pub(super) fn insert_render_texture(
-        &mut self,
-        texture: TextureBinding,
-        render_texture: ImguiRenderTexture,
-    ) {
-        self.bevy_image_sources.remove(&texture);
-        self.textures.insert(texture, render_texture);
-    }
-
-    pub(super) fn managed_texture_id(&mut self, id: SnapshotTextureId) -> imgui::TextureId {
-        if let Some(texture_id) = self.managed_texture_ids.get(&id) {
-            return *texture_id;
-        }
-        loop {
-            let sequence = self
-                .next_managed_texture_id
-                .checked_add(1)
-                .expect("Bevy managed texture ID space exhausted");
-            assert!(
-                sequence < MANAGED_TEXTURE_NAMESPACE,
-                "Bevy managed texture ID namespace exhausted"
-            );
-            self.next_managed_texture_id = sequence;
-            let texture_id = imgui::TextureId::new(MANAGED_TEXTURE_NAMESPACE | sequence);
-            if self.managed_texture_aliases.contains_key(&texture_id)
-                || self
-                    .textures
-                    .contains_key(&TextureBinding::Legacy(texture_id))
-            {
-                continue;
-            }
-            self.managed_texture_ids.insert(id, texture_id);
-            self.managed_texture_aliases.insert(texture_id, id);
-            return texture_id;
-        }
-    }
-
-    pub(super) fn remove_managed_texture(&mut self, id: SnapshotTextureId) {
-        self.remove_binding(&TextureBinding::Managed(id));
-        if let Some(texture_id) = self.managed_texture_ids.remove(&id) {
-            self.managed_texture_aliases.remove(&texture_id);
-        }
-    }
-
-    pub(super) fn destroy_managed_texture(&mut self, id: SnapshotTextureId, destroy_epoch: u64) {
-        self.destroyed_managed_textures
-            .entry(id)
-            .and_modify(|epoch| *epoch = (*epoch).max(destroy_epoch))
-            .or_insert(destroy_epoch);
-        self.remove_managed_texture(id);
-    }
-
-    pub(super) fn managed_texture_is_destroyed(&self, id: SnapshotTextureId) -> bool {
-        self.destroyed_managed_textures.contains_key(&id)
-    }
-
-    pub(super) fn accepts_managed_texture_upload(&self, id: SnapshotTextureId) -> bool {
-        !self.managed_texture_is_destroyed(id)
-    }
-
-    pub(super) fn prune_destroyed_managed_textures(
-        &mut self,
-        completion_watermarks: &HashMap<imgui::ContextId, u64>,
-    ) {
-        self.destroyed_managed_textures.retain(|id, destroy_epoch| {
-            completion_watermarks
-                .get(&snapshot_texture_context_id(*id))
-                .is_none_or(|watermark| *destroy_epoch > *watermark)
-        });
-    }
-
-    pub(super) fn take_managed_renderer_state(
-        &mut self,
-        context_id: imgui::ContextId,
-    ) -> Vec<ImguiRenderTexture> {
-        let mut released = Vec::new();
-        let managed_ids = self
-            .managed_texture_ids
-            .keys()
-            .filter(|id| snapshot_texture_context_id(**id) == context_id)
-            .copied()
-            .collect::<Vec<_>>();
-        for id in managed_ids {
-            let texture_id = self
-                .managed_texture_ids
-                .remove(&id)
-                .expect("selected managed texture identity must still exist");
-            self.managed_texture_aliases.remove(&texture_id);
-            let binding = TextureBinding::Managed(id);
-            self.bevy_image_sources.remove(&binding);
-            if let Some(texture) = self.textures.remove(&binding) {
-                released.push(texture);
-            }
-        }
-        let orphaned = self
-            .textures
-            .keys()
-            .copied()
-            .filter(|binding| {
-                matches!(
-                    binding,
-                    TextureBinding::Managed(id)
-                        if snapshot_texture_context_id(*id) == context_id
-                )
-            })
-            .collect::<Vec<_>>();
-        for binding in orphaned {
-            self.bevy_image_sources.remove(&binding);
-            if let Some(texture) = self.textures.remove(&binding) {
-                released.push(texture);
-            }
-        }
-        self.destroyed_managed_textures
-            .retain(|id, _| snapshot_texture_context_id(*id) != context_id);
-        released
-    }
-
-    pub(super) fn contains_current_bevy_image(
-        &self,
-        texture: &TextureBinding,
-        image: &GpuImage,
-    ) -> bool {
-        self.textures.contains_key(texture)
-            && self.bevy_image_source_matches(texture, &BevyImageBindingSource::from(image))
-    }
-
-    fn bevy_image_source_matches(
-        &self,
-        texture: &TextureBinding,
-        source: &BevyImageBindingSource,
-    ) -> bool {
-        self.bevy_image_sources.get(texture) == Some(source)
-    }
-
-    pub(super) fn insert_bevy_image(
-        &mut self,
-        texture: TextureBinding,
-        image: &GpuImage,
-        bind_group: BindGroup,
-    ) {
-        self.textures.insert(
-            texture,
-            ImguiRenderTexture {
-                texture: None,
-                _view: None,
-                extent: None,
-                linear_bind_group: bind_group.clone(),
-                nearest_bind_group: bind_group,
-            },
-        );
-        self.bevy_image_sources
-            .insert(texture, BevyImageBindingSource::from(image));
-    }
-
-    pub(super) fn retain_bevy_image_bindings(&mut self, active_bindings: &HashSet<TextureBinding>) {
-        let stale_bindings = self
-            .bevy_image_sources
-            .keys()
-            .filter(|binding| !active_bindings.contains(binding))
-            .copied()
-            .collect::<Vec<_>>();
-        for binding in stale_bindings {
-            self.remove_binding(&binding);
-        }
-    }
-
-    pub(super) fn contains_binding(&self, binding: &TextureBinding) -> bool {
-        self.textures.contains_key(binding)
-    }
-}
-
-#[cfg(test)]
-mod bevy_image_binding_source_tests {
-    use super::*;
-
-    fn source(texture_view: TextureViewId, sampler: SamplerId) -> BevyImageBindingSource {
-        BevyImageBindingSource {
-            texture_view,
-            sampler,
-        }
-    }
-
-    #[test]
-    fn source_identity_requires_the_same_texture_view_and_sampler() {
-        let binding = TextureBinding::Legacy(imgui::TextureId::new(1));
-        let texture_view = TextureViewId::new();
-        let sampler = SamplerId::new();
-        let expected = source(texture_view, sampler);
-        let mut bindings = ImguiTextureBindGroups::default();
-
-        assert!(!bindings.bevy_image_source_matches(&binding, &expected));
-        bindings.bevy_image_sources.insert(binding, expected);
-        assert!(bindings.bevy_image_source_matches(&binding, &expected));
-        assert!(
-            !bindings.bevy_image_source_matches(&binding, &source(TextureViewId::new(), sampler))
-        );
-        assert!(
-            !bindings.bevy_image_source_matches(&binding, &source(texture_view, SamplerId::new()))
-        );
-    }
-
-    #[test]
-    fn removing_or_retiring_a_bevy_image_forgets_its_source_identity() {
-        let removed = TextureBinding::Legacy(imgui::TextureId::new(1));
-        let retired = TextureBinding::Legacy(imgui::TextureId::new(2));
-        let mut bindings = ImguiTextureBindGroups::default();
-        for binding in [removed, retired] {
-            bindings
-                .bevy_image_sources
-                .insert(binding, source(TextureViewId::new(), SamplerId::new()));
-        }
-
-        bindings.remove_binding(&removed);
-        bindings.retain_bevy_image_bindings(&HashSet::new());
-
-        assert!(!bindings.bevy_image_sources.contains_key(&removed));
-        assert!(!bindings.bevy_image_sources.contains_key(&retired));
-    }
-}
-
-fn snapshot_texture_context_id(id: SnapshotTextureId) -> imgui::ContextId {
-    match id {
-        SnapshotTextureId::User(id) => id.context_id(),
-        SnapshotTextureId::FontAtlas { context, .. } => context,
     }
 }
 
@@ -1004,6 +642,12 @@ impl ImguiExtractedRenderFrame {
         self.frames.keys().copied()
     }
 
+    pub(super) fn sorted_context_ids(&self) -> Vec<imgui::ContextId> {
+        let mut ids = self.context_ids().collect::<Vec<_>>();
+        ids.sort_unstable_by_key(|id| id.get());
+        ids
+    }
+
     /// Latest main-world route epoch observed by extraction.
     #[must_use]
     pub const fn route_epoch(&self) -> u64 {
@@ -1020,11 +664,8 @@ impl ImguiExtractedRenderFrame {
 
     /// Highest contiguous completion watermark confirmed by the owning core Context.
     #[must_use]
-    pub fn completion_watermark(&self, context_id: imgui::ContextId) -> u64 {
-        self.completion_watermarks
-            .get(&context_id)
-            .copied()
-            .unwrap_or_default()
+    pub(super) fn completion_watermark(&self, context_id: imgui::ContextId) -> Option<u64> {
+        self.completion_watermarks.get(&context_id).copied()
     }
 
     pub(super) fn begin_extraction(

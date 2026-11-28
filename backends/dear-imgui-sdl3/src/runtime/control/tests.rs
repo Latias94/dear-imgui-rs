@@ -411,7 +411,7 @@ fn registration_with_backend_lifecycle_and_texture_update(
     platform_graphics: PlatformGraphicsKind,
     native_renderer: NativeRendererKind,
 ) -> RuntimeRegistration {
-    let platform_session = Sdl3PlatformSession::acquire().unwrap();
+    let platform_session = Sdl3PlatformSession::acquire(context.id(), None).unwrap();
     let baseline = preflight_platform_claim(context, native_renderer).unwrap();
     let control = Rc::new(RuntimeControl::new_with_backend(
         context,

@@ -153,6 +153,9 @@
 #[cfg(test)]
 extern crate self as dear_imgui_bevy;
 
+// Keep Bevy's transitive ECS macro implementation on the version pinned in Cargo.toml.
+use bevy_ecs_macro_logic as _;
+
 pub mod context;
 pub mod input;
 pub mod prelude;

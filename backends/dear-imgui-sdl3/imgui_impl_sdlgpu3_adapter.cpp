@@ -3,6 +3,8 @@
 #include "backends/imgui_impl_sdlgpu3.h"
 #include "native_bridge.h"
 
+#include <cstdlib>
+
 #define SDL_ClaimWindowForGPUDevice dear_imgui_sdl3_hook_claim_window_for_gpu_device
 #define SDL_SetGPUSwapchainParameters dear_imgui_sdl3_hook_set_gpu_swapchain_parameters
 
@@ -70,6 +72,27 @@ struct DearImguiSdlGpu3RenderOps {
     );
 };
 
+// The upstream renderer temporarily publishes a pointer to stack state. Preserve the
+// exact incoming state even if the draw aborts with a C++ exception.
+void dear_imgui_sdl3_render_sdlgpu3_draw_data(
+    ImDrawData* draw_data,
+    SDL_GPUCommandBuffer* command_buffer,
+    SDL_GPURenderPass* render_pass,
+    SDL_GPUGraphicsPipeline* pipeline
+) {
+    auto* data = ImGui_ImplSDLGPU3_GetBackendData();
+    ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
+    void* previous_platform_state = platform.Renderer_RenderState;
+    auto* previous_backend_state = data->RenderState;
+    try {
+        ImGui_ImplSDLGPU3_RenderDrawData(draw_data, command_buffer, render_pass, pipeline);
+    } catch (...) {
+        platform.Renderer_RenderState = previous_platform_state;
+        data->RenderState = previous_backend_state;
+        throw;
+    }
+}
+
 const DearImguiSdlGpu3RenderOps real_render_ops = {
     SDL_AcquireGPUCommandBuffer,
     SDL_AcquireGPUSwapchainTexture,
@@ -78,7 +101,7 @@ const DearImguiSdlGpu3RenderOps real_render_ops = {
     SDL_SubmitGPUCommandBuffer,
     SDL_CancelGPUCommandBuffer,
     ImGui_ImplSDLGPU3_PrepareDrawData,
-    ImGui_ImplSDLGPU3_RenderDrawData,
+    dear_imgui_sdl3_render_sdlgpu3_draw_data,
 };
 
 std::uint64_t dear_imgui_sdlgpu3_render_checked(
@@ -86,6 +109,8 @@ std::uint64_t dear_imgui_sdlgpu3_render_checked(
     SDL_GPUDevice* device,
     SDL_Window* window,
     ImDrawData* draw_data,
+    ImGuiViewportFlags viewport_flags,
+    bool transparent,
     std::uint64_t* first_fault
 ) {
     if (first_fault != nullptr)
@@ -121,29 +146,30 @@ std::uint64_t dear_imgui_sdlgpu3_render_checked(
 
     std::uint64_t faults = 0;
     if (swapchain_texture != nullptr) {
-        ops.prepare_draw_data(draw_data, command_buffer);
-        SDL_GPUColorTargetInfo target_info = {};
-        target_info.texture = swapchain_texture;
-        target_info.clear_color = SDL_FColor{ 0.0f, 0.0f, 0.0f, 1.0f };
-        target_info.load_op = SDL_GPU_LOADOP_CLEAR;
-        target_info.store_op = SDL_GPU_STOREOP_STORE;
-        target_info.mip_level = 0;
-        target_info.layer_or_depth_plane = 0;
-        target_info.cycle = false;
-        SDL_GPURenderPass* render_pass = ops.begin_render_pass(
-            command_buffer,
-            &target_info,
-            1,
-            nullptr
-        );
-        if (render_pass == nullptr) {
-            faults |= DEAR_IMGUI_SDL3_FAULT_SDLGPU_RENDER_PASS;
+        SDL_GPURenderPass* render_pass = nullptr;
+        try {
+            ops.prepare_draw_data(draw_data, command_buffer);
+            SDL_GPUColorTargetInfo target_info = {};
+            target_info.texture = swapchain_texture;
+            target_info.clear_color = SDL_FColor{ 0.0f, 0.0f, 0.0f, transparent ? 0.0f : 1.0f };
+            target_info.load_op = (viewport_flags & ImGuiViewportFlags_NoRendererClear)
+                ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
+            target_info.store_op = SDL_GPU_STOREOP_STORE;
+            render_pass = ops.begin_render_pass(command_buffer, &target_info, 1, nullptr);
+            if (render_pass == nullptr) {
+                faults |= DEAR_IMGUI_SDL3_FAULT_SDLGPU_RENDER_PASS;
+                if (first_fault != nullptr)
+                    *first_fault = DEAR_IMGUI_SDL3_FAULT_SDLGPU_RENDER_PASS;
+            } else {
+                ops.render_draw_data(draw_data, command_buffer, render_pass, nullptr);
+            }
+        } catch (...) {
+            faults |= DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL;
             if (first_fault != nullptr)
-                *first_fault = DEAR_IMGUI_SDL3_FAULT_SDLGPU_RENDER_PASS;
-        } else {
-            ops.render_draw_data(draw_data, command_buffer, render_pass, nullptr);
-            ops.end_render_pass(render_pass);
+                *first_fault = DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL;
         }
+        if (render_pass != nullptr)
+            ops.end_render_pass(render_pass);
     }
 
     // A swapchain texture may have been acquired, so submit even after a render-pass failure.
@@ -162,6 +188,7 @@ enum class DearImguiSdlGpu3FailStage {
     CommandBuffer,
     Swapchain,
     RenderPass,
+    DrawException,
     Submit,
 };
 
@@ -176,6 +203,8 @@ struct DearImguiSdlGpu3FakeState {
     int end_pass_calls = 0;
     int submit_calls = 0;
     int cancel_calls = 0;
+    SDL_GPULoadOp load_op = SDL_GPU_LOADOP_DONT_CARE;
+    float clear_alpha = -1.0f;
 };
 
 thread_local DearImguiSdlGpu3FakeState fake_render_state;
@@ -203,11 +232,13 @@ bool SDLCALL fake_acquire_swapchain_texture(
 
 SDL_GPURenderPass* SDLCALL fake_begin_render_pass(
     SDL_GPUCommandBuffer*,
-    const SDL_GPUColorTargetInfo*,
+    const SDL_GPUColorTargetInfo* target,
     std::uint32_t,
     const SDL_GPUDepthStencilTargetInfo*
 ) {
     fake_render_state.begin_pass_calls++;
+    fake_render_state.load_op = target->load_op;
+    fake_render_state.clear_alpha = target->clear_color.a;
     return fake_render_state.fail_stage == DearImguiSdlGpu3FailStage::RenderPass
         ? nullptr
         : reinterpret_cast<SDL_GPURenderPass*>(static_cast<std::uintptr_t>(0x503));
@@ -238,6 +269,8 @@ void fake_render_draw_data(
     SDL_GPUGraphicsPipeline*
 ) {
     fake_render_state.render_calls++;
+    if (fake_render_state.fail_stage == DearImguiSdlGpu3FailStage::DrawException)
+        throw DearImguiSdlGpu3FailStage::DrawException;
 }
 
 const DearImguiSdlGpu3RenderOps fake_render_ops = {
@@ -295,14 +328,14 @@ static void update_gpu_texture(ImGui_ImplSDLGPU3_Data* bd, ImTextureData* tex, d
     tex->SetStatus(ImTextureStatus_OK);
 }
 
-extern "C" void dear_imgui_sdl3_backend_sdlgpu3_update_texture(ImTextureData* tex) {
+extern "C" void dear_imgui_sdl3_backend_sdlgpu3_update_texture(ImTextureData* tex) try {
     update_gpu_texture(ImGui_ImplSDLGPU3_GetBackendData(), tex, upload_texture_region);
-}
+} catch (...) { std::abort(); }
 
 extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_viewport(
     ImGuiViewport* viewport,
     std::uint64_t* first_fault
-) {
+) try {
     ImGui_ImplSDLGPU3_Data* data = ImGui_ImplSDLGPU3_GetBackendData();
     if (viewport == nullptr || data == nullptr) {
         if (first_fault != nullptr)
@@ -315,12 +348,18 @@ extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_viewport(
         data->InitInfo.Device,
         window,
         viewport->DrawData,
+        viewport->Flags,
+        window != nullptr && (SDL_GetWindowFlags(window) & SDL_WINDOW_TRANSPARENT) != 0,
         first_fault
     );
+} catch (...) {
+    if (first_fault != nullptr)
+        *first_fault = DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL;
+    return DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL;
 }
 
 #if defined(DEAR_IMGUI_SDL3_NATIVE_SELF_TEST)
-extern "C" bool dear_imgui_sdl3_backend_sdlgpu3_texture_self_test() {
+extern "C" bool dear_imgui_sdl3_backend_sdlgpu3_texture_self_test() try {
     ImGui_ImplSDLGPU3_Data bd{};
     ImTextureData tex;
     tex.Create(ImTextureFormat_RGBA32, 4, 2);
@@ -334,9 +373,9 @@ extern "C" bool dear_imgui_sdl3_backend_sdlgpu3_texture_self_test() {
         return region.x == 2 && region.y == 1 && region.w == 1 && region.h == 1;
     });
     return tex.Status == ImTextureStatus_OK && tex.GetTexID() == 77;
-}
+} catch (...) { return false; }
 
-extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_test() {
+extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_test() try {
     std::uint64_t failures = 0;
     SDL_GPUDevice* device = reinterpret_cast<SDL_GPUDevice*>(static_cast<std::uintptr_t>(0x601));
     SDL_Window* window = reinterpret_cast<SDL_Window*>(static_cast<std::uintptr_t>(0x602));
@@ -346,7 +385,7 @@ extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_te
     fake_render_state = {};
     fake_render_state.fail_stage = DearImguiSdlGpu3FailStage::CommandBuffer;
     std::uint64_t faults = dear_imgui_sdlgpu3_render_checked(
-        fake_render_ops, device, window, draw_data, &first_fault
+        fake_render_ops, device, window, draw_data, 0, false, &first_fault
     );
     if (faults != DEAR_IMGUI_SDL3_FAULT_SDLGPU_COMMAND_BUFFER
         || first_fault != DEAR_IMGUI_SDL3_FAULT_SDLGPU_COMMAND_BUFFER
@@ -358,7 +397,7 @@ extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_te
     fake_render_state = {};
     fake_render_state.fail_stage = DearImguiSdlGpu3FailStage::Swapchain;
     faults = dear_imgui_sdlgpu3_render_checked(
-        fake_render_ops, device, window, draw_data, &first_fault
+        fake_render_ops, device, window, draw_data, 0, false, &first_fault
     );
     if (faults != DEAR_IMGUI_SDL3_FAULT_SDLGPU_SWAPCHAIN
         || first_fault != DEAR_IMGUI_SDL3_FAULT_SDLGPU_SWAPCHAIN
@@ -372,7 +411,7 @@ extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_te
     fake_render_state.fail_stage = DearImguiSdlGpu3FailStage::Swapchain;
     fake_render_state.cancel_fails = true;
     faults = dear_imgui_sdlgpu3_render_checked(
-        fake_render_ops, device, window, draw_data, &first_fault
+        fake_render_ops, device, window, draw_data, 0, false, &first_fault
     );
     if (faults != (DEAR_IMGUI_SDL3_FAULT_SDLGPU_SWAPCHAIN
             | DEAR_IMGUI_SDL3_FAULT_SDLGPU_CANCEL)
@@ -386,7 +425,7 @@ extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_te
     fake_render_state = {};
     fake_render_state.fail_stage = DearImguiSdlGpu3FailStage::RenderPass;
     faults = dear_imgui_sdlgpu3_render_checked(
-        fake_render_ops, device, window, draw_data, &first_fault
+        fake_render_ops, device, window, draw_data, 0, false, &first_fault
     );
     if (faults != DEAR_IMGUI_SDL3_FAULT_SDLGPU_RENDER_PASS
         || first_fault != DEAR_IMGUI_SDL3_FAULT_SDLGPU_RENDER_PASS
@@ -400,7 +439,7 @@ extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_te
     fake_render_state = {};
     fake_render_state.fail_stage = DearImguiSdlGpu3FailStage::Submit;
     faults = dear_imgui_sdlgpu3_render_checked(
-        fake_render_ops, device, window, draw_data, &first_fault
+        fake_render_ops, device, window, draw_data, 0, false, &first_fault
     );
     if (faults != DEAR_IMGUI_SDL3_FAULT_SDLGPU_SUBMIT
         || first_fault != DEAR_IMGUI_SDL3_FAULT_SDLGPU_SUBMIT
@@ -410,6 +449,41 @@ extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_te
         || fake_render_state.submit_calls != 1)
         failures |= UINT64_C(1) << 3;
 
+    fake_render_state = {};
+    faults = dear_imgui_sdlgpu3_render_checked(
+        fake_render_ops, device, window, draw_data, 0, false, &first_fault
+    );
+    if (faults != 0 || first_fault != 0 || fake_render_state.load_op != SDL_GPU_LOADOP_CLEAR
+        || fake_render_state.clear_alpha != 1.0f)
+        failures |= UINT64_C(1) << 5;
+
+    fake_render_state = {};
+    faults = dear_imgui_sdlgpu3_render_checked(
+        fake_render_ops, device, window, draw_data, 0, true, &first_fault
+    );
+    if (faults != 0 || first_fault != 0 || fake_render_state.load_op != SDL_GPU_LOADOP_CLEAR
+        || fake_render_state.clear_alpha != 0.0f)
+        failures |= UINT64_C(1) << 6;
+
+    fake_render_state = {};
+    faults = dear_imgui_sdlgpu3_render_checked(
+        fake_render_ops, device, window, draw_data, ImGuiViewportFlags_NoRendererClear, true,
+        &first_fault
+    );
+    if (faults != 0 || first_fault != 0 || fake_render_state.load_op != SDL_GPU_LOADOP_LOAD)
+        failures |= UINT64_C(1) << 7;
+
+    fake_render_state = {};
+    fake_render_state.fail_stage = DearImguiSdlGpu3FailStage::DrawException;
+    faults = dear_imgui_sdlgpu3_render_checked(
+        fake_render_ops, device, window, draw_data, 0, false, &first_fault
+    );
+    if (faults != DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL
+        || first_fault != DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL
+        || fake_render_state.render_calls != 1 || fake_render_state.end_pass_calls != 1
+        || fake_render_state.submit_calls != 1 || fake_render_state.cancel_calls != 0)
+        failures |= UINT64_C(1) << 8;
+
     return failures;
-}
+} catch (...) { return UINT64_MAX; }
 #endif

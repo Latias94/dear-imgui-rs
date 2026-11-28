@@ -1,6 +1,11 @@
-use std::ffi::c_void;
+use std::cell::Cell;
+use std::ffi::{c_char, c_void};
+use std::rc::Rc;
 
-use dear_imgui_rs::{BackendFlags, Context as ImGuiContext, sys};
+use dear_imgui_rs::{
+    BackendFlags, Context as ImGuiContext, ContextAttachment, ContextAttachmentLease,
+    ContextAttachmentRole, ContextAttachmentTeardownError, ContextTeardown, sys,
+};
 use glow::{Context, HasContext};
 
 use super::{
@@ -9,7 +14,7 @@ use super::{
         draw_callback_reset_render_state, draw_callback_set_sampler_from_texture,
         draw_callback_set_sampler_linear, draw_callback_set_sampler_nearest,
     },
-    core::{GlowBackendUserData, RendererStateFault},
+    core::{ActivateGlContext, RendererStateFault},
     device::PendingDeviceObjects,
 };
 use crate::{
@@ -24,6 +29,57 @@ const CORE_RENDERER_RESERVED_FLAGS: i32 =
 const RENDERER_RESERVED_FLAGS: i32 =
     CORE_RENDERER_RESERVED_FLAGS | sys::ImGuiBackendFlags_RendererHasViewports;
 
+struct GlowPublicationMarker;
+
+pub(super) struct RendererPublication {
+    state: Rc<PublishedRendererState>,
+    _attachment: ContextAttachmentLease,
+}
+
+struct PublishedRendererState {
+    name: Cell<Option<*const c_char>>,
+    texture_max: [i32; 2],
+}
+
+impl RendererPublication {
+    pub(super) fn register(imgui: &mut ImGuiContext, texture_max: [i32; 2]) -> InitResult<Self> {
+        let state = Rc::new(PublishedRendererState {
+            name: Cell::new(None),
+            texture_max,
+        });
+        let attachment = imgui.register_attachment::<GlowPublicationMarker>(
+            ContextAttachmentRole::Extension,
+            Rc::clone(&state) as Rc<dyn ContextAttachment>,
+        )?;
+        Ok(Self {
+            state,
+            _attachment: attachment,
+        })
+    }
+
+    pub(super) fn publish(&self, imgui: &mut ImGuiContext, version: GlVersion) -> InitResult<()> {
+        let name = publish_renderer_state(
+            imgui,
+            self.state.user_data_ptr(),
+            self.state.texture_max,
+            core_renderer_flags(version),
+        )?;
+        self.state.name.set(Some(name));
+        Ok(())
+    }
+}
+
+impl ContextAttachment for PublishedRendererState {
+    fn release_renderer_resources(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), ContextAttachmentTeardownError> {
+        // ImGui::Shutdown requires BackendRendererUserData to be cleared before native teardown.
+        context.with_bound_context(|| unsafe { self.withdraw_bound() });
+        Ok(())
+    }
+}
+
 fn core_renderer_flags(gl_version: GlVersion) -> i32 {
     let mut flags = sys::ImGuiBackendFlags_RendererHasTextures;
     if gl_version.supports_vertex_offset() || gl_version.supports_vertex_offset_emulation() {
@@ -33,11 +89,12 @@ fn core_renderer_flags(gl_version: GlVersion) -> i32 {
 }
 
 impl GlowRenderer {
-    /// Create a new Glow renderer with a retained Glow function table (recommended).
+    /// Create a Glow renderer with a retained Glow function table.
     ///
-    /// This is the preferred way to create a Glow renderer as it handles all resource
-    /// management automatically and provides a simple API similar to the WGPU backend. The native
-    /// context behind `gl` must be current during construction and every renderer operation.
+    /// On native platforms the context behind `gl` must be current during construction and
+    /// renderer operations, including [`Self::shutdown`]. Use [`Self::with_owned_context`] to
+    /// give the renderer authority to activate the native context during `Drop`.
+    /// A retained browser WebGL context supports automatic release directly.
     ///
     /// # Arguments
     /// * `gl` - Glow function table retained by the renderer
@@ -54,8 +111,7 @@ impl GlowRenderer {
     /// let mut renderer = GlowRenderer::new(gl_context, &mut imgui_context).unwrap();
     /// ```
     pub fn new(gl: glow::Context, imgui_context: &mut ImGuiContext) -> InitResult<Self> {
-        let gl = std::rc::Rc::new(gl);
-        Self::init_internal(Some(gl.clone()), &gl, imgui_context)
+        Self::with_shared_context(Rc::new(gl), imgui_context)
     }
 
     /// Create a new Glow renderer with an externally retained function table (advanced).
@@ -82,15 +138,15 @@ impl GlowRenderer {
         gl: &Context,
         imgui_context: &mut ImGuiContext,
     ) -> InitResult<Self> {
-        Self::init_internal(None, gl, imgui_context)
+        Self::init_internal(None, None, gl, imgui_context)
     }
 
     /// Create a renderer that shares ownership of its Glow function table.
     ///
-    /// Unlike [`Self::with_external_context`], the renderer retains the exact `Rc` used to create
-    /// its GL objects. This is the supported construction path when the renderer will later be
-    /// consumed by `GlowViewportRuntime`. Retaining the table does not make its native context
-    /// current; the application/platform runtime must still activate a compatible context.
+    /// The renderer retains the table used to create its GL objects. On native platforms the
+    /// application makes a compatible native context current for renderer operations, including
+    /// [`Self::shutdown`]. Use [`Self::with_owned_context`] to provide native activation for
+    /// automatic release. A retained browser WebGL context supports automatic release directly.
     ///
     /// ```rust,no_run
     /// use std::rc::Rc;
@@ -105,19 +161,54 @@ impl GlowRenderer {
     /// # Ok::<(), dear_imgui_glow::InitError>(())
     /// ```
     pub fn with_shared_context(
-        gl: std::rc::Rc<Context>,
+        gl: Rc<Context>,
         imgui_context: &mut ImGuiContext,
     ) -> InitResult<Self> {
-        Self::init_internal(Some(std::rc::Rc::clone(&gl)), &gl, imgui_context)
+        Self::init_internal(Some(Rc::clone(&gl)), None, &gl, imgui_context)
+    }
+
+    /// Create a renderer that owns the capability to activate its OpenGL context.
+    ///
+    /// Capture the native context and any surface needed by `make_current`. Glow uses this
+    /// owner for initialization, ordinary GL work, and automatic resource release, even if the
+    /// Dear ImGui Context has already been destroyed. Successful activation leaves that OpenGL
+    /// context current. If it fails, explicit operations return an error and `Drop` skips GL
+    /// deletion. An explicit [`Self::shutdown`] can report a failure while the renderer still
+    /// owns its resources and can retry.
+    ///
+    /// # Safety
+    ///
+    /// `make_current` must keep the native context and any required surface alive until the
+    /// renderer releases them. Every `Ok(())` must establish that the original native context
+    /// associated with `gl` is current on this thread and still owns its resource namespace. It
+    /// must remain current while Glow uses it. Raw draw callbacks that switch contexts must
+    /// restore it before returning. The function table must stay valid and have no Glow-managed
+    /// native debug callback registered, since Glow's own destructor can invoke the debug callback
+    /// API even after activation fails.
+    pub unsafe fn with_owned_context(
+        gl: Rc<Context>,
+        make_current: impl Fn() -> Result<(), String> + 'static,
+        imgui_context: &mut ImGuiContext,
+    ) -> InitResult<Self> {
+        Self::init_internal(
+            Some(Rc::clone(&gl)),
+            Some(Box::new(make_current)),
+            &gl,
+            imgui_context,
+        )
     }
 
     /// Internal initialization method
     fn init_internal(
-        owned_gl: Option<std::rc::Rc<glow::Context>>,
+        owned_gl: Option<Rc<Context>>,
+        context_owner: Option<ActivateGlContext>,
         gl: &Context,
         imgui_context: &mut ImGuiContext,
     ) -> InitResult<Self> {
         preflight_renderer_state(imgui_context)?;
+        if let Some(activate) = &context_owner {
+            activate().map_err(InitError::ActivateGlContext)?;
+        }
         let gl_version = GlVersion::read(gl);
         if !gl_version.is_supported() {
             return Err(InitError::UnsupportedVersion(format!(
@@ -145,21 +236,13 @@ impl GlowRenderer {
         let pending_device_objects =
             PendingDeviceObjects::create_all(gl, gl_version, has_sampler_object_support)?;
         preflight_renderer_state(imgui_context)?;
+        let publication = RendererPublication::register(imgui_context, [renderer_texture_max; 2])?;
         let renderer_consumer = imgui_context.create_synchronous_renderer_consumer()?;
         // Construction has not emitted a renderer epoch or installed a Context-managed texture
         // mapping. Commit the empty transaction before this renderer can publish either one.
         let reset = imgui_context.prepare_renderer_texture_reset(&renderer_consumer)?;
         reset.commit();
-        let backend_user_data = Box::<GlowBackendUserData>::default();
-        let backend_user_data_ptr = std::ptr::from_ref(backend_user_data.as_ref())
-            .cast_mut()
-            .cast::<c_void>();
-        let renderer_name_ptr = publish_renderer_state(
-            imgui_context,
-            backend_user_data_ptr,
-            [renderer_texture_max; 2],
-            core_renderer_flags(gl_version),
-        )?;
+        publication.publish(imgui_context, gl_version)?;
         let (shaders, vbo_handle, ebo_handle, samplers) = pending_device_objects.into_parts();
 
         let renderer = Self {
@@ -174,16 +257,14 @@ impl GlowRenderer {
             has_sampler_object_support,
             bind_program_pipeline: None,
             gl_context: owned_gl,
+            context_owner,
             context_binding: Some(imgui_context.binding()),
-            backend_user_data,
-            renderer_name_ptr,
-            renderer_texture_max: [renderer_texture_max; 2],
+            publication: Some(publication),
             renderer_state_fault: None,
             #[cfg(test)]
             synthetic_test_renderer: false,
             texture_registry: TextureRegistry::default(),
-            managed_textures: std::collections::HashMap::new(),
-            destroyed_managed_textures: std::collections::HashMap::new(),
+            managed_textures: Default::default(),
             renderer_consumer: Some(renderer_consumer),
             framebuffer_srgb: false,
             color_gamma_override: None,
@@ -216,10 +297,13 @@ impl GlowRenderer {
             return Err(RenderError::RendererNotAttached);
         };
 
+        let Some(publication) = &self.publication else {
+            return Err(RenderError::RendererNotAttached);
+        };
         let fault = binding.try_with_bound_context(|| {
-            let fault = self.detect_renderer_state_fault_bound();
+            let fault = publication.state.detect_fault_bound(self.gl_version);
             if fault.is_some() {
-                unsafe { self.clear_owned_renderer_state_bound() };
+                unsafe { publication.state.withdraw_bound() };
             }
             fault
         })?;
@@ -230,19 +314,50 @@ impl GlowRenderer {
         Ok(())
     }
 
-    fn detect_renderer_state_fault_bound(&self) -> Option<RendererStateFault> {
+    pub(super) fn unconfigure_imgui_context(&mut self, imgui_context: &mut ImGuiContext) {
+        let owned_name = self.publication.take().is_some_and(|publication| {
+            imgui_context
+                .binding()
+                .with_bound_context(|| unsafe { publication.state.withdraw_bound() })
+        });
+        if owned_name {
+            imgui_context
+                .set_renderer_name::<String>(None)
+                .expect("clearing Glow BackendRendererName must not fail");
+        }
+        self.context_binding.take();
+    }
+
+    pub(super) fn withdraw_publication(&mut self) {
+        if let (Some(binding), Some(publication)) =
+            (self.context_binding.take(), self.publication.take())
+        {
+            // During Context-first teardown the attachment still owns the marker and withdraws it
+            // in RendererResources. A lease dropped during teardown leaves that attachment intact.
+            let _ =
+                binding.try_with_bound_context(|| unsafe { publication.state.withdraw_bound() });
+        }
+    }
+}
+
+impl PublishedRendererState {
+    fn user_data_ptr(&self) -> *mut c_void {
+        std::ptr::from_ref(self).cast_mut().cast()
+    }
+
+    fn detect_fault_bound(&self, version: GlVersion) -> Option<RendererStateFault> {
         let io = unsafe { sys::igGetIO_Nil() };
         if io.is_null() {
             return Some(RendererStateFault::State("ImGuiIO"));
         }
         let io = unsafe { &*io };
-        if io.BackendRendererUserData != self.backend_user_data_ptr() {
+        if io.BackendRendererUserData != self.user_data_ptr() {
             return Some(RendererStateFault::State("BackendRendererUserData"));
         }
-        if io.BackendRendererName != self.renderer_name_ptr {
+        if self.name.get() != Some(io.BackendRendererName) {
             return Some(RendererStateFault::State("BackendRendererName"));
         }
-        let expected_core_flags = core_renderer_flags(self.gl_version);
+        let expected_core_flags = core_renderer_flags(version);
         let actual_core_flags = io.BackendFlags & CORE_RENDERER_RESERVED_FLAGS;
         if actual_core_flags != expected_core_flags
             && actual_core_flags & sys::ImGuiBackendFlags_RendererHasVtxOffset
@@ -262,10 +377,10 @@ impl GlowRenderer {
         if !platform_io.Renderer_RenderState.is_null() {
             return Some(RendererStateFault::State("Renderer_RenderState"));
         }
-        if platform_io.Renderer_TextureMaxWidth != self.renderer_texture_max[0] {
+        if platform_io.Renderer_TextureMaxWidth != self.texture_max[0] {
             return Some(RendererStateFault::State("Renderer_TextureMaxWidth"));
         }
-        if platform_io.Renderer_TextureMaxHeight != self.renderer_texture_max[1] {
+        if platform_io.Renderer_TextureMaxHeight != self.texture_max[1] {
             return Some(RendererStateFault::State("Renderer_TextureMaxHeight"));
         }
         for (matches, callback) in [
@@ -314,28 +429,19 @@ impl GlowRenderer {
         None
     }
 
-    pub(super) fn unconfigure_imgui_context(&mut self, imgui_context: &mut ImGuiContext) {
-        let owned_name = imgui_context
-            .binding()
-            .with_bound_context(|| unsafe { self.clear_owned_renderer_state_bound() });
-        if owned_name {
-            imgui_context
-                .set_renderer_name::<String>(None)
-                .expect("clearing Glow BackendRendererName must not fail");
-        }
-        self.context_binding.take();
-    }
-
     /// Clear only values still carrying this renderer's exact identity.
-    pub(super) unsafe fn clear_owned_renderer_state_bound(&self) -> bool {
+    unsafe fn withdraw_bound(&self) -> bool {
+        let Some(name) = self.name.take() else {
+            return false;
+        };
         let io = unsafe { sys::igGetIO_Nil() };
         if io.is_null() {
             return false;
         }
         let io = unsafe { &mut *io };
-        let user_data_is_ours = io.BackendRendererUserData == self.backend_user_data_ptr();
-        let owned_name =
-            !self.renderer_name_ptr.is_null() && io.BackendRendererName == self.renderer_name_ptr;
+        let user_data_is_ours = io.BackendRendererUserData == self.user_data_ptr();
+        let user_data_is_foreign = !user_data_is_ours && !io.BackendRendererUserData.is_null();
+        let owned_name = io.BackendRendererName == name;
         if owned_name {
             io.BackendRendererName = std::ptr::null();
         }
@@ -345,27 +451,27 @@ impl GlowRenderer {
 
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         if platform_io.is_null() {
-            if user_data_is_ours || owned_name {
+            if !user_data_is_foreign && (user_data_is_ours || owned_name) {
                 io.BackendFlags &= !CORE_RENDERER_RESERVED_FLAGS;
             }
             return owned_name;
         }
         let platform_io = unsafe { &mut *platform_io };
         let owns_standard_draw_callback = [
-            draw_callback_matches(
-                platform_io.DrawCallback_ResetRenderState,
+            clear_draw_callback_if_owned(
+                &mut platform_io.DrawCallback_ResetRenderState,
                 draw_callback_reset_render_state,
             ),
-            draw_callback_matches(
-                platform_io.DrawCallback_SetSamplerLinear,
+            clear_draw_callback_if_owned(
+                &mut platform_io.DrawCallback_SetSamplerLinear,
                 draw_callback_set_sampler_linear,
             ),
-            draw_callback_matches(
-                platform_io.DrawCallback_SetSamplerNearest,
+            clear_draw_callback_if_owned(
+                &mut platform_io.DrawCallback_SetSamplerNearest,
                 draw_callback_set_sampler_nearest,
             ),
-            draw_callback_matches(
-                platform_io.DrawCallback_SetSamplerFromTex,
+            clear_draw_callback_if_owned(
+                &mut platform_io.DrawCallback_SetSamplerFromTex,
                 draw_callback_set_sampler_from_texture,
             ),
         ]
@@ -373,8 +479,8 @@ impl GlowRenderer {
         .any(|matches| matches);
         let owns_viewport_callback =
             renderer_render_callback_is_glow(platform_io.Renderer_RenderWindow);
-        let still_owns_core_publication =
-            user_data_is_ours || owned_name || owns_standard_draw_callback;
+        let still_owns_core_publication = !user_data_is_foreign
+            && (user_data_is_ours || owned_name || owns_standard_draw_callback);
         if still_owns_core_publication {
             io.BackendFlags &= !CORE_RENDERER_RESERVED_FLAGS;
         }
@@ -382,36 +488,12 @@ impl GlowRenderer {
             io.BackendFlags &= !sys::ImGuiBackendFlags_RendererHasViewports;
         }
         if still_owns_core_publication {
-            if platform_io.Renderer_TextureMaxWidth == self.renderer_texture_max[0] {
+            if platform_io.Renderer_TextureMaxWidth == self.texture_max[0] {
                 platform_io.Renderer_TextureMaxWidth = 0;
             }
-            if platform_io.Renderer_TextureMaxHeight == self.renderer_texture_max[1] {
+            if platform_io.Renderer_TextureMaxHeight == self.texture_max[1] {
                 platform_io.Renderer_TextureMaxHeight = 0;
             }
-        }
-        if draw_callback_matches(
-            platform_io.DrawCallback_ResetRenderState,
-            draw_callback_reset_render_state,
-        ) {
-            platform_io.DrawCallback_ResetRenderState = None;
-        }
-        if draw_callback_matches(
-            platform_io.DrawCallback_SetSamplerLinear,
-            draw_callback_set_sampler_linear,
-        ) {
-            platform_io.DrawCallback_SetSamplerLinear = None;
-        }
-        if draw_callback_matches(
-            platform_io.DrawCallback_SetSamplerNearest,
-            draw_callback_set_sampler_nearest,
-        ) {
-            platform_io.DrawCallback_SetSamplerNearest = None;
-        }
-        if draw_callback_matches(
-            platform_io.DrawCallback_SetSamplerFromTex,
-            draw_callback_set_sampler_from_texture,
-        ) {
-            platform_io.DrawCallback_SetSamplerFromTex = None;
         }
         if owns_viewport_callback {
             platform_io.Renderer_RenderWindow = None;
@@ -562,6 +644,14 @@ type RawDrawCallback = unsafe extern "C" fn(*const sys::ImDrawList, *const sys::
 
 fn draw_callback_matches(actual: sys::ImDrawCallback, expected: RawDrawCallback) -> bool {
     actual.is_some_and(|actual| std::ptr::fn_addr_eq(actual, expected))
+}
+
+fn clear_draw_callback_if_owned(slot: &mut sys::ImDrawCallback, expected: RawDrawCallback) -> bool {
+    let owned = draw_callback_matches(*slot, expected);
+    if owned {
+        *slot = None;
+    }
+    owned
 }
 
 fn first_renderer_window_callback_drift(raw: &sys::ImGuiPlatformIO) -> Option<&'static str> {

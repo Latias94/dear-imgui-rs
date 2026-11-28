@@ -366,16 +366,16 @@ impl TextureRegistry {
         })
     }
 
-    pub(crate) fn take_renderer_owned(&mut self) -> Vec<GlTexture> {
-        let mut owned = Vec::new();
-        self.textures.retain(|_, texture| match texture {
-            RegisteredTexture::External(_) => true,
-            RegisteredTexture::Managed(_) | RegisteredTexture::Renderer(_) => {
-                owned.push(texture.gl_texture());
-                false
-            }
-        });
-        owned
+    pub(crate) fn take_renderer_owned(&mut self) -> impl Iterator<Item = GlTexture> + '_ {
+        self.textures
+            .extract_if(|_, texture| !matches!(texture, RegisteredTexture::External(_)))
+            .map(|(_, texture)| texture.gl_texture())
+    }
+
+    pub(crate) fn has_renderer_owned(&self) -> bool {
+        self.textures
+            .values()
+            .any(|texture| !matches!(texture, RegisteredTexture::External(_)))
     }
 
     pub(crate) fn clear(&mut self) {

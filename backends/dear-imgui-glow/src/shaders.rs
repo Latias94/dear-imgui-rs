@@ -1,5 +1,9 @@
 //! Shader management for Dear ImGui rendering
 
+use dear_imgui_backend_support::{
+    SRGB_DECODE_THRESHOLD, SRGB_EXPONENT, SRGB_LINEAR_DIVISOR, SRGB_OFFSET, SRGB_SCALE,
+};
+
 use crate::{
     GlProgram, GlShader, GlUniformLocation, GlVersion, GlslVersion, InitError, InitResult,
 };
@@ -70,6 +74,7 @@ pub struct Shaders {
     pub program: Option<GlProgram>,
     pub attrib_location_tex: Option<GlUniformLocation>,
     pub attrib_location_proj_mtx: Option<GlUniformLocation>,
+    pub attrib_location_decode_vertex_srgb: Option<GlUniformLocation>,
     pub attrib_location_color_gamma: Option<GlUniformLocation>,
     pub attrib_location_vtx_pos: u32,
     pub attrib_location_vtx_uv: u32,
@@ -79,7 +84,7 @@ pub struct Shaders {
 impl Shaders {
     /// Create and compile shaders
     ///
-    /// The fragment shader decodes vertex RGB through `ColorGamma`; desktop
+    /// The fragment shader can decode interpolated vertex RGB from sRGB; desktop
     /// `GL_FRAMEBUFFER_SRGB`, when enabled, encodes the final framebuffer output.
     pub fn new(gl: &Context, gl_version: GlVersion) -> InitResult<Self> {
         let glsl_version = GlslVersion::for_gl_version(gl_version);
@@ -128,6 +133,8 @@ impl Shaders {
             // Get uniform locations
             let attrib_location_tex = gl.get_uniform_location(program.handle(), "Texture");
             let attrib_location_proj_mtx = gl.get_uniform_location(program.handle(), "ProjMtx");
+            let attrib_location_decode_vertex_srgb =
+                gl.get_uniform_location(program.handle(), "DecodeVertexSrgb");
             let attrib_location_color_gamma =
                 gl.get_uniform_location(program.handle(), "ColorGamma");
 
@@ -146,6 +153,7 @@ impl Shaders {
                 program: Some(program.commit()),
                 attrib_location_tex,
                 attrib_location_proj_mtx,
+                attrib_location_decode_vertex_srgb,
                 attrib_location_color_gamma,
                 attrib_location_vtx_pos,
                 attrib_location_vtx_uv,
@@ -217,64 +225,53 @@ void main()
 
     /// Generate fragment shader source
     ///
-    /// Decode vertex RGB with `ColorGamma` before multiplying sampled texture values.
-    /// Desktop `GL_FRAMEBUFFER_SRGB` performs the final framebuffer encoding when enabled;
-    /// texture decoding remains controlled by the application's GL texture format.
+    /// Decode interpolated vertex RGB before multiplying sampled texture values. The GL texture
+    /// format controls texture decoding, and an sRGB framebuffer encodes the blended output.
     fn fragment_shader_source(glsl_version: &GlslVersion) -> String {
-        let version_str = glsl_version.as_str();
-        let is_legacy =
-            version_str.contains("#version 120") || version_str.contains("#version 100");
-
-        if is_legacy {
-            // GLSL 120 and ES 100 use gl_FragColor and texture2D
-            format!(
-                r#"{version}
-{precision}
-uniform sampler2D Texture;
-varying vec2 Frag_UV;
-varying vec4 Frag_Color;
-uniform float ColorGamma;
-
-void main()
-{{
-    vec4 col = Frag_Color;
-    col.rgb = pow(max(col.rgb, vec3(0.0)), vec3(ColorGamma));
-    gl_FragColor = col * texture2D(Texture, Frag_UV.st);
-}}
-"#,
-                version = version_str,
-                precision = if version_str.contains("es") || version_str.contains("#version 120") {
-                    "#ifdef GL_ES\n    precision mediump float;\n#endif"
-                } else {
-                    ""
-                }
-            )
+        let version = glsl_version.as_str();
+        let is_legacy = version.contains("#version 120") || version.contains("#version 100");
+        let (input, output_decl, output, sample) = if is_legacy {
+            ("varying", "", "gl_FragColor", "texture2D")
         } else {
-            // GLSL 130+ use out variables and texture()
-            format!(
-                r#"{version}
+            ("in", "out vec4 Out_Color;", "Out_Color", "texture")
+        };
+        let precision = if is_legacy {
+            "#ifdef GL_ES\n    precision mediump float;\n#endif"
+        } else if version.contains("es") {
+            "precision mediump float;"
+        } else {
+            ""
+        };
+
+        format!(
+            r#"{version}
 {precision}
 uniform sampler2D Texture;
-in vec2 Frag_UV;
-in vec4 Frag_Color;
-out vec4 Out_Color;
+{input} vec2 Frag_UV;
+{input} vec4 Frag_Color;
+{output_decl}
+uniform bool DecodeVertexSrgb;
 uniform float ColorGamma;
+
+float srgb_to_linear(float channel)
+{{
+    channel = max(channel, 0.0);
+    return channel <= {SRGB_DECODE_THRESHOLD}
+        ? channel / {SRGB_LINEAR_DIVISOR}
+        : pow((channel + {SRGB_OFFSET}) / {SRGB_SCALE}, {SRGB_EXPONENT});
+}}
 
 void main()
 {{
     vec4 col = Frag_Color;
-    col.rgb = pow(max(col.rgb, vec3(0.0)), vec3(ColorGamma));
-    Out_Color = col * texture(Texture, Frag_UV.st);
+    if (DecodeVertexSrgb)
+        col.rgb = vec3(srgb_to_linear(col.r), srgb_to_linear(col.g), srgb_to_linear(col.b));
+    else if (ColorGamma != 1.0)
+        col.rgb = pow(max(col.rgb, vec3(0.0)), vec3(ColorGamma));
+    {output} = col * {sample}(Texture, Frag_UV.st);
 }}
-"#,
-                version = version_str,
-                precision = if version_str.contains("es") {
-                    "precision mediump float;"
-                } else {
-                    ""
-                }
-            )
-        }
+"#
+        )
     }
 }
 

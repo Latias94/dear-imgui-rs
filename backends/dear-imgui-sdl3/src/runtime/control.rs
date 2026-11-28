@@ -190,7 +190,7 @@ impl RuntimeControl {
             .map(Sdl3PlatformSession::generation)
     }
 
-    fn resolve_live_viewport(
+    pub(crate) fn resolve_live_viewport(
         &self,
         viewport: *mut sys::ImGuiViewport,
     ) -> Option<*mut sys::ImGuiViewport> {
@@ -847,13 +847,13 @@ impl RuntimeControl {
         viewport: *mut sys::ImGuiViewport,
         size: *const sys::ImVec2,
     ) {
-        let invocation = self
+        let callback = self
             .renderer_callbacks
             .borrow()
             .as_ref()
-            .map(RendererCallbackOwnership::original_set_window_size_invocation);
-        if let Some(invocation) = invocation {
-            invocation.invoke(viewport, size);
+            .map(RendererCallbackOwnership::original_set_window_size);
+        if let Some(callback) = callback {
+            unsafe { callback.invoke(viewport, size) };
         }
     }
 

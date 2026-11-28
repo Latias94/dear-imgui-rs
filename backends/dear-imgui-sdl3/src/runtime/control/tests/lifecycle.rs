@@ -287,7 +287,7 @@ fn context_renderer_phase_releases_provider_before_sdl_platform_phase() {
 }
 
 #[test]
-fn platform_session_is_exclusive_and_reusable_across_contexts() {
+fn platform_sessions_are_isolated_and_reusable_across_contexts() {
     let _guard = crate::tests::test_guard();
     let mut context_a = Context::create();
     let mut runtime_a = synthetic_claimed_registration(
@@ -305,25 +305,11 @@ fn platform_session_is_exclusive_and_reusable_across_contexts() {
         Some(id_a)
     );
 
+    assert!(matches!(
+        Sdl3PlatformSession::acquire(id_a, None),
+        Err(Sdl3BackendError::PlatformSessionOccupied)
+    ));
     let mut context_b = Context::create();
-    let error = RuntimeRegistration::prepare_with_backend(
-        &mut context_b,
-        None,
-        None,
-        None,
-        PlatformGraphicsKind::Other,
-        NativeRendererKind::None,
-    )
-    .unwrap_err();
-    assert!(matches!(error, Sdl3BackendError::PlatformSessionOccupied));
-
-    assert_eq!(
-        binding_a.with_bound_context(|| with_current_runtime(|control| control.binding.id())),
-        Some(id_a)
-    );
-    runtime_a.shutdown_platform(&mut context_a).unwrap();
-    assert!(!registry_contains(key_a));
-
     let mut runtime_b = synthetic_claimed_registration(
         &mut context_b,
         Rc::new(Cell::new(0)),
@@ -333,7 +319,21 @@ fn platform_session_is_exclusive_and_reusable_across_contexts() {
     );
     let id_b = context_b.id();
     let key_b = runtime_b.control.platform_io_key.get();
+    assert_ne!(key_a, key_b);
     assert!(registry_contains(key_b));
+    assert_eq!(
+        binding_a.with_bound_context(|| with_current_runtime(|control| control.binding.id())),
+        Some(id_a)
+    );
+    let previous_generation = runtime_a.control.platform_session_generation().unwrap();
+    runtime_a.shutdown_platform(&mut context_a).unwrap();
+    assert!(!registry_contains(key_a));
+    assert_ne!(
+        previous_generation,
+        Sdl3PlatformSession::acquire(id_a, None)
+            .unwrap()
+            .generation()
+    );
     assert_eq!(
         context_b
             .binding()

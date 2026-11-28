@@ -19,7 +19,7 @@
 #include <SDL3/SDL.h>
 #include <cstddef>
 #include <cstdint>
-#include <vector>
+#include <cstdlib>
 
 namespace {
 
@@ -69,6 +69,7 @@ struct DearImguiSdl3NativeTransaction {
     std::uint64_t faults = 0;
     std::uint64_t first_fault = 0;
     SDL_Window* expected_window = nullptr;
+    ImGuiContext* context = nullptr;
 
     SDL_Window* previous_window = nullptr;
     SDL_GLContext previous_context = nullptr;
@@ -283,16 +284,100 @@ struct DearImguiSdl3FakeOpsScope {
 };
 #endif
 
-} // namespace
-
-extern "C" {
-
-void dear_imgui_sdl3_backend_clear_platform_monitors() {
-    ImGui::GetPlatformIO().Monitors.clear();
+void rollback_platform_init() noexcept {
+    if (ImGui::GetIO().BackendPlatformUserData)
+        ImGui_ImplSDL3_Shutdown();
 }
 
+using SetViewportVec2PointerCallback = void (*)(ImGuiViewport*, const ImVec2*);
+using GetViewportVec2OutCallback = void (*)(ImGuiViewport*, ImVec2*);
+
 #if defined(DEAR_IMGUI_SDL3_NATIVE_SELF_TEST)
-ImGuiViewport* dear_imgui_sdl3_create_live_viewport_for_test(unsigned int id) {
+ImVec2 throwing_viewport_vec2_query(ImGuiViewport*) {
+    throw 1;
+}
+#endif
+
+} // namespace
+
+// Keep C++ exceptions inside the native bridge. Where an entry point cannot report a failure
+// without publishing partially mutated renderer state, terminate instead of reporting success.
+extern "C" {
+
+// Rust forwards the saved callback address here. Keep the target's C++ calling convention,
+// including ImVec2 by value, and catch exceptions before returning through Rust's C ABI.
+// A mutating callback can leave a partially updated window, renderer or surface on failure.
+void dear_imgui_sdl3_invoke_viewport(
+    decltype(ImGuiPlatformIO::Platform_CreateWindow) callback, ImGuiViewport* viewport
+) try {
+    callback(viewport);
+} catch (...) { std::abort(); }
+
+void dear_imgui_sdl3_invoke_viewport_render(
+    decltype(ImGuiPlatformIO::Platform_RenderWindow) callback, ImGuiViewport* viewport, void* argument
+) try {
+    callback(viewport, argument);
+} catch (...) { std::abort(); }
+
+bool dear_imgui_sdl3_invoke_viewport_query(
+    decltype(ImGuiPlatformIO::Platform_GetWindowFocus) callback, ImGuiViewport* viewport, bool fallback
+) try {
+    return callback(viewport);
+} catch (...) { return fallback; }
+
+void dear_imgui_sdl3_invoke_viewport_title(
+    decltype(ImGuiPlatformIO::Platform_SetWindowTitle) callback, ImGuiViewport* viewport, const char* title
+) try {
+    callback(viewport, title);
+} catch (...) { std::abort(); }
+
+void dear_imgui_sdl3_invoke_viewport_alpha(
+    decltype(ImGuiPlatformIO::Platform_SetWindowAlpha) callback, ImGuiViewport* viewport, float alpha
+) try {
+    callback(viewport, alpha);
+} catch (...) { std::abort(); }
+
+int dear_imgui_sdl3_invoke_viewport_vulkan(
+    decltype(ImGuiPlatformIO::Platform_CreateVkSurface) callback,
+    ImGuiViewport* viewport, ImU64 instance, const void* allocator, ImU64* surface
+) try {
+    return callback(viewport, instance, allocator, surface);
+} catch (...) { std::abort(); }
+
+void dear_imgui_sdl3_invoke_viewport_set_vec2(
+    decltype(ImGuiPlatformIO::Platform_SetWindowPos) callback, ImGuiViewport* viewport, const ImVec2* value
+) try {
+    callback(viewport, *value);
+} catch (...) { std::abort(); }
+
+void dear_imgui_sdl3_invoke_viewport_set_vec2_ptr(
+    SetViewportVec2PointerCallback callback, ImGuiViewport* viewport, const ImVec2* value
+) try {
+    callback(viewport, value);
+} catch (...) { std::abort(); }
+
+bool dear_imgui_sdl3_invoke_viewport_get_vec2(
+    decltype(ImGuiPlatformIO::Platform_GetWindowPos) callback, ImGuiViewport* viewport, ImVec2* value
+) try {
+    *value = callback(viewport);
+    return true;
+} catch (...) { return false; }
+
+bool dear_imgui_sdl3_invoke_viewport_get_vec2_out(
+    GetViewportVec2OutCallback callback, ImGuiViewport* viewport, ImVec2* value
+) try {
+    ImVec2 result = *value;
+    callback(viewport, &result);
+    *value = result;
+    return true;
+} catch (...) { return false; }
+
+void dear_imgui_sdl3_backend_clear_platform_monitors() try {
+    ImGui::GetPlatformIO().Monitors.clear();
+} catch (...) { std::abort(); }
+
+#if defined(DEAR_IMGUI_SDL3_NATIVE_SELF_TEST)
+ImGuiViewport* dear_imgui_sdl3_create_live_viewport_for_test(unsigned int id) try {
     ImGuiViewportP* viewport = IM_NEW(ImGuiViewportP)();
     viewport->ID = id;
     viewport->Pos = ImVec2(24.0f, 24.0f);
@@ -301,9 +386,9 @@ ImGuiViewport* dear_imgui_sdl3_create_live_viewport_for_test(unsigned int id) {
     viewport->Idx = GImGui->Viewports.Size;
     GImGui->Viewports.push_back(viewport);
     return viewport;
-}
+} catch (...) { return nullptr; }
 
-void dear_imgui_sdl3_delete_live_viewport_for_test(ImGuiViewport* viewport) {
+void dear_imgui_sdl3_delete_live_viewport_for_test(ImGuiViewport* viewport) try {
     if (viewport->PlatformUserData != nullptr && ImGui::GetPlatformIO().Platform_DestroyWindow)
         ImGui::GetPlatformIO().Platform_DestroyWindow(viewport);
     for (int index = 1; index < GImGui->Viewports.Size; ++index) {
@@ -313,16 +398,16 @@ void dear_imgui_sdl3_delete_live_viewport_for_test(ImGuiViewport* viewport) {
         }
     }
     IM_DELETE(static_cast<ImGuiViewportP*>(viewport));
-}
+} catch (...) { std::abort(); }
 
-void dear_imgui_sdl3_destroy_platform_windows_for_test(ImGuiViewportP* viewport) {
+void dear_imgui_sdl3_destroy_platform_windows_for_test(ImGuiViewportP* viewport) try {
     IM_ASSERT(viewport != nullptr);
     ImGuiContext& context = *GImGui;
     context.Viewports.push_back(viewport);
     ImGui::DestroyPlatformWindows();
     IM_ASSERT(context.Viewports.back() == viewport);
     context.Viewports.pop_back();
-}
+} catch (...) { std::abort(); }
 #endif
 
 std::uint64_t dear_imgui_sdl3_native_begin(
@@ -331,27 +416,29 @@ std::uint64_t dear_imgui_sdl3_native_begin(
     std::uint32_t swap_interval_policy,
     std::int32_t explicit_swap_interval,
     ImGuiViewport* viewport
-) {
+) try {
     if (native_transaction.active)
         return DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL;
 
-    native_transaction = {};
-    native_transaction.active = true;
-    native_transaction.phase = static_cast<DearImguiSdl3NativePhase>(phase);
-    native_transaction.expects_opengl = expects_opengl != 0;
-    native_transaction.match_main_swap_interval = swap_interval_policy == 1;
-    native_transaction.explicit_swap_interval = explicit_swap_interval;
-    native_transaction.expected_window = dear_imgui_sdl3_window_from_viewport(viewport);
-    if (native_transaction.expects_opengl
-        && native_transaction.phase == DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE) {
-        native_transaction.previous_window = native_ops->gl_get_current_window();
-        native_transaction.previous_context = native_ops->gl_get_current_context();
+    DearImguiSdl3NativeTransaction transaction;
+    transaction.active = true;
+    transaction.context = ImGui::GetCurrentContext();
+    transaction.phase = static_cast<DearImguiSdl3NativePhase>(phase);
+    transaction.expects_opengl = expects_opengl != 0;
+    transaction.match_main_swap_interval = swap_interval_policy == 1;
+    transaction.explicit_swap_interval = explicit_swap_interval;
+    transaction.expected_window = dear_imgui_sdl3_window_from_viewport(viewport);
+    if (transaction.expects_opengl
+        && transaction.phase == DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE) {
+        transaction.previous_window = native_ops->gl_get_current_window();
+        transaction.previous_context = native_ops->gl_get_current_context();
     }
+    native_transaction = transaction;
     return 0;
-}
+} catch (...) { return DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL; }
 
-std::uint64_t dear_imgui_sdl3_native_end(std::uint64_t* first_fault) {
-    if (!native_transaction.active) {
+std::uint64_t dear_imgui_sdl3_native_end(std::uint64_t* first_fault) try {
+    if (!native_transaction.active || native_transaction.context != ImGui::GetCurrentContext()) {
         if (first_fault != nullptr)
             *first_fault = DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL;
         return DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL;
@@ -392,19 +479,19 @@ std::uint64_t dear_imgui_sdl3_native_end(std::uint64_t* first_fault) {
         *first_fault = state.first_fault;
     state = {};
     return faults;
-}
+} catch (...) { std::abort(); }
 
-bool dear_imgui_sdl3_native_set_window_transparent(bool transparent) {
+bool dear_imgui_sdl3_native_set_window_transparent(bool transparent) try {
     if (!native_transaction.active
         || native_transaction.phase != DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE)
         return false;
     native_transaction.transparent_window = transparent;
     return true;
-}
+} catch (...) { return false; }
 
 SDL_Window* SDLCALL dear_imgui_sdl3_hook_create_window(
     const char* title, int width, int height, SDL_WindowFlags flags
-) {
+) try {
     // Applications can only add transparent backing. Geometry, initial hidden state, graphics
     // API, DPI, decoration and taskbar flags stay under the backend's ownership.
     if (native_transaction.active
@@ -412,10 +499,14 @@ SDL_Window* SDLCALL dear_imgui_sdl3_hook_create_window(
         && native_transaction.transparent_window)
         flags |= SDL_WINDOW_TRANSPARENT;
     return SDL_CreateWindow(title, width, height, flags);
+} catch (...) {
+    if (native_transaction.active)
+        dear_imgui_sdl3_record_fault(native_transaction, DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL);
+    return nullptr;
 }
 
 #if defined(DEAR_IMGUI_SDL3_NATIVE_SELF_TEST)
-std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
+std::uint64_t dear_imgui_sdl3_native_contract_self_test() try {
     DearImguiSdl3FakeOpsScope scope;
     std::uint64_t failures = 0;
     ImGuiViewport viewport{};
@@ -647,11 +738,19 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
     if (dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_test() != 0)
         failures |= UINT64_C(1) << 7;
 #endif
+    ImVec2 result(3.0f, 4.0f);
+    if (!dear_imgui_sdl3_invoke_viewport_query(
+            [](ImGuiViewport*) -> bool { throw 1; }, &viewport, true)
+        || dear_imgui_sdl3_invoke_viewport_get_vec2(throwing_viewport_vec2_query, &viewport, &result)
+        || dear_imgui_sdl3_invoke_viewport_get_vec2_out(
+            [](ImGuiViewport*, ImVec2* value) { value->x = 0.0f; throw 1; }, &viewport, &result)
+        || result.x != 3.0f || result.y != 4.0f)
+        failures |= UINT64_C(1) << 11;
     return failures;
-}
+} catch (...) { return UINT64_MAX; }
 #endif
 
-bool SDLCALL dear_imgui_sdl3_hook_gl_set_attribute(SDL_GLAttr attribute, int value) {
+bool SDLCALL dear_imgui_sdl3_hook_gl_set_attribute(SDL_GLAttr attribute, int value) try {
     DearImguiSdl3NativeTransaction& state = native_transaction;
     if (!state.active
         || !state.expects_opengl
@@ -669,9 +768,13 @@ bool SDLCALL dear_imgui_sdl3_hook_gl_set_attribute(SDL_GLAttr attribute, int val
     }
     state.share_attribute_changed = true;
     return true;
+} catch (...) {
+    if (native_transaction.active)
+        dear_imgui_sdl3_record_fault(native_transaction, DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL);
+    return false;
 }
 
-SDL_GLContext SDLCALL dear_imgui_sdl3_hook_gl_create_context(SDL_Window* window) {
+SDL_GLContext SDLCALL dear_imgui_sdl3_hook_gl_create_context(SDL_Window* window) try {
     DearImguiSdl3NativeTransaction& state = native_transaction;
     if (!state.active
         || !state.expects_opengl
@@ -684,9 +787,13 @@ SDL_GLContext SDLCALL dear_imgui_sdl3_hook_gl_create_context(SDL_Window* window)
     if (state.created_context == nullptr || state.created_context == state.main_context)
         dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_CREATE_CONTEXT);
     return state.created_context;
+} catch (...) {
+    if (native_transaction.active)
+        dear_imgui_sdl3_record_fault(native_transaction, DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL);
+    return nullptr;
 }
 
-bool SDLCALL dear_imgui_sdl3_hook_gl_make_current(SDL_Window* window, SDL_GLContext context) {
+bool SDLCALL dear_imgui_sdl3_hook_gl_make_current(SDL_Window* window, SDL_GLContext context) try {
     DearImguiSdl3NativeTransaction& state = native_transaction;
     if (!state.active || !state.expects_opengl)
         return native_ops->gl_make_current(window, context);
@@ -730,9 +837,13 @@ bool SDLCALL dear_imgui_sdl3_hook_gl_make_current(SDL_Window* window, SDL_GLCont
         );
     }
     return state.phase_make_current_succeeded;
+} catch (...) {
+    if (native_transaction.active)
+        dear_imgui_sdl3_record_fault(native_transaction, DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL);
+    return false;
 }
 
-bool SDLCALL dear_imgui_sdl3_hook_gl_set_swap_interval(int interval) {
+bool SDLCALL dear_imgui_sdl3_hook_gl_set_swap_interval(int interval) try {
     DearImguiSdl3NativeTransaction& state = native_transaction;
     if (!state.active
         || !state.expects_opengl
@@ -753,9 +864,13 @@ bool SDLCALL dear_imgui_sdl3_hook_gl_set_swap_interval(int interval) {
     // its default rather than treating an unsupported VSync preference as a creation failure.
     (void)native_ops->gl_set_swap_interval(state.resolved_swap_interval);
     return true;
+} catch (...) {
+    if (native_transaction.active)
+        dear_imgui_sdl3_record_fault(native_transaction, DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL);
+    return false;
 }
 
-bool SDLCALL dear_imgui_sdl3_hook_gl_swap_window(SDL_Window* window) {
+bool SDLCALL dear_imgui_sdl3_hook_gl_swap_window(SDL_Window* window) try {
     DearImguiSdl3NativeTransaction& state = native_transaction;
     if (!state.active
         || !state.expects_opengl
@@ -770,12 +885,16 @@ bool SDLCALL dear_imgui_sdl3_hook_gl_swap_window(SDL_Window* window) {
     if (!state.phase_swap_succeeded)
         dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_SWAP_WINDOW);
     return state.phase_swap_succeeded;
+} catch (...) {
+    if (native_transaction.active)
+        dear_imgui_sdl3_record_fault(native_transaction, DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL);
+    return false;
 }
 
 bool SDLCALL dear_imgui_sdl3_hook_claim_window_for_gpu_device(
     SDL_GPUDevice* device,
     SDL_Window* window
-) {
+) try {
     DearImguiSdl3NativeTransaction& state = native_transaction;
     if (!state.active || state.phase != DEAR_IMGUI_SDL3_PHASE_SDLGPU_CREATE)
         return native_ops->claim_window_for_gpu_device(device, window);
@@ -786,6 +905,10 @@ bool SDLCALL dear_imgui_sdl3_hook_claim_window_for_gpu_device(
     if (!state.gpu_claimed)
         dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_SDLGPU_CLAIM);
     return state.gpu_claimed;
+} catch (...) {
+    if (native_transaction.active)
+        dear_imgui_sdl3_record_fault(native_transaction, DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL);
+    return false;
 }
 
 bool SDLCALL dear_imgui_sdl3_hook_set_gpu_swapchain_parameters(
@@ -793,7 +916,7 @@ bool SDLCALL dear_imgui_sdl3_hook_set_gpu_swapchain_parameters(
     SDL_Window* window,
     SDL_GPUSwapchainComposition swapchain_composition,
     SDL_GPUPresentMode present_mode
-) {
+) try {
     DearImguiSdl3NativeTransaction& state = native_transaction;
     if (!state.active || state.phase != DEAR_IMGUI_SDL3_PHASE_SDLGPU_CREATE)
         return native_ops->set_gpu_swapchain_parameters(
@@ -824,155 +947,162 @@ bool SDLCALL dear_imgui_sdl3_hook_set_gpu_swapchain_parameters(
     if (!state.gpu_configured)
         dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_SDLGPU_CONFIGURE);
     return state.gpu_configured;
+} catch (...) {
+    if (native_transaction.active)
+        dear_imgui_sdl3_record_fault(native_transaction, DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL);
+    return false;
 }
 
-std::size_t dear_imgui_sdl3_backend_sizeof_imgui_io() {
+std::size_t dear_imgui_sdl3_backend_sizeof_imgui_io() try {
     return sizeof(ImGuiIO);
-}
+} catch (...) { return 0; }
 
-bool ImGui_ImplSDL3_InitForOpenGL_Rust(SDL_Window* window, void* sdl_gl_context) {
+bool ImGui_ImplSDL3_InitForOpenGL_Rust(SDL_Window* window, void* sdl_gl_context) try {
     return ImGui_ImplSDL3_InitForOpenGL(window, sdl_gl_context);
-}
+} catch (...) { rollback_platform_init(); return false; }
 
-bool ImGui_ImplSDL3_InitForVulkan_Rust(SDL_Window* window) {
+bool ImGui_ImplSDL3_InitForVulkan_Rust(SDL_Window* window) try {
     return ImGui_ImplSDL3_InitForVulkan(window);
-}
+} catch (...) { rollback_platform_init(); return false; }
 
-bool ImGui_ImplSDL3_InitForD3D_Rust(SDL_Window* window) {
+bool ImGui_ImplSDL3_InitForD3D_Rust(SDL_Window* window) try {
     return ImGui_ImplSDL3_InitForD3D(window);
-}
+} catch (...) { rollback_platform_init(); return false; }
 
-bool ImGui_ImplSDL3_InitForMetal_Rust(SDL_Window* window) {
+bool ImGui_ImplSDL3_InitForMetal_Rust(SDL_Window* window) try {
     return ImGui_ImplSDL3_InitForMetal(window);
-}
+} catch (...) { rollback_platform_init(); return false; }
 
-bool ImGui_ImplSDL3_InitForSDLRenderer_Rust(SDL_Window* window, SDL_Renderer* renderer) {
+bool ImGui_ImplSDL3_InitForSDLRenderer_Rust(SDL_Window* window, SDL_Renderer* renderer) try {
     return ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
-}
+} catch (...) { rollback_platform_init(); return false; }
 
-bool ImGui_ImplSDL3_InitForSDLGPU_Rust(SDL_Window* window) {
+bool ImGui_ImplSDL3_InitForSDLGPU_Rust(SDL_Window* window) try {
     return ImGui_ImplSDL3_InitForSDLGPU(window);
-}
+} catch (...) { rollback_platform_init(); return false; }
 
-bool ImGui_ImplSDL3_InitForOther_Rust(SDL_Window* window) {
+bool ImGui_ImplSDL3_InitForOther_Rust(SDL_Window* window) try {
     return ImGui_ImplSDL3_InitForOther(window);
-}
+} catch (...) { rollback_platform_init(); return false; }
 
-void ImGui_ImplSDL3_Shutdown_Rust() {
+void ImGui_ImplSDL3_Shutdown_Rust() try {
     ImGui_ImplSDL3_Shutdown();
-}
+} catch (...) { std::abort(); }
 
-void ImGui_ImplSDL3_NewFrame_Rust() {
+void ImGui_ImplSDL3_NewFrame_Rust() try {
     ImGui_ImplSDL3_NewFrame();
-}
+} catch (...) { std::abort(); }
 
-bool ImGui_ImplSDL3_ProcessEvent_Rust(const SDL_Event* event) {
+bool ImGui_ImplSDL3_ProcessEvent_Rust(const SDL_Event* event) try {
     return ImGui_ImplSDL3_ProcessEvent(event);
-}
+} catch (...) { return false; }
 
 void dear_imgui_sdl3_backend_set_texture_updates(
     ImTextureData* texture,
     const ImTextureRect* updates,
     int update_count
-) {
+) try {
     IM_ASSERT(texture != nullptr);
     IM_ASSERT(update_count >= 0);
     texture->Updates.resize(update_count);
     for (int index = 0; index < update_count; index++)
         texture->Updates[index] = updates[index];
-}
+} catch (...) { std::abort(); }
 
-void ImGui_ImplSDL3_SetGamepadMode_AutoFirst_Rust() {
+void ImGui_ImplSDL3_SetGamepadMode_AutoFirst_Rust() try {
     ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoFirst, nullptr, 0);
-}
+} catch (...) { std::abort(); }
 
-void ImGui_ImplSDL3_SetGamepadMode_AutoAll_Rust() {
+void ImGui_ImplSDL3_SetGamepadMode_AutoAll_Rust() try {
     ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll, nullptr, 0);
-}
+} catch (...) { std::abort(); }
 
-void ImGui_ImplSDL3_SetGamepadMode_Manual_Rust(SDL_Gamepad* const* manual_gamepads_array, int manual_gamepads_count) {
-    // Dear ImGui SDL backends may keep a pointer to the passed-in array. Copy it into stable
-    // storage so Rust callers don't need to keep their slice buffer alive.
-    static std::vector<SDL_Gamepad*> manual_gamepads;
-    manual_gamepads.clear();
-    if (manual_gamepads_array != nullptr && manual_gamepads_count > 0) {
-        manual_gamepads.assign(manual_gamepads_array, manual_gamepads_array + manual_gamepads_count);
-    }
-    ImGui_ImplSDL3_SetGamepadMode(
-        ImGui_ImplSDL3_GamepadMode_Manual,
-        manual_gamepads.empty() ? nullptr : manual_gamepads.data(),
-        (int)manual_gamepads.size()
-    );
-}
+void ImGui_ImplSDL3_SetGamepadMode_Manual_Rust(SDL_Gamepad* const* manual_gamepads_array, int manual_gamepads_count) try {
+    // The vendored setter copies the handles into the current Context's backend data.
+    ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual,
+        const_cast<SDL_Gamepad**>(manual_gamepads_array), manual_gamepads_count);
+} catch (...) { std::abort(); }
 
-void ImGui_ImplSDL3_SetMouseCaptureMode_Enabled_Rust() {
+void ImGui_ImplSDL3_SetMouseCaptureMode_Enabled_Rust() try {
     ImGui_ImplSDL3_SetMouseCaptureMode(ImGui_ImplSDL3_MouseCaptureMode_Enabled);
-}
+} catch (...) { std::abort(); }
 
-void ImGui_ImplSDL3_SetMouseCaptureMode_EnabledAfterDrag_Rust() {
+void ImGui_ImplSDL3_SetMouseCaptureMode_EnabledAfterDrag_Rust() try {
     ImGui_ImplSDL3_SetMouseCaptureMode(ImGui_ImplSDL3_MouseCaptureMode_EnabledAfterDrag);
-}
+} catch (...) { std::abort(); }
 
-void ImGui_ImplSDL3_SetMouseCaptureMode_Disabled_Rust() {
+void ImGui_ImplSDL3_SetMouseCaptureMode_Disabled_Rust() try {
     ImGui_ImplSDL3_SetMouseCaptureMode(ImGui_ImplSDL3_MouseCaptureMode_Disabled);
-}
+} catch (...) { std::abort(); }
 
 #if defined(DEAR_IMGUI_SDL3_ENABLE_SDLRENDERER3)
-bool dear_imgui_sdl3_backend_sdlrenderer3_init(SDL_Renderer* renderer) {
+bool dear_imgui_sdl3_backend_sdlrenderer3_init(SDL_Renderer* renderer) try {
     return ImGui_ImplSDLRenderer3_Init(renderer);
+} catch (...) {
+    // A published renderer needs its normal shutdown path. A failed initialization before
+    // publication can safely return through the Rust platform rollback.
+    if (ImGui::GetIO().BackendRendererUserData)
+        std::abort();
+    return false;
 }
 
-void dear_imgui_sdl3_backend_sdlrenderer3_shutdown() {
+void dear_imgui_sdl3_backend_sdlrenderer3_shutdown() try {
     ImGui_ImplSDLRenderer3_Shutdown();
-}
+} catch (...) { std::abort(); }
 
-void dear_imgui_sdl3_backend_sdlrenderer3_new_frame() {
+void dear_imgui_sdl3_backend_sdlrenderer3_new_frame() try {
     ImGui_ImplSDLRenderer3_NewFrame();
-}
+} catch (...) { std::abort(); }
 
-void dear_imgui_sdl3_backend_sdlrenderer3_render_draw_data(ImDrawData* draw_data, SDL_Renderer* renderer) {
+void dear_imgui_sdl3_backend_sdlrenderer3_render_draw_data(ImDrawData* draw_data, SDL_Renderer* renderer) try {
     ImGui_ImplSDLRenderer3_RenderDrawData(draw_data, renderer);
-}
+} catch (...) { std::abort(); }
 
-void dear_imgui_sdl3_backend_sdlrenderer3_destroy_device_objects() {
+void dear_imgui_sdl3_backend_sdlrenderer3_destroy_device_objects() try {
     ImGui_ImplSDLRenderer3_DestroyDeviceObjects();
-}
+} catch (...) { std::abort(); }
 
 #endif
 
 #if defined(DEAR_IMGUI_SDL3_ENABLE_SDLGPU3)
-bool dear_imgui_sdl3_backend_sdlgpu3_init(ImGui_ImplSDLGPU3_InitInfo* info) {
+bool dear_imgui_sdl3_backend_sdlgpu3_init(ImGui_ImplSDLGPU3_InitInfo* info) try {
     return ImGui_ImplSDLGPU3_Init(info);
+} catch (...) {
+    // A published renderer needs its normal shutdown path. A failed initialization before
+    // publication can safely return through the Rust platform rollback.
+    if (ImGui::GetIO().BackendRendererUserData)
+        std::abort();
+    return false;
 }
 
-void dear_imgui_sdl3_backend_sdlgpu3_shutdown() {
+void dear_imgui_sdl3_backend_sdlgpu3_shutdown() try {
     ImGui_ImplSDLGPU3_Shutdown();
-}
+} catch (...) { std::abort(); }
 
-void dear_imgui_sdl3_backend_sdlgpu3_new_frame() {
+void dear_imgui_sdl3_backend_sdlgpu3_new_frame() try {
     ImGui_ImplSDLGPU3_NewFrame();
-}
+} catch (...) { std::abort(); }
 
-void dear_imgui_sdl3_backend_sdlgpu3_prepare_draw_data(ImDrawData* draw_data, SDL_GPUCommandBuffer* buffer) {
+void dear_imgui_sdl3_backend_sdlgpu3_prepare_draw_data(ImDrawData* draw_data, SDL_GPUCommandBuffer* buffer) try {
     ImGui_ImplSDLGPU3_PrepareDrawData(draw_data, buffer);
-}
+} catch (...) { std::abort(); }
 
 void dear_imgui_sdl3_backend_sdlgpu3_render_draw_data(
     ImDrawData* draw_data,
     SDL_GPUCommandBuffer* buffer,
     SDL_GPURenderPass* render_pass,
     SDL_GPUGraphicsPipeline* pipeline
-) {
+) try {
     ImGui_ImplSDLGPU3_RenderDrawData(draw_data, buffer, render_pass, pipeline);
-}
+} catch (...) { std::abort(); }
 
-void dear_imgui_sdl3_backend_sdlgpu3_create_device_objects() {
+void dear_imgui_sdl3_backend_sdlgpu3_create_device_objects() try {
     ImGui_ImplSDLGPU3_CreateDeviceObjects();
-}
+} catch (...) { std::abort(); }
 
-void dear_imgui_sdl3_backend_sdlgpu3_destroy_device_objects() {
+void dear_imgui_sdl3_backend_sdlgpu3_destroy_device_objects() try {
     ImGui_ImplSDLGPU3_DestroyDeviceObjects();
-}
+} catch (...) { std::abort(); }
 
 #endif
 

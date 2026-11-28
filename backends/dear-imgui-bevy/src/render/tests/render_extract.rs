@@ -1477,7 +1477,7 @@ fn renderer_prepare_flattens_extracted_snapshot_for_pipeline_consumption() {
         "vertex shader must keep sRGB vertex colors intact so rasterization interpolates in sRGB space"
     );
     assert!(
-        fragment_stage.contains("srgb_to_linear(in.color.rgb)"),
+        fragment_stage.contains("srgb_to_linear(max(in.color.rgb, vec3<f32>(0.0)))"),
         "fragment shader must decode interpolated sRGB vertex colors to linear light before texture modulation"
     );
     assert!(

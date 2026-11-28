@@ -1,9 +1,4 @@
 use super::*;
-#[cfg(any(
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
 use dear_imgui_rs::sys;
 
 pub(super) fn with_context<R>(imgui: &Context, caller: &str, f: impl FnOnce() -> R) -> R {
@@ -43,6 +38,62 @@ pub(super) mod ffi {
     }
 
     unsafe extern "C" {
+        pub fn dear_imgui_sdl3_invoke_viewport(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport),
+            viewport: *mut sys::ImGuiViewport,
+        );
+        pub fn dear_imgui_sdl3_invoke_viewport_render(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void),
+            viewport: *mut sys::ImGuiViewport,
+            argument: *mut c_void,
+        );
+        pub fn dear_imgui_sdl3_invoke_viewport_query(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport) -> bool,
+            viewport: *mut sys::ImGuiViewport,
+            fallback: bool,
+        ) -> bool;
+        pub fn dear_imgui_sdl3_invoke_viewport_title(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *const std::ffi::c_char),
+            viewport: *mut sys::ImGuiViewport,
+            title: *const std::ffi::c_char,
+        );
+        pub fn dear_imgui_sdl3_invoke_viewport_alpha(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, f32),
+            viewport: *mut sys::ImGuiViewport,
+            alpha: f32,
+        );
+        pub fn dear_imgui_sdl3_invoke_viewport_vulkan(
+            callback: unsafe extern "C" fn(
+                *mut sys::ImGuiViewport,
+                sys::ImU64,
+                *const c_void,
+                *mut sys::ImU64,
+            ) -> std::ffi::c_int,
+            viewport: *mut sys::ImGuiViewport,
+            instance: sys::ImU64,
+            allocator: *const c_void,
+            surface: *mut sys::ImU64,
+        ) -> std::ffi::c_int;
+        pub fn dear_imgui_sdl3_invoke_viewport_set_vec2(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2_c),
+            viewport: *mut sys::ImGuiViewport,
+            value: *const sys::ImVec2,
+        );
+        pub fn dear_imgui_sdl3_invoke_viewport_set_vec2_ptr(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2),
+            viewport: *mut sys::ImGuiViewport,
+            value: *const sys::ImVec2,
+        );
+        pub fn dear_imgui_sdl3_invoke_viewport_get_vec2(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2_c,
+            viewport: *mut sys::ImGuiViewport,
+            value: *mut sys::ImVec2,
+        ) -> bool;
+        pub fn dear_imgui_sdl3_invoke_viewport_get_vec2_out(
+            callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
+            viewport: *mut sys::ImGuiViewport,
+            value: *mut sys::ImVec2,
+        ) -> bool;
         #[cfg(test)]
         pub fn dear_imgui_sdl3_backend_sizeof_imgui_io() -> usize;
         #[cfg(all(test, sdl3_native_self_test))]
@@ -243,8 +294,10 @@ pub enum Sdl3BackendError {
         expected: dear_imgui_rs::ContextId,
         actual: dear_imgui_rs::ContextId,
     },
-    #[error("another SDL3 platform runtime already owns the process-wide SDL session")]
+    #[error("the Dear ImGui Context already owns an SDL3 platform session")]
     PlatformSessionOccupied,
+    #[error("SDL window {window_id} is already attached to an SDL3 platform session")]
+    PlatformWindowOccupied { window_id: u32 },
     #[error(transparent)]
     NativeWindowIdentityExhausted(#[from] dear_imgui_rs::NativeWindowIdentityExhausted),
     #[error("SDL3 window policy is invalid: {reason}")]

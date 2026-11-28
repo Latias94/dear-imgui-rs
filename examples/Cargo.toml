@@ -59,9 +59,7 @@ sdl3-glow-multi-viewport = [
     "dear-imgui-sdl3/multi-viewport",
 ]
 
-# Enable WGPU multi-viewport when using the SDL3 platform backend (native only).
-# This is separate from `multi-viewport` because the wgpu crate cannot enable both
-# winit and SDL3 multi-viewport routes simultaneously.
+# Enable the native SDL3/WGPU multi-viewport route independently of the Winit examples.
 sdl3-wgpu-multi-viewport = [
     "sdl3-platform",
     "dear-imgui-rs/multi-viewport",

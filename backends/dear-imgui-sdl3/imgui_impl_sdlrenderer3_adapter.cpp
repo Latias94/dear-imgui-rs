@@ -1,3 +1,5 @@
+#include <cstdlib>
+
 #include "backends/imgui_impl_sdlrenderer3.cpp"
 
 // The upstream updater acknowledges partial uploads even when SDL_UpdateTexture fails.
@@ -29,12 +31,12 @@ static void update_texture(ImTextureData* tex, decltype(&SDL_UpdateTexture) uplo
     tex->SetStatus(ImTextureStatus_OK);
 }
 
-extern "C" void dear_imgui_sdl3_backend_sdlrenderer3_update_texture(ImTextureData* tex) {
+extern "C" void dear_imgui_sdl3_backend_sdlrenderer3_update_texture(ImTextureData* tex) try {
     update_texture(tex, SDL_UpdateTexture);
-}
+} catch (...) { std::abort(); }
 
 #if defined(DEAR_IMGUI_SDL3_NATIVE_SELF_TEST)
-extern "C" bool dear_imgui_sdl3_backend_sdlrenderer3_texture_self_test() {
+extern "C" bool dear_imgui_sdl3_backend_sdlrenderer3_texture_self_test() try {
     ImTextureData tex;
     tex.Create(ImTextureFormat_RGBA32, 4, 2);
     tex.Updates.push_back({0, 0, 1, 1});
@@ -45,5 +47,5 @@ extern "C" bool dear_imgui_sdl3_backend_sdlrenderer3_texture_self_test() {
         return false;
     update_texture(&tex, [](SDL_Texture*, const SDL_Rect*, const void*, int pitch) { return pitch == 16; });
     return tex.Status == ImTextureStatus_OK;
-}
+} catch (...) { return false; }
 #endif
