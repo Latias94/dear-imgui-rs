@@ -120,11 +120,11 @@ pub(super) mod ffi {
             current_frame: i32,
             buttons_down: i32,
         ) -> bool;
-        #[cfg(all(test, sdl3_native_self_test))]
+        #[cfg(all(test, target_os = "windows", sdl3_native_self_test))]
         pub fn dear_imgui_sdl3_create_live_viewport_for_test(
             id: u32,
         ) -> *mut dear_imgui_rs::sys::ImGuiViewport;
-        #[cfg(all(test, sdl3_native_self_test))]
+        #[cfg(all(test, target_os = "windows", sdl3_native_self_test))]
         pub fn dear_imgui_sdl3_delete_live_viewport_for_test(
             viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
         );
