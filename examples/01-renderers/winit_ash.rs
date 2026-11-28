@@ -945,6 +945,12 @@ impl AppWindow {
             }
         }
 
+        let (reconciled_frame, texture_retirement) = match renderer.prepare_frame(pending_frame) {
+            Ok(prepared) => prepared,
+            Err(RendererError::Vulkan(vk::Result::NOT_READY)) => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+
         let acquire = unsafe {
             vk.swapchain.loader.acquire_next_image(
                 vk.swapchain.swapchain,
@@ -1017,8 +1023,6 @@ impl AppWindow {
                     vk::CommandBufferResetFlags::empty(),
                 )?;
             }
-
-            let (reconciled_frame, texture_retirement) = renderer.prepare_frame(pending_frame)?;
 
             let texture_retirement = record_command_buffer(
                 &vk.ctx.device,

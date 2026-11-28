@@ -18,16 +18,15 @@ pub struct Options {
     /// This excludes the two renderer-owned standard sampler sets and must be at least 8 so font
     /// atlas replacements and fence-delayed texture retirement have bounded headroom.
     pub max_textures: u32,
-    /// If true, treat the render target as sRGB.
+    /// Decode interpolated vertex RGB before blending into an sRGB render target.
     ///
-    /// This backend follows the WGPU renderer approach: ImGui provides colors/texels in sRGB
-    /// space (stored as UNORM), and the fragment shader applies `pow(rgb, gamma)` to convert
-    /// to linear before writing to an sRGB render target.
+    /// The fragment shader uses the IEC 61966-2-1 transfer. Use an sRGB image view for any
+    /// application texture containing sRGB-encoded RGB.
     pub framebuffer_srgb: bool,
-    /// Override the gamma used for sRGB->linear conversion in the shader.
+    /// Override the vertex color transfer applied in the fragment shader.
     ///
-    /// - `None`: auto (2.2 when `framebuffer_srgb`, else 1.0)
-    /// - `Some(gamma)`: force a value (e.g. 2.2 or 1.0)
+    /// - `None`: select sRGB decoding from the target configuration.
+    /// - `Some(gamma)`: apply a power curve to vertex RGB, with `1.0` preserving the input.
     pub color_gamma_override: Option<f32>,
 }
 

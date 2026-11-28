@@ -788,6 +788,10 @@ jobs:
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
+      - name: Check all additive Ash features
+        if: matrix.platform == 'Winit' && matrix.rendering == 'classic'
+        run: cargo check -p dear-imgui-ash --all-features
+
       - name: Test exact Ash route including NoRendererClear policy
         run: cargo nextest run -p dear-imgui-ash --lib --no-default-features --features "${{ matrix.features }}"
         env:
@@ -798,44 +802,6 @@ jobs:
           python3 tools/ci/run_contract.py clippy --
           -p dear-imgui-ash --all-targets --no-default-features
           --features "${{ matrix.features }}"
-        env:
-          IMGUI_SYS_FORCE_BUILD: "1"
-
-  feature-conflict-contracts:
-    name: Mutually exclusive feature contracts
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          submodules: true
-
-      - name: Init required nested submodules (selective)
-        run: python3 tools/ci/update_submodules.py
-
-      - name: Install Rust toolchain
-        run: rustup toolchain install --profile minimal --no-self-update
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          cache-bin: "false"
-          key: feature-conflict-contracts
-
-      - name: Refresh Linux package metadata
-        run: sudo apt-get update
-
-      - name: Install Linux deps
-        run: >-
-          sudo apt-get install -y
-          build-essential cmake ninja-build pkg-config
-          libasound2-dev
-          libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
-          libxkbcommon-dev libwayland-dev libudev-dev
-          mesa-common-dev libgl1-mesa-dev
-
-      - name: Reject mutually exclusive renderer features
-        run: python3 tools/ci/run_contract.py renderer-feature-conflicts
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 

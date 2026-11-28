@@ -52,6 +52,16 @@ builders and `Ui::text_colored` accept `Color`, RGBA arrays, and compatible vect
 | sRGB transfer applied to the combined fragment color | The shader decodes the interpolated vertex tint before modulation. Use an sRGB texture view for sRGB-encoded application textures. |
 | Keeping the renderer alive until explicit `shutdown` or Context teardown | Drop the renderer to release its WGPU handles. The Context resets managed textures before the next renderer uses them. Use `shutdown` for synchronous error reporting. |
 
+## Ash renderer
+
+| In 0.23 | In 0.24 |
+| --- | --- |
+| Choosing an allocator through Cargo features | Use `with_default_allocator`, `with_gpu_allocator`, or `with_vk_mem_allocator`. The built-in allocator is always available and both optional allocators can be enabled together. |
+| Choosing Winit or SDL3 at Cargo feature resolution | Enable either or both features, then attach the route for the Context's platform owner. |
+| sRGB transfer applied to the combined fragment color | The shader decodes the interpolated vertex tint before modulation. Use an sRGB image view for sRGB-encoded application textures. |
+| Preparing textures after acquiring a swapchain image | Prepare before acquisition. If the upload ring returns `VK_NOT_READY` as the only fault, skip the frame and retry on the next redraw. |
+| Requiring explicit synchronous `shutdown` to release a single-viewport renderer | Drop the renderer while the Vulkan device, queue, command pool, and loader are live. Use `shutdown` to receive cleanup errors and reset the Context immediately. |
+
 ## Prebuilt archives
 
 | In 0.23 | In 0.24 |

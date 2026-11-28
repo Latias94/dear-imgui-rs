@@ -2,10 +2,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::rc::Rc;
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 use std::sync::Arc;
 
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 use ash::vk;
 
 use dear_imgui_rs::{
@@ -23,10 +21,8 @@ use super::runtime::{
     AshPreparedViewportFrame, AshViewportError, AshViewportFrameCompletion, AshViewportRouteFault,
     OwningViewportRuntime, RuntimeControl, RuntimeState, preflight_attachment_with,
 };
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 use super::{SurfaceAdapter, SurfaceCreateError, ViewportSwapchainPolicy, VulkanViewportConfig};
 use crate::RendererError;
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 use crate::renderer::lifecycle::renderer_for_test;
 
 assert_impl_all!(AshViewportFrameCompletion: Send, Sync);
@@ -34,10 +30,8 @@ assert_not_impl_any!(AshPreparedViewportFrame<'static>: Send, Sync);
 
 struct TestPlatformMarker;
 
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 struct InertSurfaceAdapter;
 
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 impl SurfaceAdapter for InertSurfaceAdapter {
     unsafe fn create_surface(
         &self,
@@ -147,7 +141,6 @@ fn attach_test_platform(context: &mut Context) -> TestPlatformLease {
     }
 }
 
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 fn inert_vulkan_config() -> VulkanViewportConfig {
     let entry = ash::Entry::from_parts_1_1(
         ash::StaticFn::load(|_| std::ptr::null()),
@@ -184,7 +177,6 @@ fn attach_requires_registered_platform_role_without_claiming_callbacks() {
     clear_test_main_handle_raw();
 }
 
-#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 #[test]
 fn failed_real_attach_returns_the_renderer_and_preserves_shutdown_ownership() {
     let _guard = super::test_context_guard();

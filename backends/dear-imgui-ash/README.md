@@ -19,8 +19,8 @@ This backend is compatible with both `ash` loader modes:
 
 - Supports Dear ImGui 1.92+ managed texture create/update/destroy requests through `PendingFrame`.
 - Sets `ImGuiBackendFlags_RendererHasTextures` and `ImGuiBackendFlags_RendererHasVtxOffset`.
-- Upload path uses in-flight fences to avoid `vkQueueWaitIdle` stalls.
-- Sub-rect texture updates (uses `UpdateRect` bounding box).
+- Managed uploads share a batch and reuse staging buffers after their upload fences signal.
+- Legacy texture sub-rectangle updates use the `UpdateRect` bounding box.
 
 ### Render targets
 
@@ -85,6 +85,35 @@ work. The consumed frame lease prevents native `DrawData` from escaping its Cont
 Safe image APIs do not accept borrowed `TextureData`; this prevents native draw commands from
 retaining a pointer after the Rust borrow ends.
 
+### Upload staging and backpressure
+
+Ash submits one upload batch per prepared frame with uploads, using the renderer's configured
+graphics queue. `Options::in_flight_frames` sets the number of staging slots. Each slot keeps its
+buffer and fence for reuse after the upload completes. The upload path polls fences without a
+host wait. Main draws and presentation remain application submissions. The viewport route submits
+secondary draws as part of its `prepare` transaction.
+
+The first create uploads the full texture. Updates copy the previous Vulkan image into a new
+image on the graphics queue and upload only the dirty rectangles through staging. The old image
+returns to its sampling layout and retains its texels and descriptors until retirement completes.
+A retry of an already submitted revision reuses its binding without another upload.
+
+When drawing on another queue, finish prior sampling of an updated texture and return its
+ownership to the upload queue before preparing the update. Order later sampling of either image
+after the upload's layout transitions, following Vulkan's queue-family ownership rules.
+
+Prepare the frame before acquiring the main swapchain image. If a new upload needs a slot while
+all slots are busy, `AshRenderer::prepare_frame` returns
+`RendererError::Vulkan(vk::Result::NOT_READY)`. Skip the frame and prepare a freshly built frame
+on the next redraw. Pending texture requests are eligible to be reissued. The acquire semaphore,
+application draw fence, and swapchain can be reused on that redraw.
+
+Viewport routes return `NOT_READY` as a nested renderer fault in `AshViewportRouteError`. Retry
+when it is the only fault in `faults()`. An aggregate with other renderer or platform faults
+still needs error handling. The staging fence covers its upload batch. Texture retirement still
+requires completion covering every submission that uses the retired textures, including the
+image-to-image copy that reads a superseded texture.
+
 ### GPU-safe retirement
 
 Recording a Vulkan command buffer does not mean the GPU has finished using its textures. A destroy
@@ -122,23 +151,26 @@ move-only `AshViewportFrameCompletion`; the route keeps the raw retirement batch
 that capability only after every relevant secondary and main submission. Merely finishing command
 recording is never sufficient, and dropping either capability only defers resource release.
 
-Call `AshRenderer::shutdown(&mut imgui)` before dropping a single-viewport Context or renderer.
-Shutdown waits for device idle, destroys active and retiring GPU textures, resets Context-owned
-renderer bindings, and then releases the renderer consumer. In multi-viewport mode, call the
-owning renderer route's `shutdown(&mut imgui)` before disabling the platform owner.
-Dropping a renderer while its Context is still alive deliberately does not release Vulkan
-resources: `Drop` cannot validate and commit the Context texture-reset transaction. Explicit
-shutdown is therefore required for deterministic cleanup; after native Context teardown, `Drop`
-may release any remaining Vulkan resources best-effort.
+`AshRenderer::shutdown(&mut imgui)` waits for device idle, releases Vulkan resources, and resets
+Context-owned texture bindings. `Drop` also waits for device idle or terminal device loss and
+signals the Context after resource release. Keep the device, queue, command pool, and Vulkan
+loader live until cleanup finishes. Discard any unsubmitted commands that reference the renderer
+before dropping it. To reuse a shared font atlas with another Context, complete the renderer
+reset while the original Context is still live. In multi-viewport mode, use the owning route's
+`shutdown(&mut imgui)` before disabling its platform owner.
 
-Shutdown prepares the Context texture reset while the complete Vulkan texture map is still intact.
-If preparation or a retryable device wait fails, no binding is reset and the renderer keeps its
-consumer for a later retry. `ERROR_DEVICE_LOST` is terminal: Ash releases the no-longer-reachable
-map, commits the prepared reset, and then returns the original device-loss error.
+Shutdown validates a Context texture-reset permit while the complete Vulkan texture map is still
+intact. A failed preflight or a nonterminal device wait error keeps the consumer and texture map
+available for a retry. After successful release, shutdown commits the reset and returns any
+terminal device-loss diagnostic.
 
-That order is significant: `Context::prepare_renderer_texture_reset` validates an idle renderer
-before resource release, and its returned permit may be committed only after the corresponding
-Vulkan resources are actually gone. Finishing CPU command recording is not enough.
+If `vkQueueSubmit` reports device loss, the upload command buffer, staging buffer, and destination
+textures stay alive until teardown establishes device idle or terminal device loss. New texture
+bindings from that batch remain unpublished. If `Drop` cannot establish GPU completion, it leaves
+Vulkan objects intact and retains any allocator backing outstanding allocations. A failed
+allocation release also retains the backing allocator. These failure paths withhold the Context
+reset. Use explicit shutdown to observe cleanup errors while the application still owns the
+Vulkan device, queues, command pool, and loader.
 
 ## External textures and sampler selection
 
@@ -206,16 +238,15 @@ commands replace renderer state.
 
 ## Native multi-viewport
 
-Select exactly one surface adapter:
+Enable the surface adapters your application uses:
 
 - `multi-viewport-winit`: Winit owns the platform windows; `ash-window` creates each surface.
 - `multi-viewport-sdl3`: SDL3 owns the platform windows and supplies
   `ImGuiPlatformIO::Platform_CreateVkSurface`.
 
-The features are mutually exclusive, native-only, and each enables
-`dear-imgui-rs/multi-viewport`. Do not use workspace `--all-features` for this crate. The Winit
-route enables viewport ownership directly on `dear_imgui_winit::WinitPlatform`; the SDL3 route must
-initialize `Sdl3PlatformBackend::init_for_vulkan` before attaching the renderer route.
+Both features can be enabled in the same native build. Each enables `dear-imgui-rs/multi-viewport`.
+The Winit route uses `dear_imgui_winit::WinitPlatform`. The SDL3 route uses a
+`Sdl3PlatformBackend` initialized through `init_for_vulkan`.
 
 ### VulkanViewportConfig and preflight
 
@@ -451,7 +482,7 @@ This backend is inspired by the excellent `imgui-rs-vulkan-renderer` project:
 
 ```rust,no_run
 use ash::vk;
-use dear_imgui_ash::{AshRenderer, AshRendererConfig, Options};
+use dear_imgui_ash::{AshRenderer, AshRendererConfig, Options, RendererError};
 use dear_imgui_rs::Context;
 
 # fn example() -> Result<(), dear_imgui_ash::RendererError> {
@@ -480,17 +511,23 @@ let mut renderer = unsafe {
 // In your render loop, update platform metrics/input and build the UI first.
 let ui = imgui.frame();
 ui.window("Hello").build(|| ui.text("Dear ImGui + Vulkan"));
-// Record inside the compatible render pass:
-# let command_buffer = vk::CommandBuffer::null();
+// Prepare before acquiring the swapchain image.
 let pending = imgui.render(renderer.renderer_consumer()?);
-let (frame, retirement) = renderer.prepare_frame(pending)?;
-// SAFETY: command_buffer is recording inside the compatible render pass and will be submitted
-// before renderer resources referenced by it are changed or destroyed.
-unsafe { renderer.cmd_draw(command_buffer, frame)? };
+match renderer.prepare_frame(pending) {
+    Ok((frame, retirement)) => {
+        // Acquire the image and record inside the compatible render pass.
+#       let command_buffer = vk::CommandBuffer::null();
+        // SAFETY: command_buffer is recording inside the compatible render pass and will be
+        // submitted before renderer resources referenced by it are changed or destroyed.
+        unsafe { renderer.cmd_draw(command_buffer, frame)? };
 
-// Submit command_buffer. The safe path waits for all device work before releasing retired textures.
-if let Some(batch) = retirement {
-    renderer.wait_for_texture_retirements(batch)?;
+        // Submit command_buffer, then use the device-idle path to release retired textures.
+        if let Some(batch) = retirement {
+            renderer.wait_for_texture_retirements(batch)?;
+        }
+    }
+    Err(RendererError::Vulkan(vk::Result::NOT_READY)) => {} // Next redraw retries.
+    Err(error) => return Err(error),
 }
 
 renderer.shutdown(&mut imgui)?;

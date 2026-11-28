@@ -8,6 +8,17 @@ impl AshRenderer {
     /// reconciliation and secondary-window dispatch in one transaction. The retirement batch
     /// returned here must remain associated with completion covering every draw which may still
     /// reference the retired resources.
+    ///
+    /// Managed texture uploads are batched and submitted to the renderer's graphics queue before
+    /// this method succeeds. Later draws on that queue can sample them without a host wait. The
+    /// renderer reuses staging slots after polling its own upload fences. An update reads the old
+    /// image to initialize its replacement. See [`Self::cmd_draw`] for cross-queue ordering.
+    ///
+    /// If every staging slot is still in flight and this frame needs an upload, the method returns
+    /// `RendererError::Vulkan(vk::Result::NOT_READY)`. The pending frame is consumed. Skip drawing
+    /// it and try again with a new frame on the next redraw. Any unacknowledged texture requests
+    /// remain eligible for reconciliation. Call this before acquiring a swapchain image so the
+    /// retry leaves the application's acquire semaphore and draw fence untouched.
     pub fn prepare_frame<'ctx>(
         &mut self,
         frame: PendingFrame<'ctx>,
@@ -39,19 +50,26 @@ impl AshRenderer {
     ///
     /// `command_buffer` must be a live, recording primary command buffer from this renderer's
     /// device, externally synchronized, and inside a compatible render pass or dynamic-rendering
-    /// scope. It must not be reset or submitted concurrently. The caller must ensure that no
-    /// recorded command buffer is submitted after renderer resources it references are updated,
-    /// unregistered, retired, or destroyed. Submission must use the renderer's configured queue,
-    /// or provide synchronization equivalent to that queue's upload ordering. Before each call,
-    /// the GPU must have completed every earlier draw which can reference the internal mesh slot
-    /// selected by this call; normally the application waits the corresponding in-flight fence
-    /// before reusing a frame slot.
+    /// scope. It must not be reset or submitted concurrently. Discard recorded command buffers
+    /// before submitting them if any referenced resources have been changed in place or released,
+    /// including through retirement completion or renderer `Drop`. Managed texture replacement
+    /// preserves previously recorded descriptors and texels through retirement.
+    ///
+    /// Submit on the renderer's configured queue, or provide equivalent cross-queue ordering and
+    /// obey queue-family ownership rules. For cross-queue sampling, finish earlier draws of any
+    /// updated managed image and return its ownership to the upload queue before preparing the
+    /// update. Later draws of either image must follow the upload and its layout transitions.
+    ///
+    /// Before each call, the GPU must have completed every earlier draw which can reference the
+    /// internal mesh slot selected by this call. Normally the application waits the corresponding
+    /// in-flight fence before reusing a frame slot.
     pub unsafe fn cmd_draw(
         &mut self,
         command_buffer: vk::CommandBuffer,
         frame: ReconciledFrame<'_>,
     ) -> RendererResult<()> {
         self.ensure_reconciled_frame_matches(&frame)?;
+        self.uploads.check_device()?;
         let binding = self.context_state.binding();
         binding
             .try_with_bound_context(|| {
@@ -112,6 +130,7 @@ impl AshRenderer {
         mesh: &mut Mesh,
     ) -> RendererResult<()> {
         self.ensure_operational()?;
+        self.uploads.check_device()?;
         if !draw_data.valid() {
             return Ok(());
         }
@@ -165,11 +184,16 @@ impl Frames {
         Some(&mut self.meshes[i])
     }
 
-    pub(super) fn destroy(self, device: &Device, allocator: &mut Allocator) -> RendererResult<()> {
+    pub(super) fn destroy(
+        self,
+        device: &Device,
+        allocator: &mut RendererAllocator,
+    ) -> RendererResult<()> {
+        let mut result = Ok(());
         for mesh in self.meshes {
-            mesh.destroy(device, allocator)?;
+            result = result.and(mesh.destroy(device, allocator));
         }
-        Ok(())
+        result
     }
 }
 
@@ -183,7 +207,7 @@ impl Mesh {
     fn update(
         &mut self,
         device: &Device,
-        allocator: &mut Allocator,
+        allocator: &mut RendererAllocator,
         draw_data: &dear_imgui_rs::render::DrawData,
     ) -> RendererResult<()> {
         let vertices = create_vertices(draw_data);
@@ -192,7 +216,6 @@ impl Mesh {
             allocator,
             &vertices,
             vk::BufferUsageFlags::VERTEX_BUFFER,
-            "vertex buffer size overflow",
         )?;
 
         let indices = create_indices(draw_data);
@@ -201,14 +224,17 @@ impl Mesh {
             allocator,
             &indices,
             vk::BufferUsageFlags::INDEX_BUFFER,
-            "index buffer size overflow",
         )?;
 
         Ok(())
     }
-    pub(super) fn destroy(self, device: &Device, allocator: &mut Allocator) -> RendererResult<()> {
-        self.vertices.destroy(device, allocator)?;
-        self.indices.destroy(device, allocator)
+    pub(super) fn destroy(
+        self,
+        device: &Device,
+        allocator: &mut RendererAllocator,
+    ) -> RendererResult<()> {
+        let vertices = self.vertices.destroy(device, allocator);
+        vertices.and(self.indices.destroy(device, allocator))
     }
 }
 
@@ -216,28 +242,25 @@ impl Mesh {
 struct GpuBuffer {
     buffer: vk::Buffer,
     memory: Option<Memory>,
-    capacity: usize,
+    capacity_bytes: usize,
 }
 
 impl GpuBuffer {
     fn update<T: Copy>(
         &mut self,
         device: &Device,
-        allocator: &mut Allocator,
+        allocator: &mut RendererAllocator,
         data: &[T],
         usage: vk::BufferUsageFlags,
-        overflow_message: &'static str,
     ) -> RendererResult<()> {
-        if data.is_empty() {
+        let size = std::mem::size_of_val(data);
+        if size == 0 {
             return Ok(());
         }
 
-        if data.len() > self.capacity {
-            let size = data
-                .len()
-                .checked_mul(std::mem::size_of::<T>())
-                .ok_or_else(|| RendererError::Allocator(overflow_message.into()))?;
-            let (new_buffer, mut new_mem) = allocator.create_buffer(device, size, usage)?;
+        if size > self.capacity_bytes {
+            let capacity = grown_buffer_capacity(self.capacity_bytes, size);
+            let (new_buffer, mut new_mem) = allocator.create_buffer(device, capacity, usage)?;
             if let Err(err) = allocator.update_buffer(device, &mut new_mem, data) {
                 let _ = allocator.destroy_buffer(device, new_buffer, new_mem);
                 return Err(err);
@@ -245,7 +268,7 @@ impl GpuBuffer {
 
             let old_buffer = std::mem::replace(&mut self.buffer, new_buffer);
             let old_mem = self.memory.replace(new_mem);
-            self.capacity = data.len();
+            self.capacity_bytes = capacity;
 
             if old_buffer != vk::Buffer::null()
                 && let Some(old_mem) = old_mem
@@ -261,7 +284,7 @@ impl GpuBuffer {
         Ok(())
     }
 
-    fn destroy(self, device: &Device, allocator: &mut Allocator) -> RendererResult<()> {
+    fn destroy(self, device: &Device, allocator: &mut RendererAllocator) -> RendererResult<()> {
         if self.buffer != vk::Buffer::null()
             && let Some(memory) = self.memory
         {
@@ -295,7 +318,7 @@ fn create_indices(
 
 pub(super) struct DrawCommandContext<'renderer> {
     pub(super) device: &'renderer Device,
-    pub(super) allocator: &'renderer mut Allocator,
+    pub(super) allocator: &'renderer mut RendererAllocator,
     pub(super) textures: &'renderer TextureManager,
     pub(super) default_texture_id: u64,
     pub(super) pipeline_layout: vk::PipelineLayout,
@@ -725,7 +748,6 @@ mod tests {
             .expect("synthetic renderer feedback should initialize Context texture bindings")
     }
 
-    #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
     #[test]
     fn split_prepare_and_record_reconciles_once_and_preserves_retirement_batch() {
         use crate::renderer::lifecycle::renderer_for_test;
@@ -761,7 +783,7 @@ mod tests {
             texture_id: TextureId::from(99_u64),
             texture: VulkanTexture {
                 image: vk::Image::null(),
-                image_mem: vk::DeviceMemory::null(),
+                image_mem: Memory::Default(vk::DeviceMemory::null()),
                 image_view: vk::ImageView::null(),
                 descriptor_set: vk::DescriptorSet::null(),
                 width: 1,
@@ -795,10 +817,46 @@ mod tests {
             Some(expected_batch)
         );
 
-        renderer.destroyed = true;
+        // This entry is bookkeeping only and never owned a Vulkan allocation.
+        renderer.textures.retiring_textures.drain().for_each(drop);
     }
 
-    #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
+    #[test]
+    fn upload_backpressure_reissues_managed_requests() {
+        use crate::renderer::lifecycle::renderer_for_test;
+        use dear_imgui_rs::FramePrepareOptions;
+
+        let mut context = Context::create();
+        // This synthetic renderer has no available upload slot and needs no Vulkan calls.
+        let mut renderer = renderer_for_test(&mut context);
+        context.prepare_frame(
+            FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+
+        let request_identities = |frame: &PendingFrame<'_>| {
+            frame
+                .texture_requests()
+                .iter()
+                .map(|request| (request.texture(), request.kind(), request.upload_identity()))
+                .collect::<Vec<_>>()
+        };
+        let pending = context
+            .begin_frame()
+            .render(renderer.renderer_consumer().unwrap());
+        let first = request_identities(&pending);
+        assert!(!first.is_empty());
+        assert!(matches!(
+            renderer.prepare_frame(pending),
+            Err(RendererError::Vulkan(vk::Result::NOT_READY))
+        ));
+        assert!(renderer.textures.managed_ids.is_empty());
+
+        let retry = context
+            .begin_frame()
+            .render(renderer.renderer_consumer().unwrap());
+        assert_eq!(request_identities(&retry), first);
+    }
+
     #[test]
     fn rejected_prepare_abandons_the_epoch_and_reissues_requests() {
         use crate::renderer::lifecycle::renderer_for_test;
@@ -836,7 +894,6 @@ mod tests {
 
         drop(consumer);
         drop(foreign);
-        renderer.destroyed = true;
         drop(renderer);
         drop(owner);
     }

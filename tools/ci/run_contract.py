@@ -67,24 +67,6 @@ SYS_CRATES = (
     "dear-imgui-test-engine-sys",
 )
 
-RENDERER_FEATURE_CONFLICTS = (
-    (
-        "ash-dual-platform",
-        "dear-imgui-ash cannot enable both `multi-viewport-winit` and "
-        "`multi-viewport-sdl3`; select one platform surface adapter",
-        (
-            "cargo",
-            "check",
-            "-p",
-            "dear-imgui-ash",
-            "--lib",
-            "--no-default-features",
-            "--features",
-            "multi-viewport-winit,multi-viewport-sdl3,render-pass",
-        ),
-    ),
-)
-
 
 def _command_arguments(arguments: Sequence[str]) -> list[str]:
     command = list(arguments)
@@ -122,13 +104,6 @@ def expect_failure(
             f"command: {rendered}\n{details}\n{output.rstrip()}"
         )
     print(f"Verified expected failure: {label}")
-
-
-def check_renderer_feature_conflicts() -> None:
-    """Verify every renderer feature exclusivity contract."""
-    for label, expected, command in RENDERER_FEATURE_CONFLICTS:
-        with github_group(label):
-            expect_failure(label, (expected,), command)
 
 
 def check_unified_prebuilt_test_engine() -> None:
@@ -521,10 +496,6 @@ def _build_parser() -> argparse.ArgumentParser:
     clippy.add_argument("cargo_arguments", nargs=argparse.REMAINDER)
 
     commands.add_parser(
-        "renderer-feature-conflicts",
-        help="Reject mutually exclusive renderer feature combinations",
-    )
-    commands.add_parser(
         "prebuilt-test-engine",
         help="Verify source-only test-engine wins over prebuilt selection",
     )
@@ -673,8 +644,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif args.contract == "clippy":
             run_clippy(args.cargo_arguments)
-        elif args.contract == "renderer-feature-conflicts":
-            check_renderer_feature_conflicts()
         elif args.contract == "prebuilt-test-engine":
             check_unified_prebuilt_test_engine()
         elif args.contract == "no-default-bindgen":

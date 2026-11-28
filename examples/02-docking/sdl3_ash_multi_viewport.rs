@@ -26,10 +26,11 @@ mod ash_portability;
 #[cfg(feature = "ash-dynamic-rendering")]
 use dear_imgui_ash::DynamicRendering;
 use dear_imgui_ash::multi_viewport_sdl3::{
-    AshPreparedViewportFrame, AshViewportFrameCompletion, Sdl3ViewportRoute, VulkanViewportConfig,
+    AshPreparedViewportFrame, AshViewportError, AshViewportFrameCompletion, AshViewportRouteFault,
+    Sdl3ViewportRoute, VulkanViewportConfig,
 };
 use dear_imgui_ash::{
-    AshRenderer, AshRendererConfig, Options as AshOptions, TextureRetirementBatch,
+    AshRenderer, AshRendererConfig, Options as AshOptions, RendererError, TextureRetirementBatch,
 };
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
@@ -1208,17 +1209,34 @@ impl RendererRuntime {
     fn prepare<'ctx>(
         &mut self,
         frame: FrameToken<'ctx>,
-    ) -> Result<PreparedRendererFrame<'ctx>, Box<dyn Error>> {
-        Ok(match self {
+    ) -> Result<Option<PreparedRendererFrame<'ctx>>, Box<dyn Error>> {
+        let prepared = match self {
             Self::Single(renderer) => {
                 let pending_frame = frame
                     .try_render(renderer.renderer_consumer()?)
                     .map_err(|(_frame, error)| error)?;
-                let (frame, retirement) = renderer.prepare_frame(pending_frame)?;
-                PreparedRendererFrame::Single { frame, retirement }
+                match renderer.prepare_frame(pending_frame) {
+                    Ok((frame, retirement)) => PreparedRendererFrame::Single { frame, retirement },
+                    Err(RendererError::Vulkan(vk::Result::NOT_READY)) => return Ok(None),
+                    Err(error) => return Err(error.into()),
+                }
             }
-            Self::Viewports(route) => PreparedRendererFrame::Viewports(route.prepare(frame)?),
-        })
+            Self::Viewports(route) => match route.prepare(frame) {
+                Ok(frame) => PreparedRendererFrame::Viewports(frame),
+                Err(error)
+                    if matches!(
+                        error.faults(),
+                        [AshViewportRouteFault::Renderer(AshViewportError::Renderer(
+                            RendererError::Vulkan(vk::Result::NOT_READY),
+                        ))]
+                    ) =>
+                {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error.into()),
+            },
+        };
+        Ok(Some(prepared))
     }
 
     fn wait_for_frame_completion(
@@ -2013,7 +2031,9 @@ impl App {
 
         // Route preparation reconciles managed textures and completes secondary swapchains before
         // main-surface acquisition, including platform and renderer fault aggregation.
-        let prepared = renderer.prepare(frame)?;
+        let Some(prepared) = renderer.prepare(frame)? else {
+            return Ok(());
+        };
 
         let completion = render_main_window(vk, renderer, window, *clear_color, prepared)?;
         renderer.wait_for_frame_completion(completion)?;

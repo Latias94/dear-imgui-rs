@@ -17,7 +17,7 @@ use ash::{
 #[cfg(feature = "ash-dynamic-rendering")]
 use dear_imgui_ash::DynamicRendering;
 use dear_imgui_ash::{
-    AshRenderer, AshRendererConfig, Options as AshOptions, multi_viewport as ash_mvp,
+    AshRenderer, AshRendererConfig, Options as AshOptions, RendererError, multi_viewport as ash_mvp,
 };
 use dear_imgui_rs::{ConfigFlags, Context, FrameToken, Ui};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
@@ -985,19 +985,36 @@ impl RendererRuntime {
         &mut self,
         event_loop: &ActiveEventLoop,
         frame: FrameToken<'ctx>,
-    ) -> Result<PreparedRendererFrame<'ctx>, Box<dyn std::error::Error>> {
-        Ok(match self {
+    ) -> Result<Option<PreparedRendererFrame<'ctx>>, Box<dyn std::error::Error>> {
+        let prepared = match self {
             Self::Single(renderer) => {
                 let pending_frame = frame
                     .try_render(renderer.renderer_consumer()?)
                     .map_err(|(_frame, error)| error)?;
-                let (frame, retirement) = renderer.prepare_frame(pending_frame)?;
-                PreparedRendererFrame::Single { frame, retirement }
+                match renderer.prepare_frame(pending_frame) {
+                    Ok((frame, retirement)) => PreparedRendererFrame::Single { frame, retirement },
+                    Err(RendererError::Vulkan(vk::Result::NOT_READY)) => return Ok(None),
+                    Err(error) => return Err(error.into()),
+                }
             }
-            Self::Viewports(route) => {
-                PreparedRendererFrame::Viewports(route.prepare(event_loop, frame)?)
-            }
-        })
+            Self::Viewports(route) => match route.prepare(event_loop, frame) {
+                Ok(frame) => PreparedRendererFrame::Viewports(frame),
+                Err(error)
+                    if matches!(
+                        error.faults(),
+                        [ash_mvp::AshViewportRouteFault::Renderer(
+                            ash_mvp::AshViewportError::Renderer(RendererError::Vulkan(
+                                vk::Result::NOT_READY
+                            ),)
+                        )]
+                    ) =>
+                {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error.into()),
+            },
+        };
+        Ok(Some(prepared))
     }
 
     #[cfg(feature = "ash-validation-smoke")]
@@ -1735,7 +1752,9 @@ impl<S: RuntimeScenario> AppWindow<S> {
 
         platform.prepare_render(ui, window)?;
         let clear_color = *clear_color;
-        let prepared = renderer.prepare(event_loop, frame)?;
+        let Some(prepared) = renderer.prepare(event_loop, frame)? else {
+            return Ok(());
+        };
         #[cfg(feature = "ash-validation-smoke")]
         let callback_only_zero_geometry = directive.callback_only
             && prepared.draw_data().total_vtx_count() == 0

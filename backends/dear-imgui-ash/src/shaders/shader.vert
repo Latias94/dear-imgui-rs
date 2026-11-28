@@ -7,13 +7,14 @@ layout(location = 2) in vec4 vColor;
 
 layout(push_constant) uniform PushConstants {
     mat4 ortho;
-    vec4 gamma_pad; // gamma in .x, keep 16-byte alignment
+    vec4 gamma_pad; // Fragment color transfer in .x, with 16-byte alignment.
 } pc;
 
 layout(location = 0) out vec4 oColor;
 layout(location = 1) out vec2 oUV;
 
 void main() {
+    // Interpolate encoded vertex colors; the fragment shader decodes them before sampling.
     oColor = vColor;
     oUV = vUV;
     gl_Position = pc.ortho * vec4(vPosition.x, vPosition.y, 0.0, 1.0);
