@@ -448,11 +448,10 @@ impl<S: ViewportScenario> AppWindow<S> {
             target_os = "macos",
             target_os = "linux"
         ));
-        let instance = wgpu::Instance::new(
-            wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(
-                event_loop.owned_display_handle(),
-            )),
-        );
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle_from_env(
+                Box::new(event_loop.owned_display_handle()),
+            ));
         let window: Arc<Window> = Arc::new(
             event_loop.create_window(
                 Window::default_attributes()

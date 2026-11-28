@@ -110,7 +110,7 @@ impl<T> CallbackSlot<T> {
         if slot.is_null() {
             return;
         }
-        let invoking = unsafe { &*(&raw const (*slot).invoking) };
+        let invoking = unsafe { &(*slot).invoking };
         if invoking.replace(true) {
             return;
         }
@@ -160,7 +160,7 @@ impl<T> UiCallbackSlot<T> {
         if slot.is_null() {
             return;
         }
-        let active_ui = unsafe { &*(&raw const (*slot).active_ui) };
+        let active_ui = unsafe { &(*slot).active_ui };
         let ui = active_ui.current.get();
         let Some(ui) = (unsafe { ui.as_ref() }) else {
             return;
