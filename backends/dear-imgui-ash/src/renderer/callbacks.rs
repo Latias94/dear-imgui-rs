@@ -1,8 +1,9 @@
-use std::{cell::Cell, marker::PhantomData, ptr::NonNull, rc::Rc};
+use std::{cell::RefCell, marker::PhantomData, ptr::NonNull, rc::Rc};
 
 use ash::{Device, vk};
 use dear_imgui_rs::sys;
-use thiserror::Error;
+
+use crate::BackendError;
 
 #[used]
 static RESET_RENDER_STATE_MARKER: u8 = 0;
@@ -10,18 +11,6 @@ static RESET_RENDER_STATE_MARKER: u8 = 0;
 static SAMPLER_LINEAR_MARKER: u8 = 1;
 #[used]
 static SAMPLER_NEAREST_MARKER: u8 = 2;
-
-/// Error returned while borrowing the transient Vulkan draw-callback state.
-#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
-#[non_exhaustive]
-pub enum AshRenderStateAccessError {
-    /// No Ash render state is active on the current Dear ImGui Context.
-    #[error("no Ash render state is active on the current Dear ImGui context")]
-    Inactive,
-    /// The active callback state is already borrowed by an outer scoped access.
-    #[error("the active Ash render state is already borrowed")]
-    AlreadyBorrowed,
-}
 
 #[repr(C)]
 pub(crate) struct AshRenderStateStorage {
@@ -34,7 +23,7 @@ pub(crate) struct AshRenderStateStorage {
     sampler_descriptor_set: vk::DescriptorSet,
     reset_count: u32,
     draw_commands_since_reset: u32,
-    borrowed: Cell<bool>,
+    borrowed: RefCell<()>,
 }
 
 impl AshRenderStateStorage {
@@ -53,7 +42,7 @@ impl AshRenderStateStorage {
             sampler_descriptor_set,
             reset_count: 0,
             draw_commands_since_reset: 0,
-            borrowed: Cell::new(false),
+            borrowed: RefCell::default(),
         }
     }
 
@@ -69,14 +58,6 @@ impl AshRenderStateStorage {
 
     pub(crate) fn record_draw_command(&mut self) {
         self.draw_commands_since_reset = self.draw_commands_since_reset.saturating_add(1);
-    }
-}
-
-struct AshRenderStateBorrow<'storage>(&'storage Cell<bool>);
-
-impl Drop for AshRenderStateBorrow<'_> {
-    fn drop(&mut self) {
-        self.0.set(false);
     }
 }
 
@@ -112,20 +93,19 @@ impl AshRenderState<'_> {
     /// render-pass, pipeline-layout, synchronization, and resource-lifetime rules.
     pub unsafe fn with_current<R>(
         callback: impl for<'callback> FnOnce(AshRenderState<'callback>) -> R,
-    ) -> Result<R, AshRenderStateAccessError> {
+    ) -> Result<R, BackendError> {
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         let raw_state = if platform_io.is_null() {
             None
         } else {
             NonNull::new(unsafe { (*platform_io).Renderer_RenderState })
         }
-        .ok_or(AshRenderStateAccessError::Inactive)?;
+        .ok_or(BackendError::RenderStateInactive)?;
         let storage = raw_state.cast::<AshRenderStateStorage>();
         let borrowed = unsafe { &storage.as_ref().borrowed };
-        if borrowed.replace(true) {
-            return Err(AshRenderStateAccessError::AlreadyBorrowed);
-        }
-        let _borrow = AshRenderStateBorrow(borrowed);
+        let _borrow = borrowed
+            .try_borrow_mut()
+            .map_err(|_| BackendError::RenderStateAlreadyBorrowed)?;
         Ok(callback(AshRenderState {
             storage,
             _callback: PhantomData,
@@ -294,7 +274,7 @@ mod tests {
         let mut context = Context::create();
         assert!(matches!(
             unsafe { AshRenderState::with_current(|_| ()) },
-            Err(AshRenderStateAccessError::Inactive)
+            Err(BackendError::RenderStateInactive)
         ));
 
         let device = unsafe { Device::load_with(|_| std::ptr::null(), vk::Device::null()) };
@@ -326,7 +306,7 @@ mod tests {
                 assert_eq!(state.draw_commands_since_reset(), 0);
                 assert!(matches!(
                     AshRenderState::with_current(|_| ()),
-                    Err(AshRenderStateAccessError::AlreadyBorrowed)
+                    Err(BackendError::RenderStateAlreadyBorrowed)
                 ));
             })
             .unwrap();
@@ -337,7 +317,7 @@ mod tests {
         }
         assert!(matches!(
             unsafe { AshRenderState::with_current(|_| ()) },
-            Err(AshRenderStateAccessError::Inactive)
+            Err(BackendError::RenderStateInactive)
         ));
     }
 }

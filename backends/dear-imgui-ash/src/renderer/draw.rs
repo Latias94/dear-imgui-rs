@@ -35,11 +35,12 @@ impl AshRenderer {
         frame: PendingFrame<'ctx>,
     ) -> RendererResult<(ReconciledFrame<'ctx>, Option<TextureRetirementBatch>)> {
         self.reap_completed_uploads()?;
-        let request_epoch = frame.epoch().sequence();
-        let feedback = self.process_texture_requests(frame.texture_requests(), request_epoch)?;
+        let feedback = self.process_texture_requests(&frame)?;
         let frame = frame.reconcile_texture_feedback(feedback)?;
+        let watermark = frame.completion_progress().watermark();
         self.textures
-            .prune_destroyed_managed_textures(frame.completion_progress().watermark());
+            .managed_textures
+            .prune_tombstones(|_| Some(watermark));
         let pending_retirement = self.pending_texture_retirement()?;
         Ok((frame, pending_retirement))
     }

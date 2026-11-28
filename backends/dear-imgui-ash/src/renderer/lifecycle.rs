@@ -478,7 +478,6 @@ impl AshRenderer {
 
     /// Clears the renderer's Context publication at the end of explicit shutdown.
     pub(super) fn finalize_shutdown_after_reset(&mut self, imgui_context: &mut Context) {
-        self.textures.clear_destroyed_managed_textures();
         self.context_state.unpublish(imgui_context);
         drop(self.publication_attachment.take());
     }
@@ -556,7 +555,7 @@ impl AshRenderer {
                 self.resources.descriptor_pool,
             ));
         }
-        for (_, managed) in self.textures.managed_textures.drain() {
+        for (_, managed) in self.textures.managed_textures.extract_resources(|_| true) {
             cleanup = cleanup.and(managed.texture.destroy(
                 &self.device,
                 &mut self.allocator,
@@ -570,6 +569,7 @@ impl AshRenderer {
                 self.resources.descriptor_pool,
             ));
         }
+        self.textures.managed_textures.clear_tombstones(|_| true);
         self.textures.managed_ids.clear();
         self.textures.external_textures.clear();
 

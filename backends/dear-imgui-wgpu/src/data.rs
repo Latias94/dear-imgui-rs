@@ -3,29 +3,17 @@
 //! This module contains the main backend data structure and initialization info,
 //! following the pattern from imgui_impl_wgpu.cpp
 
-use std::{cell::Cell, marker::PhantomData, ptr::NonNull, rc::Rc};
+use std::{cell::RefCell, marker::PhantomData, ptr::NonNull, rc::Rc};
 
 use crate::{FrameResourceArena, FrameResources, RenderResources, RendererError, RendererResult};
+use dear_imgui_backend_support::BackendError;
 use dear_imgui_rs::sys;
-use thiserror::Error;
 use wgpu::*;
-
-/// Error returned while borrowing the transient WGPU draw-callback state.
-#[derive(Copy, Clone, Debug, Eq, Error, PartialEq)]
-#[non_exhaustive]
-pub enum WgpuRenderStateAccessError {
-    /// No WGPU render state is active on the current Dear ImGui Context.
-    #[error("no WGPU render state is active on the current Dear ImGui context")]
-    Inactive,
-    /// The active callback state is already borrowed by an outer scoped access.
-    #[error("the active WGPU render state is already borrowed")]
-    AlreadyBorrowed,
-}
 
 pub(crate) struct WgpuRenderStateStorage<'pass, 'encoder> {
     device: &'pass Device,
     render_pass: NonNull<RenderPass<'encoder>>,
-    borrowed: Cell<bool>,
+    borrowed: RefCell<()>,
     _pass: PhantomData<&'pass mut RenderPass<'encoder>>,
 }
 
@@ -35,17 +23,9 @@ impl<'pass, 'encoder> WgpuRenderStateStorage<'pass, 'encoder> {
         Self {
             device,
             render_pass: NonNull::from(render_pass),
-            borrowed: Cell::new(false),
+            borrowed: RefCell::default(),
             _pass: PhantomData,
         }
-    }
-}
-
-struct WgpuRenderStateBorrow<'storage>(&'storage Cell<bool>);
-
-impl Drop for WgpuRenderStateBorrow<'_> {
-    fn drop(&mut self) {
-        self.0.set(false);
     }
 }
 
@@ -91,20 +71,19 @@ impl<'encoder> WgpuRenderState<'encoder> {
     /// escaping the callback scope. Recursive access is rejected at runtime.
     pub unsafe fn with_current<R>(
         callback: impl for<'pass_encoder> FnOnce(WgpuRenderState<'pass_encoder>) -> R,
-    ) -> Result<R, WgpuRenderStateAccessError> {
+    ) -> Result<R, BackendError> {
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         let raw_state = if platform_io.is_null() {
             None
         } else {
             NonNull::new(unsafe { (*platform_io).Renderer_RenderState })
         }
-        .ok_or(WgpuRenderStateAccessError::Inactive)?;
+        .ok_or(BackendError::RenderStateInactive)?;
         let storage = unsafe { raw_state.cast::<WgpuRenderStateStorage<'_, '_>>().as_ref() };
-        let borrowed = &storage.borrowed;
-        if borrowed.replace(true) {
-            return Err(WgpuRenderStateAccessError::AlreadyBorrowed);
-        }
-        let _borrow = WgpuRenderStateBorrow(borrowed);
+        let _borrow = storage
+            .borrowed
+            .try_borrow_mut()
+            .map_err(|_| BackendError::RenderStateAlreadyBorrowed)?;
         Ok(callback(WgpuRenderState {
             device: NonNull::from(storage.device),
             render_pass: storage.render_pass,

@@ -13,9 +13,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use dear_imgui_glow::{
-    GlBuffer, GlProgram, GlSampler, GlTexture, GlVersion, GlVertexArray, GlowRenderState,
-    GlowRenderStateAccessError, GlowRenderer, GlowSamplerStrategy,
-    multi_viewport::GlowPreparedViewportFrame,
+    BackendError, GlBuffer, GlProgram, GlSampler, GlTexture, GlVersion, GlVertexArray,
+    GlowRenderState, GlowRenderer, GlowSamplerStrategy, multi_viewport::GlowPreparedViewportFrame,
 };
 use dear_imgui_rs::{Context, FrameToken, Id, RawDrawCallback, TextureId, Ui};
 use dear_imgui_test_engine::{
@@ -79,7 +78,7 @@ unsafe extern "C" fn glow_render_state_probe(
                 && strategy_code != 0;
             let nested_rejected = matches!(
                 GlowRenderState::with_current(|_| ()),
-                Err(GlowRenderStateAccessError::AlreadyBorrowed)
+                Err(BackendError::RenderStateAlreadyBorrowed)
             );
             RAW_CALLBACK_NESTED_BORROW_REJECTED.store(nested_rejected, Ordering::SeqCst);
             let gl = state.gl();
@@ -982,7 +981,7 @@ impl ViewportScenario for ViewportSmokeScenario {
         let render_state_cleared_after_callback = context.binding().with_bound_context(|| {
             matches!(
                 unsafe { GlowRenderState::with_current(|_| ()) },
-                Err(GlowRenderStateAccessError::Inactive)
+                Err(BackendError::RenderStateInactive)
             )
         });
         let sampler_strategy = self.smoke()?.sampler_strategy;

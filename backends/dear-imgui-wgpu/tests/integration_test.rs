@@ -8,8 +8,8 @@ use dear_imgui_rs::{
 };
 use dear_imgui_wgpu::wgpu::*;
 use dear_imgui_wgpu::{
-    ExternalTextureId, FramebufferExtent, RendererError, RendererResult, WgpuInitInfo,
-    WgpuRenderState, WgpuRenderStateAccessError, WgpuRenderer,
+    BackendError, ExternalTextureId, FramebufferExtent, RendererError, RendererResult,
+    WgpuInitInfo, WgpuRenderState, WgpuRenderer,
 };
 use static_assertions::assert_not_impl_any;
 use std::sync::{
@@ -80,7 +80,7 @@ unsafe extern "C" fn observe_callback_a(
         WgpuRenderState::with_current(|mut state| {
             let nested = WgpuRenderState::with_current(|_| ());
             CALLBACK_NESTED_BORROW_REJECTED.store(
-                matches!(nested, Err(WgpuRenderStateAccessError::AlreadyBorrowed)),
+                matches!(nested, Err(BackendError::RenderStateAlreadyBorrowed)),
                 Ordering::SeqCst,
             );
             let (device, render_pass) = state.resources();
@@ -225,7 +225,7 @@ fn render_callback_contract_frame(
     assert!(unsafe { context.platform_io().renderer_render_state() }.is_null());
     assert!(matches!(
         unsafe { WgpuRenderState::with_current(|_| ()) },
-        Err(WgpuRenderStateAccessError::Inactive)
+        Err(BackendError::RenderStateInactive)
     ));
     Ok(())
 }

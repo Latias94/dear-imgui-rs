@@ -38,6 +38,12 @@ pub enum BackendError {
     /// Projecting a draw command produced a non-finite clip edge.
     #[error("draw command clip rectangle {0:?} projects to a non-finite framebuffer coordinate")]
     NonFiniteClipRect([f32; 4]),
+    /// No draw callback state is active on the current Dear ImGui Context.
+    #[error("no renderer callback state is active on the current Dear ImGui context")]
+    RenderStateInactive,
+    /// The active draw callback state is already borrowed by a scoped access.
+    #[error("the active renderer callback state is already borrowed")]
+    RenderStateAlreadyBorrowed,
     /// A callback or transient renderer state slot conflicts with backend ownership.
     #[error("callback slot `{slot}` is unavailable: {reason}")]
     CallbackConflict {

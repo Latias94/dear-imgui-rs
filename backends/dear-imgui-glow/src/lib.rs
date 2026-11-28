@@ -50,9 +50,10 @@ mod state;
 mod texture;
 mod versions;
 
+pub use dear_imgui_backend_support::BackendError;
 pub use error::*;
 pub use renderer::*;
-pub use state::{GlowRenderState, GlowRenderStateAccessError, GlowSamplerStrategy};
+pub use state::{GlowRenderState, GlowSamplerStrategy};
 pub use texture::*;
 pub use versions::*;
 

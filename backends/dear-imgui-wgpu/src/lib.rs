@@ -145,9 +145,8 @@ mod removed_public_contracts {
     struct PerTextureSamplers;
 }
 
-pub use data::{
-    WgpuInitInfo, WgpuRenderState, WgpuRenderStateAccessError, WgpuViewportSurfaceConfig,
-};
+pub use data::{WgpuInitInfo, WgpuRenderState, WgpuViewportSurfaceConfig};
+pub use dear_imgui_backend_support::BackendError;
 pub use error::{RendererError, RendererResult};
 pub use observation::{
     WgpuDrawRecording, WgpuFrameOutcome, WgpuFrameScope, WgpuFrameSkipReason, WgpuFrameStage,

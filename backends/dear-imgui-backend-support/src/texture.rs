@@ -294,10 +294,11 @@ mod tests {
         table.acknowledge_destroy(retired, 8);
         table.seal_destroy(retired, 7);
         table.seal_destroy(retired, 10);
+        table.seal_destroy(retired, 9);
         table.acknowledge_destroy(retired, 8);
         table.acknowledge_destroy(other_texture, 3);
 
-        table.prune_tombstones(|context| (context == owner_id).then_some(10));
+        table.prune_tombstones(|context| (context == owner_id).then_some(u64::MAX));
         assert!(table.is_destroyed(retired));
         assert!(table.is_destroyed(other_texture));
         table.acknowledge_destroy(retired, 11);
@@ -326,6 +327,26 @@ mod tests {
         assert!(table.is_destroyed(other_texture));
         table.prune_tombstones(|context| (context == other_id).then_some(3));
         assert!(!table.is_destroyed(other_texture));
+    }
+
+    #[test]
+    fn advancing_watermark_keeps_destroy_tombstones_bounded() {
+        let context = Context::create().id();
+        let mut table = ManagedTextureTable::<()>::default();
+
+        for epoch in 1..=64 {
+            let id = SnapshotTextureId::FontAtlas {
+                context,
+                stamp: 1,
+                generation: epoch,
+            };
+            table.seal_destroy(id, epoch);
+            table.acknowledge_destroy(id, epoch);
+            table.prune_tombstones(|_| Some(epoch - 1));
+            assert_eq!(table.tombstone_count(), 1);
+        }
+        table.prune_tombstones(|_| Some(64));
+        assert_eq!(table.tombstone_count(), 0);
     }
 
     fn rect(x: u16, y: u16, w: u16, h: u16) -> TextureRect {

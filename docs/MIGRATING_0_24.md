@@ -70,6 +70,12 @@ resource cleanup, and drop the consumer. The Context applies the texture reset w
 generation drains. Keep the explicit reset permit for synchronous shutdown that can report
 preparation errors. See the [custom backend guide](CUSTOM_BACKENDS.md#renderer-backend-reference).
 
+`AshRenderState::with_current`, `GlowRenderState::with_current`, and `WgpuRenderState::with_current`
+return `BackendError`. Replace `AshRenderStateAccessError`, `GlowRenderStateAccessError`, and
+`WgpuRenderStateAccessError` with the `BackendError` re-export of the renderer crate. The old
+`Inactive` and `AlreadyBorrowed` variants become `RenderStateInactive` and
+`RenderStateAlreadyBorrowed`.
+
 ## WGPU renderer
 
 | In 0.23 | In 0.24 |

@@ -1,13 +1,13 @@
 //! OpenGL state backup and restoration
 
-use std::{cell::Cell, marker::PhantomData, ptr::NonNull, rc::Rc};
+use std::{cell::RefCell, marker::PhantomData, ptr::NonNull, rc::Rc};
 
-use crate::GlVertexArray;
-use crate::{GlBuffer, GlProgram, GlSampler, GlTexture, GlVersion, RenderError};
+use crate::{
+    BackendError, GlBuffer, GlProgram, GlSampler, GlTexture, GlVersion, GlVertexArray, RenderError,
+};
 use dear_imgui_rs::FrameError;
 use dear_imgui_rs::sys;
 use glow::{Context, HasContext};
-use thiserror::Error;
 
 /// Sampling mechanism selected from the live OpenGL context.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -19,22 +19,10 @@ pub enum GlowSamplerStrategy {
     TextureParameters,
 }
 
-/// Error returned while borrowing transient Glow draw-callback state.
-#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
-#[non_exhaustive]
-pub enum GlowRenderStateAccessError {
-    /// No Glow render state is active on the current Dear ImGui Context.
-    #[error("no Glow render state is active on the current Dear ImGui context")]
-    Inactive,
-    /// The active callback state is already borrowed by an outer scoped access.
-    #[error("the active Glow render state is already borrowed")]
-    AlreadyBorrowed,
-}
-
 pub(crate) struct GlowRenderStateStorage<'gl> {
     gl: &'gl Context,
     sampler_strategy: GlowSamplerStrategy,
-    borrowed: Cell<bool>,
+    borrowed: RefCell<()>,
 }
 
 impl<'gl> GlowRenderStateStorage<'gl> {
@@ -42,16 +30,8 @@ impl<'gl> GlowRenderStateStorage<'gl> {
         Self {
             gl,
             sampler_strategy,
-            borrowed: Cell::new(false),
+            borrowed: RefCell::default(),
         }
-    }
-}
-
-struct GlowRenderStateBorrow<'storage>(&'storage Cell<bool>);
-
-impl Drop for GlowRenderStateBorrow<'_> {
-    fn drop(&mut self) {
-        self.0.set(false);
     }
 }
 
@@ -90,20 +70,19 @@ impl GlowRenderState<'_> {
     /// access is rejected at runtime.
     pub unsafe fn with_current<R>(
         callback: impl for<'callback> FnOnce(GlowRenderState<'callback>) -> R,
-    ) -> Result<R, GlowRenderStateAccessError> {
+    ) -> Result<R, BackendError> {
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         let raw_state = if platform_io.is_null() {
             None
         } else {
             NonNull::new(unsafe { (*platform_io).Renderer_RenderState })
         }
-        .ok_or(GlowRenderStateAccessError::Inactive)?;
+        .ok_or(BackendError::RenderStateInactive)?;
         let storage = raw_state.cast::<GlowRenderStateStorage<'_>>();
         let borrowed = unsafe { &storage.as_ref().borrowed };
-        if borrowed.replace(true) {
-            return Err(GlowRenderStateAccessError::AlreadyBorrowed);
-        }
-        let _borrow = GlowRenderStateBorrow(borrowed);
+        let _borrow = borrowed
+            .try_borrow_mut()
+            .map_err(|_| BackendError::RenderStateAlreadyBorrowed)?;
         Ok(callback(GlowRenderState {
             storage,
             _callback: PhantomData,
@@ -498,8 +477,8 @@ mod tests {
     use static_assertions::assert_not_impl_any;
 
     use super::{
-        FramebufferSrgbScope, GlStateGuard, GlowRenderState, GlowRenderStateAccessError,
-        GlowRenderStateStorage, GlowSamplerStrategy,
+        BackendError, FramebufferSrgbScope, GlStateGuard, GlowRenderState, GlowRenderStateStorage,
+        GlowSamplerStrategy,
     };
     use crate::GlVersion;
 
@@ -880,7 +859,7 @@ mod tests {
                     );
                     assert!(matches!(
                         GlowRenderState::with_current(|_| ()),
-                        Err(GlowRenderStateAccessError::AlreadyBorrowed)
+                        Err(BackendError::RenderStateAlreadyBorrowed)
                     ));
                 })
                 .unwrap();
@@ -889,7 +868,7 @@ mod tests {
             guard.finish().unwrap();
             assert!(matches!(
                 unsafe { GlowRenderState::with_current(|_| ()) },
-                Err(GlowRenderStateAccessError::Inactive)
+                Err(BackendError::RenderStateInactive)
             ));
         });
     }

@@ -121,7 +121,7 @@ use dear_imgui_rs::{TextureData, TextureFormat as ImGuiTextureFormat, TextureId,
 use std::collections::HashMap;
 
 use self::allocator::{Allocate, Allocator, Memory};
-pub use self::callbacks::{AshRenderState, AshRenderStateAccessError};
+pub use self::callbacks::AshRenderState;
 use self::callbacks::{
     AshRenderStateStorage, draw_callback_reset_render_state, draw_callback_set_sampler_linear,
     draw_callback_set_sampler_nearest,
