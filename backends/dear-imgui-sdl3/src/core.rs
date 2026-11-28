@@ -133,6 +133,7 @@ pub(super) mod ffi {
             sdl_gl_context: *mut c_void,
         ) -> bool;
         pub fn ImGui_ImplSDL3_InitForVulkan_Rust(window: *mut sdl3_sys::video::SDL_Window) -> bool;
+        #[cfg(target_os = "windows")]
         pub fn ImGui_ImplSDL3_InitForD3D_Rust(window: *mut sdl3_sys::video::SDL_Window) -> bool;
         pub fn ImGui_ImplSDL3_InitForMetal_Rust(window: *mut sdl3_sys::video::SDL_Window) -> bool;
         pub fn ImGui_ImplSDL3_InitForSDLRenderer_Rust(
