@@ -54,6 +54,52 @@
 //! }
 //! ```
 //!
+//! ## Color Space and Compositing
+//!
+//! Dear ImGui vertex colors interpolate in sRGB across triangles and decode to linear light in the
+//! fragment shader before texture modulation, while alpha remains linear. Output encoding follows
+//! Bevy's resolved camera compositing space (`Linear`, `Srgb`, or `Oklab`).
+//!
+//! In Bevy `0.20.1`, `Camera3d` views (including HDR `Rgba16Float`) always resolve to `Linear`
+//! compositing. This default keeps font anti-aliasing and translucent overlays over 3D scenes
+//! physically accurate, though widgets authored for sRGB-space blending (such as the black
+//! value-dimming overlay in `ColorPicker3` / `ColorPicker4`) look slightly brighter in dark
+//! midtones. To blend Dear ImGui widgets in sRGB space over a `Camera3d`, spawn a dedicated
+//! non-HDR overlay `Camera2d` with a higher `Camera::order`, transparent clear color, and
+//! `CompositingSpace::Srgb`:
+//!
+//! ```no_run
+//! use bevy::{
+//!     camera::Hdr,
+//!     prelude::*,
+//!     render::view::Msaa,
+//! };
+//!
+//! fn spawn_srgb_ui_overlay(mut commands: Commands) {
+//!     // 3D scene camera on order 0.
+//!     commands.spawn((Camera3d::default(), Hdr));
+//!
+//!     // Non-HDR Camera2d with CompositingSpace::Srgb allocates its own Rgba8Unorm target.
+//!     // As the unique highest-order primary-window camera, the primary ImGui Context routes here
+//!     // automatically.
+//!     commands.spawn((
+//!         Camera2d,
+//!         Camera {
+//!             order: 1,
+//!             clear_color: ClearColorConfig::Custom(Color::NONE),
+//!             ..Default::default()
+//!         },
+//!         CompositingSpace::Srgb,
+//!         Msaa::Off,
+//!     ));
+//! }
+//! ```
+//!
+//! Opaque ImGui windows (and translucent widgets inside them) blend cleanly in sRGB space in this
+//! setup. Semi-transparent ImGui backgrounds directly over the 3D scene appear slightly darker
+//! because Bevy `0.20.1`'s `upscaling` blit decodes sRGB without unpremultiplying RGB before
+//! blending onto the window target.
+//!
 //! Superseded configuration, camera-marker, helper, and renderer-storage APIs are intentionally
 //! unavailable:
 //!

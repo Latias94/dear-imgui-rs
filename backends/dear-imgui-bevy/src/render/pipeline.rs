@@ -16,6 +16,11 @@ pub const IMGUI_FRAGMENT_ENTRY_POINT: &str = "fs_main";
 /// BEVY-090 keeps this shader local to the Bevy backend instead of reusing
 /// `dear-imgui-wgpu`, because Bevy owns render schedules, target formats, and pipeline
 /// specialization.
+///
+/// Vertex colors stay in sRGB across rasterization for perceptual gradient interpolation and are
+/// decoded to linear light in `fs_main` before texture modulation, while alpha stays linear.
+/// Output RGB is then encoded to the camera stack's resolved compositing space (`Linear` by default
+/// on `Camera3d` / HDR views, or `Srgb` / `Oklab` on `Camera2d` views that request it).
 pub const IMGUI_SHADER_SOURCE: &str = r#"
 import bevy_render::color_operations::{srgb_to_linear, linear_to_srgb, linear_rgb_to_oklab};
 
