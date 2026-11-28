@@ -209,7 +209,7 @@ impl BuildConfig {
 
 fn write_package_metadata(cfg: &BuildConfig, profile: &ArtifactProfile) {
     let candidate_sha = env::var(RELEASE_CANDIDATE_SHA_ENV).unwrap_or_else(|_| {
-        panic!("dear-imgui-sys: feature `package-bin` requires {RELEASE_CANDIDATE_SHA_ENV}")
+        panic!("dear-imgui-sys: packaging requires {RELEASE_CANDIDATE_SHA_ENV}")
     });
     let archive_name = cfg.archive_name(cfg.crt_profile());
     fs::write(cfg.out_dir.join("prebuilt-archive-name.txt"), archive_name)
@@ -221,21 +221,34 @@ fn write_package_metadata(cfg: &BuildConfig, profile: &ArtifactProfile) {
             .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}")),
     )
     .expect("failed to write package manifest");
+    let identity = CoreArtifactIdentity::new(profile, &candidate_sha)
+        .expect("package manifest validated the candidate SHA");
+    fs::write(
+        cfg.out_dir.join("prebuilt-artifact-identity.txt"),
+        identity.deterministic_hash(),
+    )
+    .expect("failed to write package artifact identity");
 }
 
 fn main() {
     let cfg = BuildConfig::new();
     let sources = cfg.maintained_source_paths();
-    if cfg!(all(feature = "package-bin", feature = "test-engine")) {
+    let packaging = build_support::native_build::is_packaging(env!("CARGO_PKG_NAME"));
+    let regenerate_bindings = build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS");
+    if packaging && cfg!(feature = "test-engine") {
         panic!(
             "dear-imgui-sys: feature `test-engine` is source-only and cannot be packaged as a prebuilt core artifact"
         );
     }
-    if cfg!(all(feature = "package-bin", feature = "abi-probe")) {
+    if packaging && cfg!(feature = "abi-probe") {
         panic!(
             "dear-imgui-sys: feature `abi-probe` is CI-only and cannot be packaged as a prebuilt core artifact"
         );
     }
+    assert!(
+        !packaging || (!cfg.docs_rs && !regenerate_bindings && !cfg.is_core_wasm_target()),
+        "dear-imgui-sys: packaging requires a native source build"
+    );
     validate_wasm_feature_contract(&cfg.target_triple, cfg!(feature = "wasm"))
         .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}"));
     let skip_cc = build_support::parse_bool_env("IMGUI_SYS_SKIP_CC");
@@ -246,9 +259,6 @@ fn main() {
     }
     let artifact_profile = cfg.artifact_profile();
     let build_request = cfg.build_request();
-    if cfg!(feature = "package-bin") {
-        write_package_metadata(&cfg, &artifact_profile);
-    }
 
     // Re-run triggers
     println!("cargo:rerun-if-changed=build.rs");
@@ -262,7 +272,6 @@ fn main() {
     // Pregenerated bindings are copied into OUT_DIR when native toolchains are disabled.
     // Track them so `cargo check` picks up refreshed bindings immediately.
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
-    println!("cargo:rerun-if-changed=src/bindings_pregenerated_windows.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_externs.cpp.inc");
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_item_add.cpp.inc");
@@ -340,7 +349,7 @@ fn main() {
     }
 
     // Maintainer workflow: regenerate bindings via bindgen without requiring native compilation.
-    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+    if regenerate_bindings {
         if cfg.is_core_wasm_target() {
             panic!(
                 "dear-imgui-sys: WASM bindings are generated through the import-provider adapter; \
@@ -358,11 +367,9 @@ fn main() {
     } else {
         Some(
             NativeBuildPlan::from_core_env(
-                cfg!(feature = "build-from-source") || cfg!(feature = "package-bin"),
+                cfg!(feature = "build-from-source") || packaging,
                 cfg!(feature = "prebuilt"),
-                cfg!(feature = "test-engine")
-                    && !cfg!(feature = "package-bin")
-                    && !cfg!(feature = "abi-probe"),
+                cfg!(feature = "test-engine") && !packaging && !cfg!(feature = "abi-probe"),
             )
             .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}")),
         )
@@ -427,6 +434,10 @@ fn main() {
             }
         },
     };
+    if packaging {
+        assert!(matches!(outcome, CoreBuildOutcome::Source));
+        write_package_metadata(&cfg, &artifact_profile);
+    }
     println!("cargo:NATIVE_MODE={}", outcome.label());
     if matches!(
         outcome,
@@ -1410,7 +1421,7 @@ fn use_pregenerated_bindings(cfg: &BuildConfig) -> bool {
             return false;
         }
     };
-    spec.validate_generated_bindings(&content)
+    spec.validate_pregenerated_bindings(&content)
         .unwrap_or_else(|error| panic!("invalid {}: {error}", pregenerated.display()));
     if let Err(error) = std::fs::write(cfg.out_dir.join("bindings.rs"), content) {
         println!("cargo:warning=Failed to write pregenerated bindings: {error}");

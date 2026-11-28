@@ -24,9 +24,9 @@ rustup toolchain install 1.100.0 --profile minimal --component rustfmt --compone
 rustup toolchain install 1.95.0 --profile minimal --component rustfmt
 ```
 
-The binding updater and pre-publication checks explicitly run Rust 1.95.0
-and its rustfmt, independently of the workspace development toolchain or a
-parent `RUSTUP_TOOLCHAIN` setting. Keep the canonical LLVM version available
+The binding updater and pre-publication checks build `xtask` with the workspace
+toolchain. `xtask` explicitly selects the Rust 1.95.0 formatter for canonical
+bindings. Keep the canonical LLVM version available
 through `LIBCLANG_PATH` when regenerating bindings (LLVM 14.0.0 in Linux CI).
 Install `cargo-nextest`, add the `wasm32-unknown-unknown` target, and activate
 Emscripten 7.0.1 for the packaged WASM-provider gate:

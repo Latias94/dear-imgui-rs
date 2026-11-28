@@ -165,6 +165,7 @@ const CORE_INCLUDE_PATHS: &[&str] = &[".", "imgui"];
 pub const CORE_BINDGEN_GENERATOR: &str = "rust-bindgen 0.73.2";
 pub const BINDGEN_EXTRA_CLANG_ARGS_PREFIX: &str = "BINDGEN_EXTRA_CLANG_ARGS";
 pub const CORE_WASM_TARGET: &str = "wasm32-unknown-unknown";
+pub const CORE_NATIVE_BINDINGS_FILE: &str = "src/bindings_pregenerated.rs";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeAbiProfile {
@@ -193,6 +194,17 @@ pub struct NativeAbiTarget {
     pub arch: &'static str,
     pub endian: &'static str,
     pub pointer_width: &'static str,
+}
+
+impl NativeAbiTarget {
+    fn matches_abi(self, target: &TargetFacts<'_>) -> bool {
+        self.os == target.os
+            && self.env == target.env
+            && self.target_abi == target.target_abi
+            && self.arch == target.arch
+            && self.endian == target.endian
+            && self.pointer_width == target.pointer_width
+    }
 }
 
 const fn native_target(
@@ -428,21 +440,7 @@ impl NativeAbiProfile {
                 .iter()
                 .find(|candidate| candidate.rust_target == target.triple)
             {
-                if (
-                    target.os,
-                    target.env,
-                    target.target_abi,
-                    target.arch,
-                    target.endian,
-                    target.pointer_width,
-                ) == (
-                    expected.os,
-                    expected.env,
-                    expected.target_abi,
-                    expected.arch,
-                    expected.endian,
-                    expected.pointer_width,
-                ) {
+                if expected.matches_abi(&target) {
                     return Ok(profile);
                 }
                 return Err(format!(
@@ -465,9 +463,27 @@ impl NativeAbiProfile {
                 ));
             }
         }
+        // The canonical matrix supplies representative compiler ABIs. Alternate Rust target
+        // names can use a representative with the same Cargo-reported ABI facts.
+        for profile in [Self::Windows64, Self::NonWindows] {
+            if profile
+                .compatibility_targets()
+                .iter()
+                .any(|expected| expected.matches_abi(&target))
+            {
+                return Ok(profile);
+            }
+        }
         Err(format!(
-            "unsupported Dear ImGui pregenerated binding Rust target: {}",
-            target.triple
+            "unsupported Dear ImGui pregenerated binding Rust target: {} \
+             (os={}, env={}, abi={}, arch={}, endian={}, pointer_width={})",
+            target.triple,
+            target.os,
+            target.env,
+            target.target_abi,
+            target.arch,
+            target.endian,
+            target.pointer_width,
         ))
     }
 
@@ -486,10 +502,7 @@ impl NativeAbiProfile {
     }
 
     pub const fn pregenerated_file(self) -> &'static str {
-        match self {
-            Self::Windows64 => "src/bindings_pregenerated_windows.rs",
-            Self::NonWindows => "src/bindings_pregenerated.rs",
-        }
+        CORE_NATIVE_BINDINGS_FILE
     }
 
     pub const fn compatibility_targets(self) -> &'static [NativeAbiTarget] {
@@ -498,6 +511,72 @@ impl NativeAbiProfile {
             Self::NonWindows => NON_WINDOWS_TARGETS,
         }
     }
+}
+
+const WINDOWS_PADDING_CFG: &str = "    #[cfg(windows)]\n";
+const WINDOWS_PADDING_FIELDS: [(&str, &str, &str, &str); 2] = [
+    (
+        "ImGuiBoxSelectState",
+        "    pub RequestClear: bool,\n",
+        "    pub __bindgen_padding_0: [u8; 3usize],\n",
+        "    pub _bitfield_1: __BindgenBitfieldUnit<[u8; 2usize]>,",
+    ),
+    (
+        "ImGuiWindow",
+        "    pub DisableInputsFrames: ImS8,\n",
+        "    pub __bindgen_padding_0: u8,\n",
+        "    pub _bitfield_1: __BindgenBitfieldUnit<[u8; 5usize]>,",
+    ),
+];
+
+fn windows_padding_ranges(
+    content: &str,
+    guard: &str,
+) -> Result<[(usize, usize); WINDOWS_PADDING_FIELDS.len()], String> {
+    let mut ranges = [(0, 0); WINDOWS_PADDING_FIELDS.len()];
+    for ((name, previous, field, next), range) in
+        WINDOWS_PADDING_FIELDS.into_iter().zip(&mut ranges)
+    {
+        let header = format!("\npub struct {name} {{\n");
+        let (prefix, rest) = content
+            .split_once(&header)
+            .filter(|(_, rest)| !rest.contains(&header))
+            .ok_or_else(|| format!("expected one generated struct {name}"))?;
+        let (fields, _) = rest
+            .split_once("\n}\n")
+            .ok_or_else(|| format!("missing end of generated struct {name}"))?;
+        let expected = format!("{previous}{guard}{field}{next}");
+        let (preceding_fields, _) = fields
+            .split_once(&expected)
+            .filter(|_| fields.matches("    pub __bindgen_padding_0:").count() == 1)
+            .ok_or_else(|| format!("unexpected Windows padding in generated struct {name}"))?;
+        let start = prefix.len() + header.len() + preceding_fields.len() + previous.len();
+        *range = (start, start + guard.len() + field.len());
+    }
+    ranges.sort_unstable();
+    Ok(ranges)
+}
+
+/// Merge the canonical native outputs by guarding the two Windows padding fields.
+///
+/// Both inputs are sanitized bindgen output with normalized line endings.
+pub fn merge_core_native_bindings(windows: &str, non_windows: &str) -> Result<String, String> {
+    let ranges = windows_padding_ranges(windows, "")?;
+    let mut without_padding = windows.to_owned();
+    for (start, end) in ranges.into_iter().rev() {
+        without_padding.replace_range(start..end, "");
+    }
+    if without_padding != non_windows {
+        return Err(
+            "canonical native bindings differ beyond the two Windows padding fields".into(),
+        );
+    }
+
+    let mut merged = windows.to_owned();
+    for (start, _) in ranges.into_iter().rev() {
+        merged.insert_str(start, WINDOWS_PADDING_CFG);
+    }
+    Ok(merged)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -762,6 +841,35 @@ impl BindingSpec {
             output.push('\n');
         }
         output
+    }
+
+    /// Validate a checked-in binding with normalized line endings.
+    pub fn validate_pregenerated_bindings(&self, content: &str) -> Result<(), String> {
+        self.validate_generated_bindings(content)?;
+        match &self.target {
+            BindingTarget::Native { .. } => {
+                windows_padding_ranges(content, WINDOWS_PADDING_CFG)?;
+                let guards = content
+                    .lines()
+                    .filter(|line| line.trim_start().starts_with("#[cfg"))
+                    .count();
+                if guards != WINDOWS_PADDING_FIELDS.len() {
+                    return Err(
+                        "merged native bindings must guard only the two Windows padding fields"
+                            .into(),
+                    );
+                }
+            }
+            BindingTarget::WasmImport { module_name } => {
+                let expected_import = format!("#[link(wasm_import_module = \"{module_name}\")]");
+                if !content.contains(&expected_import) {
+                    return Err(format!(
+                        "WASM bindings must use import provider {module_name}"
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn validate_generated_bindings(&self, content: &str) -> Result<(), String> {

@@ -2,7 +2,7 @@
 name = "dear-imgui-bevy"
 version.workspace = true
 edition.workspace = true
-rust-version = "1.97.1"
+rust-version.workspace = true
 description = "Bevy-native backend for dear-imgui-rs on Bevy 0.20.1"
 license.workspace = true
 repository.workspace = true

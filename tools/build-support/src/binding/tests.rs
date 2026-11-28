@@ -300,7 +300,7 @@ fn header_shim_contents_participate_in_binding_spec_identity() {
 }
 
 #[test]
-fn native_abi_profiles_cover_only_the_verified_target_matrix() {
+fn native_abi_profiles_cover_the_verified_target_facts() {
     for profile in [NativeAbiProfile::Windows64, NativeAbiProfile::NonWindows] {
         for target in profile.compatibility_targets() {
             assert_eq!(
@@ -326,6 +326,20 @@ fn native_abi_profiles_cover_only_the_verified_target_matrix() {
         .unwrap();
     assert_eq!(windows_gnu.clang_target, "x86_64-w64-windows-gnu");
     assert_eq!(windows_gnu.target_abi, "");
+
+    assert_eq!(
+        NativeAbiProfile::for_target(TargetFacts {
+            triple: "x86_64-acme-linux-gnu",
+            os: "linux",
+            env: "gnu",
+            target_abi: "",
+            arch: "x86_64",
+            endian: "little",
+            pointer_width: "64",
+        })
+        .unwrap(),
+        NativeAbiProfile::NonWindows,
+    );
 
     for (rust_target, expected_abi) in [
         ("aarch64-apple-ios-sim", "sim"),
@@ -1343,46 +1357,37 @@ fn extension_define_resolution_is_backend_neutral_and_deterministic() {
 #[test]
 fn maintained_extension_build_routes_do_not_hard_code_bindgen_defines() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for crate_name in [
-        "dear-imgui-cte-sys",
-        "dear-imgui-test-engine-sys",
-        "dear-imguizmo-quat-sys",
-        "dear-imguizmo-sys",
-        "dear-imnodes-sys",
-        "dear-implot-sys",
-        "dear-implot3d-sys",
-        "dear-node-editor-sys",
-    ] {
-        let path = workspace_root
-            .join("extensions")
-            .join(crate_name)
-            .join("build.rs");
+    for spec in CrateBindingSpec::maintained()
+        .iter()
+        .filter(|spec| spec.target == CrateBindingTarget::Native)
+    {
+        let path = workspace_root.join(spec.crate_root()).join("build.rs");
         let source = fs::read_to_string(&path).unwrap();
         assert!(
-            source.contains("binding_defines()"),
-            "{} does not consume the canonical binding define profile",
-            path.display()
-        );
-        assert!(
-            source.contains("apply_extension_binding_defines"),
-            "{} does not derive native defines from the canonical profile",
+            source.contains("build_extension_sys("),
+            "{} does not call the shared extension build entry point",
             path.display()
         );
         assert!(
             !source.contains(".clang_arg(\"-D"),
-            "{} still hard-codes a bindgen define",
+            "{} hard-codes a bindgen define",
             path.display()
         );
     }
 
-    let implot_build = fs::read_to_string(
-        workspace_root
-            .join("extensions")
-            .join("dear-implot-sys")
-            .join("build.rs"),
-    )
-    .unwrap();
-    assert!(!implot_build.contains("strip_prefix(\"DEP_DEAR_IMGUI"));
+    // The profile tests cover define values and ordering. Check that the shared
+    // entry point uses the profile for both bindgen and native compilation.
+    let shared = include_str!("../extension_build.rs");
+    assert!(
+        shared.contains(".binding_defines()"),
+        "shared bindgen route must use the canonical binding define profile"
+    );
+    assert!(
+        shared.contains(".apply_extension_binding_defines("),
+        "shared C++ route must apply canonical defines and core metadata"
+    );
+    assert!(!shared.contains(".clang_arg(\"-D"));
+    assert!(!shared.contains("strip_prefix(\"DEP_DEAR_IMGUI"));
 
     let core_build = fs::read_to_string(workspace_root.join("dear-imgui-sys/build.rs")).unwrap();
     assert!(!core_build.contains("cargo:DEFINE_IMGUI_ENABLE_TEST_ENGINE={}"));

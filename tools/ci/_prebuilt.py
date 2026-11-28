@@ -187,6 +187,7 @@ SUPPORTED_WASM_EXTENSION_SPECS = tuple(
 PREBUILT_ENV_TO_UNSET = (
     "DEAR_IMGUI_CORE_ARTIFACT_IDENTITY_HASH",
     "DEAR_IMGUI_RS_CANDIDATE_SHA",
+    "DEAR_IMGUI_RS_PACKAGE_DEAR_IMGUI_SYS",
     "IMGUI_SYS_BUILD_MODE",
     "IMGUI_SYS_FORCE_BUILD",
     "IMGUI_SYS_LIB_DIR",
@@ -199,20 +200,13 @@ EXTENSION_PREBUILT_ENV_TO_UNSET = tuple(
     f"{spec.env_stem}_{suffix}"
     for spec in EXTENSION_SPECS
     for suffix in ("BUILD_MODE", "FORCE_BUILD", "LIB_DIR", "PACKAGE_DIR", "PREBUILT_URL", "SKIP_CC", "USE_PREBUILT")
+) + tuple(
+    f"DEAR_IMGUI_RS_PACKAGE_{spec.sys_crate.replace('-', '_').upper()}"
+    for spec in EXTENSION_SPECS
 )
 NATIVE_BUILD_ENV_TO_UNSET = (
     *PREBUILT_ENV_TO_UNSET,
-    "IMGUI_SYS_LIB_DIR",
-    "IMGUI_SYS_PACKAGE_DIR",
-    "IMGUI_SYS_PKG_CRT",
-    "IMGUI_SYS_PKG_FEATURES",
-    "IMGUI_SYS_SKIP_CC",
     *EXTENSION_PREBUILT_ENV_TO_UNSET,
-    *(
-        f"{spec.env_stem}_{suffix}"
-        for spec in EXTENSION_SPECS
-        for suffix in ("PACKAGE_DIR", "PKG_CRT", "PKG_FEATURES")
-    ),
 )
 
 GIT_SHA_PATTERN = re.compile(r"[0-9a-fA-F]{40}\Z")
@@ -1608,46 +1602,29 @@ def _build_prebuilt_packages(
     """Build exact core and matching extension profiles for one native target."""
     candidate_sha = _validate_candidate_sha(candidate_sha)
     target_arguments = ("--target", target) if target is not None else ()
+    crt_arguments = ("--crt", crt) if crt else ()
+    package_command = ("cargo", "run", "-p", "xtask", "--", "package")
     for profile_name in _required_profiles(profile_scope):
         profile = PREBUILT_PROFILE_BY_NAME[profile_name]
-        package_features = ",".join(profile.consumer_features)
         values: dict[str, str | Path] = {
             "DEAR_IMGUI_RS_CANDIDATE_SHA": candidate_sha,
-            "IMGUI_SYS_FORCE_BUILD": "1",
-            "IMGUI_SYS_PACKAGE_DIR": package_dir,
             "CARGO_TARGET_DIR": target_dir / f"native-{profile.name}",
         }
-        if crt is not None:
-            values["IMGUI_SYS_PKG_CRT"] = crt
-        unset = NATIVE_BUILD_ENV_TO_UNSET
-        if package_features:
-            values["IMGUI_SYS_PKG_FEATURES"] = package_features
-        else:
-            unset = (*unset, "IMGUI_SYS_PKG_FEATURES")
-
-        command = [
-            "cargo",
-            "run",
-            "-p",
+        command = (
+            *package_command,
             "dear-imgui-sys",
-            "--release",
             *target_arguments,
-        ]
-        if profile.consumer_features:
-            command.append("--no-default-features")
-        command.extend(
-            (
-                "--features",
-                ",".join(("package-bin", *profile.consumer_features)),
-                "--bin",
-                "package",
-            )
+            *crt_arguments,
+            "--out-dir",
+            str(package_dir.resolve()),
+            "--features",
+            ",".join(profile.consumer_features),
         )
         with github_group(f"Build {profile.name} Dear ImGui host prebuilt"):
             run(
                 command,
                 cwd=package_workspace,
-                env=environment(values, unset=unset),
+                env=environment(values, unset=NATIVE_BUILD_ENV_TO_UNSET),
             )
 
         core_archive = _built_core_archive(package_dir, profile_name)
@@ -1659,30 +1636,22 @@ def _build_prebuilt_packages(
             if profile_name not in spec.profiles:
                 continue
             _, sys_features = extension_consumer_features(spec, profile_name)
-            extension_features = ("package-bin", "build-from-source", *sys_features)
             extension_values: dict[str, str | Path] = {
                 "DEAR_IMGUI_RS_CANDIDATE_SHA": candidate_sha,
                 "DEAR_IMGUI_CORE_ARTIFACT_IDENTITY_HASH": core_identity,
-                f"{spec.env_stem}_PACKAGE_DIR": package_dir,
-                f"{spec.env_stem}_FORCE_BUILD": "1",
                 "CARGO_TARGET_DIR": (
                     target_dir / f"native-{profile.name}-{spec.extension_id}"
                 ),
             }
-            if crt is not None:
-                extension_values[f"{spec.env_stem}_PKG_CRT"] = crt
             extension_command = (
-                "cargo",
-                "run",
-                "-p",
+                *package_command,
                 spec.sys_crate,
-                "--release",
                 *target_arguments,
-                "--no-default-features",
+                *crt_arguments,
+                "--out-dir",
+                str(package_dir.resolve()),
                 "--features",
-                ",".join(extension_features),
-                "--bin",
-                "package",
+                ",".join(sys_features),
             )
             with github_group(
                 f"Build {profile.name} {spec.safe_crate} host prebuilt"

@@ -52,12 +52,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 dear-imgui-sys = { workspace = true, features = ["test-engine"] }
 
 [build-dependencies]
-bindgen = { workspace = true, optional = true }
 build-support = { workspace = true, features = ["binding-spec"] }
-cc.workspace = true
 
 [features]
 default = []
-bindgen = ["dep:bindgen", "dear-imgui-sys/bindgen"]
+bindgen = ["build-support/bindgen", "dear-imgui-sys/bindgen"]
 freetype = ["dear-imgui-sys/freetype"]
 capture = []

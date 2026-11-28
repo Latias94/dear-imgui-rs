@@ -106,8 +106,9 @@ compile_error!("feature `test-engine` is native source-only and cannot be combin
 #[cfg(all(feature = "prebuilt", dear_imgui_rs_wasm_import_target))]
 compile_error!("feature `prebuilt` is native-only and cannot be combined with WASM");
 
-// Bindings are generated into OUT_DIR and included via a submodule so that
-// possible inner attributes in the generated file are accepted at module root.
+// The build script prepares one bindings.rs in OUT_DIR. Target cfg selects
+// the Windows padding fields in the shared native binding. Browser builds use
+// the separate WASM import binding.
 mod ffi;
 pub use ffi::*;
 

@@ -2,6 +2,12 @@
 
 This document tracks compatibility across the workspace crates, upstream Dear ImGui, and key external dependencies. The root README shows the latest recommendations; this file keeps version history and compatibility policy.
 
+## 0.24 Development Workspace
+
+All workspace crates, including Bevy, require Rust 1.97.1. Development uses Rust 1.100.0.
+Canonical binding generation uses the separate Rust 1.95.0 formatter and LLVM 14.
+See the [0.24 migration guide](MIGRATING_0_24.md) for source changes.
+
 ## 0.23 Release Train
 
 All 29 publishable crates share version `0.23.0`. Upgrade their requirements to `"0.23"` together. Applications passing SDL windows or events to the backend should also use `sdl3 = "0.22.1"`. Its `sdl3-sys` 0.7.3 bindings target SDL 3.4.20. The 0.22.0 backend uses `sdl3` 0.20.

@@ -138,7 +138,7 @@ linking in all cases.
 ## When to Use
 
 - In `build.rs` of `dear-imgui-sys` and extension `-sys` crates to handle optional prebuilt flows.
-- In internal packaging tools (e.g., `bin/package`) to ensure archive names and manifests are consistent.
+- In `xtask package` to keep archive names and manifests consistent with native builds.
 
 ## Docs.rs / Offline Builds
 

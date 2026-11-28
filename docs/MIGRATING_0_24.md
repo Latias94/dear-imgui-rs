@@ -1,5 +1,10 @@
 # Migrating from 0.23 to 0.24
 
+## Rust toolchain
+
+Upgrade the workspace toolchain to Rust 1.97.1 or later. The same minimum applies to the core,
+Bevy backend, extensions, and build helpers.
+
 ## Context and stack layouts
 
 | In 0.23 | In 0.24 |
@@ -45,6 +50,7 @@ builders and `Ui::text_colored` accept `Color`, RGBA arrays, and compatible vect
 | An implicit cache beside the crate's source tree | Cargo's `OUT_DIR` supplies the default cache. Set `DEAR_IMGUI_CACHE_DIR` for a shared cache root or `*_SYS_CACHE_DIR` for a crate-specific override. |
 | A custom core archive built for the 0.23 native ABI | Rebuild the archive and its manifest against this checkout. The core frame fast path reads the native current-context slot exported by the archive. Cargo does not build that shim when linking a matching archive. |
 | Prebuilt caches from an earlier checkout | Populate the new cache online before building offline, or select a local archive explicitly. Downloaded archives are still verified against their full SHA-256 digest. Extraction uses a short content-addressed path and accepts only regular files and directories in archives. `Auto` can fall back to source after a rejected discovered archive. |
+| `cargo run --features package-bin --bin package` in a sys crate | Run `cargo run -p xtask -- package <sys-crate>` from the workspace. Choose the artifact profile with `--features`, pass `--target` for a specific Rust target, and select a destination with `--out-dir`. `--all` builds the core and matching extensions. For Windows MSVC, set Cargo's `crt-static` target feature for `/MT`; `--crt mt` or `--crt md` verifies the resulting profile. The output includes `SHA256SUMS`. |
 
 ## Fonts
 

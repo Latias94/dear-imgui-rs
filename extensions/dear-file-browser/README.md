@@ -18,16 +18,14 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 - Native backend: https://github.com/PolyMeilex/rfd
 - In-UI: Pure Dear ImGui implementation (no C API)
 
-## Fearless Refactor (IGFD-Grade)
+## Integration Guides
 
-- Architecture: `docs/FEARLESS_REFACTOR_ARCHITECTURE.md`
-- IGFD source reference map: `docs/IGFD_SOURCE_REFERENCE_MAP.md` (1:1 UI/behavior alignment guide)
-- P2 performance/async design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
-- Background scan runtime: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
-- Roadmap / TODO: `docs/FEARLESS_REFACTOR_TODO_MILESTONES.md`
-- Parity + deviations (non-C-API): `docs/IGFD_PARITY_AND_DEVIATIONS.md`
-- Thumbnails cookbook: `docs/THUMBNAILS_INTEGRATION_COOKBOOK.md`
-- Demo parity pack: `examples/04-integration/file_browser_imgui.rs`
+- [IGFD parity and deviations](docs/IGFD_PARITY_AND_DEVIATIONS.md)
+- [IGFD source reference map](docs/IGFD_SOURCE_REFERENCE_MAP.md)
+- [Filesystem ownership and scan policy](#filesystem-ownership-and-scan-policy)
+- [EntryId selection migration](docs/API_MIGRATION_ID_SELECTION.md)
+- [Thumbnail integration cookbook](docs/THUMBNAILS_INTEGRATION_COOKBOOK.md)
+- [ImGui file browser example](../../examples/04-integration/file_browser_imgui.rs)
 
 ## Compatibility
 
@@ -113,9 +111,11 @@ fn choose_files() {
 }
 ```
 
-For the ImGui-embedded browser, create the state once and pass it to `draw` on
-each initialized application frame. The snippet does not create a platform or
-renderer:
+For the ImGui-embedded browser, keep one `FileDialogState` per dialog and draw it
+on each ImGui frame. `FileDialogCore` manages navigation, `EntryId` selection,
+filtering, and sorting. `FileDialogUiState` holds layout and presentation state.
+The same browser contents can run inside an existing host or through the window
+and modal helpers.
 
 ```rust
 use dear_imgui_rs::Ui;
@@ -162,30 +162,28 @@ fn draw(ui: &Ui, state: &mut FileDialogState) {
 
 ### Filesystem Ownership and Scan Policy
 
-Each `FileDialogState` owns its filesystem capability. Draw methods never borrow a
-filesystem for one frame, so a worker cannot outlive caller-owned data.
+Each `FileDialogState` owns its filesystem capability. A background job holds a
+shared filesystem handle for the duration of its scan.
 
 On native targets, `FileDialogState::new` owns an
 `Arc<dyn FileSystem + Send + Sync>` and selects `ScanPolicy::tuned_background()`.
-The worker invokes `FileSystem::visit_dir_for_scan` and sends bounded raw-entry
-batches to the UI thread. Scan hooks, filtering, sorting, selection reconciliation,
-and rendering remain on the UI thread. During a partial scan, the projector filters
-only the newly accepted batch, then inserts visible entries into an ordered index.
-Arrival sequence breaks equal sort keys, so entries from earlier batches remain first
-without walking or moving the accumulated view. The full index is rebuilt only when
-projection inputs change.
+The worker invokes `FileSystem::visit_dir_for_scan` and sends raw-entry batches
+through a bounded channel. The UI thread applies up to `max_batches_per_tick`
+messages from the current generation per tick. It discards stale messages,
+including errors from earlier generations.
 
-Scan hooks may capture owner-thread state such as `Rc<RefCell<_>>`; they never cross
-into the worker and run only on the thread that applies scan batches.
+Scan hooks registered with `set_scan_hook` require `Send + 'static`. They run on
+the polling thread and can modify or drop raw entries before conversion.
+Filtering, sorting, selection reconciliation, and rendering also run on the UI
+thread.
 
-Each native scan runtime owns one worker and keeps one running request plus one
-latest pending request. Repeated navigation cancels the running generation and
-coalesces intermediate destinations without waiting for filesystem I/O. Destroying
-the `FileDialogState` cancels its session, closes the worker channel, and waits for
-that worker after releasing core/UI state. A filesystem blocked inside an
-uninterruptible call can therefore delay destruction of its owning dialog, but it
-cannot starve scans belonging to other dialogs. Custom filesystems should return
-promptly after their visitor returns `ScanVisit::Stop`.
+Each native scan runtime has at most one worker, one running request, and one
+latest pending request. Repeated navigation requests cancellation of the running
+generation and replaces the pending request without waiting for filesystem I/O.
+Dropping the dialog closes the session and requests cancellation. The worker
+exits asynchronously once it can observe cancellation, so a blocked filesystem
+call can keep the worker alive after the dialog is dropped. Other dialogs have
+independent scan workers.
 
 ```rust
 use std::sync::Arc;
@@ -211,18 +209,24 @@ let state = FileDialogState::with_blocking_filesystem(
 );
 ```
 
-`ScanPolicy::Background` is never silently downgraded. It returns
+Selecting `ScanPolicy::Background` returns
 `BackgroundScanRequiresThreadSafeFileSystem` for a native blocking capability and
-`BackgroundScanUnsupported` on `wasm32`. Custom `visit_dir` implementations must
-stop when their visitor returns `ScanVisit::Stop`; cancellation is cooperative,
-while generation filtering is the final stale-result guard.
+`BackgroundScanUnsupported` on `wasm32`. Cancellation is cooperative. Custom
+`visit_dir` and `visit_dir_for_scan` implementations must stop when the visitor
+returns `ScanVisit::Stop`.
 
-The list and grid clip off-screen rows. Completed projections have a row index,
-and selection resolves native paths by ID without scanning the listing for each
-selected entry. While scanning, the browser traverses the partial ordered index
-to reach the clipped slice without rebuilding a complete row index for each batch.
-Filter setters return an error for malformed regular expressions and leave the
-previous filters intact. A glob `?` matches one Unicode scalar.
+During a partial scan, the projector filters each new batch and inserts its
+visible entries into an ordered index. Equal sort keys retain scan order. The
+browser uses this index to reach the visible list or grid rows and builds a row
+index for completed projections. Changes to projection inputs trigger a full
+projection rebuild. Selection resolves native paths by `EntryId`, and unresolved
+IDs are retained during a partial scan and reconciled on completion. Filter
+setters return an error for malformed regular expressions and leave the previous
+filters intact. A glob `?` matches one Unicode scalar.
+
+With `tracing` enabled, `scan.requested`, `scan.batch_applied`, `scan.completed`,
+and `scan.dropped_stale_batch` report scan progress. `projector.incremental` and
+`projector.rebuild` identify incremental updates and full projection rebuilds.
 
 With the native background filesystem, Paste and Delete each run on a worker,
 with at most one active transfer or deletion per dialog. Paste conflicts are
@@ -232,9 +236,11 @@ dropping a dialog does not join workers, but an already-started file operation
 may still finish its current filesystem call or cleanup. On Windows, mounted
 drive letters appear after a background probe and do not imply reachability.
 
-The address bar, bookmarks, and file actions use original paths while displaying
-Unicode labels. Windows drive and UNC labels omit their verbatim prefix without
-modifying the path passed to the filesystem.
+Path completion uses directories from the current projection. Breadcrumb quick
+selection uses recent navigation history. Both reuse data already held by the
+dialog. The address bar, bookmarks, and file actions use original paths while
+displaying Unicode labels. Windows drive and UNC labels omit their verbatim
+prefix without modifying the underlying paths.
 
 ### Reopen Semantics (IGFD-style Open/Display/Close)
 

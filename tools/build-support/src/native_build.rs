@@ -4,6 +4,21 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+/// Environment flag set for the one sys crate being packaged.
+pub fn package_crate_env(crate_name: &str) -> String {
+    format!(
+        "DEAR_IMGUI_RS_PACKAGE_{}",
+        crate_name.replace('-', "_").to_ascii_uppercase()
+    )
+}
+
+/// Whether the packager requested this crate's source archive metadata.
+pub fn is_packaging(crate_name: &str) -> bool {
+    let name = package_crate_env(crate_name);
+    println!("cargo:rerun-if-env-changed={name}");
+    crate::parse_bool_env(&name)
+}
+
 /// How a native core or extension obtains its library, independently of bindings.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum NativeBuildMode {

@@ -2819,6 +2819,7 @@ dependencies = [
 name = "dear-imgui-build-support"
 version = "0.23.0"
 dependencies = [
+ "bindgen",
  "cc",
  "flate2",
  "pkg-config",
@@ -2847,12 +2848,8 @@ dependencies = [
 name = "dear-imgui-cte-sys"
 version = "0.23.0"
 dependencies = [
- "bindgen",
- "cc",
  "dear-imgui-build-support",
  "dear-imgui-sys",
- "flate2",
- "tar",
 ]
 
 [[package]]
@@ -2975,13 +2972,11 @@ dependencies = [
  "bindgen",
  "cc",
  "dear-imgui-build-support",
- "flate2",
  "glam 0.34.3",
  "mint",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
- "tar",
  "windows 0.62.2",
 ]
 
@@ -2998,8 +2993,6 @@ dependencies = [
 name = "dear-imgui-test-engine-sys"
 version = "0.23.0"
 dependencies = [
- "bindgen",
- "cc",
  "dear-imgui-build-support",
  "dear-imgui-sys",
 ]
@@ -3096,25 +3089,17 @@ dependencies = [
 name = "dear-imguizmo-quat-sys"
 version = "0.23.0"
 dependencies = [
- "bindgen",
- "cc",
  "dear-imgui-build-support",
  "dear-imgui-sys",
- "flate2",
- "tar",
 ]
 
 [[package]]
 name = "dear-imguizmo-sys"
 version = "0.23.0"
 dependencies = [
- "bindgen",
- "cc",
  "dear-imgui-build-support",
  "dear-imgui-sys",
- "flate2",
  "mint",
- "tar",
 ]
 
 [[package]]
@@ -3131,12 +3116,8 @@ dependencies = [
 name = "dear-imnodes-sys"
 version = "0.23.0"
 dependencies = [
- "bindgen",
- "cc",
  "dear-imgui-build-support",
  "dear-imgui-sys",
- "flate2",
- "tar",
 ]
 
 [[package]]
@@ -3156,12 +3137,8 @@ dependencies = [
 name = "dear-implot-sys"
 version = "0.23.0"
 dependencies = [
- "bindgen",
- "cc",
  "dear-imgui-build-support",
  "dear-imgui-sys",
- "flate2",
- "tar",
 ]
 
 [[package]]
@@ -3180,12 +3157,8 @@ dependencies = [
 name = "dear-implot3d-sys"
 version = "0.23.0"
 dependencies = [
- "bindgen",
- "cc",
  "dear-imgui-build-support",
  "dear-imgui-sys",
- "flate2",
- "tar",
 ]
 
 [[package]]
@@ -3203,12 +3176,8 @@ dependencies = [
 name = "dear-node-editor-sys"
 version = "0.23.0"
 dependencies = [
- "bindgen",
- "cc",
  "dear-imgui-build-support",
  "dear-imgui-sys",
- "flate2",
- "tar",
 ]
 
 [[package]]
@@ -8973,7 +8942,11 @@ dependencies = [
  "anyhow",
  "bindgen",
  "dear-imgui-build-support",
+ "flate2",
  "semver",
+ "serde_json",
+ "sha2",
+ "tar",
  "tempfile",
  "toml_edit",
  "which",

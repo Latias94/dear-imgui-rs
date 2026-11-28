@@ -29,21 +29,14 @@ UPDATER_SPEC.loader.exec_module(UPDATER)
 class BindingTaskTests(unittest.TestCase):
     def test_updater_uses_the_idempotent_canonical_generation_command(self):
         command = UPDATER.binding_command()
-        self.assertEqual(command[:3], ["cargo", "+1.95.0", "run"])
-        specification = (
-            REPO_ROOT / "tools/build-support/src/binding/spec.rs"
-        ).read_text(encoding="utf-8")
-        self.assertIn(
-            f'CANONICAL_BINDING_RUSTC_VERSION: &str = "rustc {UPDATER.CANONICAL_BINDING_TOOLCHAIN}";',
-            specification,
-        )
+        self.assertEqual(command[:5], ["cargo", "run", "-p", "xtask", "--"])
         self.assertEqual(
             command[-3:],
             ["verify-bindings", "--update", "--allow-dirty"],
         )
         self.assertNotIn("--check-only", command)
 
-    def test_updater_overrides_parent_toolchain_for_nested_rustfmt(self):
+    def test_updater_lets_xtask_select_the_binding_formatter(self):
         with (
             patch.object(UPDATER.sys, "argv", [
                 "update_submodule_and_bindings.py", "--crates", "dear-implot-sys",
@@ -54,9 +47,7 @@ class BindingTaskTests(unittest.TestCase):
             redirect_stdout(io.StringIO()),
         ):
             self.assertEqual(UPDATER.main(), 0)
-            env = run.call_args.kwargs["env"]
-            self.assertEqual(env["RUSTUP_TOOLCHAIN"], "1.95.0")
-            self.assertEqual(env["LIBCLANG_PATH"], "/llvm/lib")
+            self.assertNotIn("env", run.call_args.kwargs)
             self.assertEqual(os.environ["RUSTUP_TOOLCHAIN"], "1.99.0")
 
     def test_binding_task_delegates_to_the_canonical_updater_once(self):

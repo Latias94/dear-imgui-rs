@@ -22,7 +22,7 @@ env:
   CARGO_INCREMENTAL: '0'
   CARGO_TERM_COLOR: always
   # Keep the installed prebuilt compiler selected despite rust-toolchain.toml.
-  RUSTUP_TOOLCHAIN: '1.95.0'
+  RUSTUP_TOOLCHAIN: '1.97.1'
 
 jobs:
   build-prebuilt:

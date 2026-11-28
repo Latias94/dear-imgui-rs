@@ -384,6 +384,8 @@ Quick examples (enable auto prebuilt download):
 
 Version `0.23.0` pairs Dear ImGui 1.93.1 WIP with the extension revisions listed in the [native source matrix](docs/COMPATIBILITY.md#native-sources-in-023). Development uses Rust 1.100.0. The core requires Rust 1.95 and the Bevy backend requires Rust 1.97.1.
 
+The 0.24 development workspace requires Rust 1.97.1 for all crates. See the [0.24 migration guide](docs/MIGRATING_0_24.md).
+
 Core
 
 | Crate           | Version | Notes                                     |

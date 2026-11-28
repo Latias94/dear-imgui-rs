@@ -351,7 +351,7 @@ jobs:
           python3 tools/ci/run_contract.py expect-failure
           --label package-test-engine
           --contains "feature \`test-engine\` is source-only and cannot be packaged as a prebuilt core artifact"
-          -- cargo check -p dear-imgui-sys --no-default-features --features package-bin,test-engine
+          -- cargo run -p xtask -- package dear-imgui-sys --features test-engine
 
   test-engine-sanitizers:
     name: Test Engine C ABI sanitizers
@@ -495,7 +495,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      RUSTUP_TOOLCHAIN: '1.95.0'
+      RUSTUP_TOOLCHAIN: '1.97.1'
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -505,8 +505,10 @@ jobs:
       - name: Init required nested submodules (selective)
         run: python3 tools/ci/update_submodules.py
 
-      - name: Install Rust toolchain
-        run: rustup toolchain install ${{ env.RUSTUP_TOOLCHAIN }} --profile minimal --no-self-update --component rustfmt
+      - name: Install workspace and canonical formatting toolchains
+        run: |
+          rustup toolchain install ${{ env.RUSTUP_TOOLCHAIN }} --profile minimal --no-self-update
+          rustup toolchain install 1.95.0 --profile minimal --no-self-update --component rustfmt
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
@@ -542,7 +544,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      RUSTUP_TOOLCHAIN: '1.95.0'
+      RUSTUP_TOOLCHAIN: '1.97.1'
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -573,10 +575,9 @@ jobs:
           libxkbcommon-dev libwayland-dev libudev-dev
           mesa-common-dev libgl1-mesa-dev cmake
 
-      - name: Check publishable non-Bevy crates at the declared MSRV
+      - name: Check publishable crates at the declared MSRV
         run: >-
           cargo check --workspace
-          --exclude dear-imgui-bevy
           --exclude dear-imgui-examples
           --exclude dear-imgui-web-demo
           --exclude xtask
@@ -1274,7 +1275,7 @@ jobs:
     env:
       CARGO_TARGET_DIR: ${{ matrix.target_dir }}
       CI_TARGET: ${{ matrix.target }}
-      RUSTUP_TOOLCHAIN: '1.95.0'
+      RUSTUP_TOOLCHAIN: '1.97.1'
       RUSTFLAGS: ${{ matrix.rustflags }}
       IMGUI_SYS_FORCE_BUILD: "1"
       IMPLOT_SYS_FORCE_BUILD: "1"
@@ -1292,7 +1293,7 @@ jobs:
       - name: Init required nested submodules (selective)
         run: python tools/ci/update_submodules.py
 
-      - name: Install Rust 1.95.0 and target standard library
+      - name: Install the declared MSRV and target standard library
         run: rustup toolchain install ${{ env.RUSTUP_TOOLCHAIN }} --profile minimal --no-self-update --target ${{ matrix.target }}
 
       - name: Enter the Arm64 MSVC developer environment
@@ -1574,9 +1575,9 @@ jobs:
       - name: Reject packaging the source-only ABI probe
         run: >-
           python3 tools/ci/run_contract.py expect-failure
-          --label package-bin-abi-probe
+          --label package-abi-probe
           --contains "feature \`abi-probe\` is CI-only and cannot be packaged as a prebuilt core artifact"
-          -- cargo check -p dear-imgui-sys --no-default-features --features package-bin,abi-probe
+          -- cargo run -p xtask -- package dear-imgui-sys --features abi-probe
 
       - name: Reject the ABI probe when native compilation is disabled
         env:

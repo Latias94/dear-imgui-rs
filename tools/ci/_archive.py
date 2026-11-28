@@ -24,7 +24,6 @@ class PackageRecord:
 
 REQUIRED_CORE_BINDINGS = (
     "src/bindings_pregenerated.rs",
-    "src/bindings_pregenerated_windows.rs",
     "src/wasm_bindings_pregenerated.rs",
 )
 REPO_ROOT = Path(__file__).resolve().parents[2]

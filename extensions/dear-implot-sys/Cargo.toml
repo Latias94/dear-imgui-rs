@@ -35,23 +35,13 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 dear-imgui-sys.workspace = true
 #mint.workspace = true
-flate2 = { workspace = true, optional = true }
-tar = { workspace = true, optional = true }
 
 [build-dependencies]
-bindgen = { workspace = true, optional = true }
-cc.workspace = true
 build-support = { workspace = true, features = ["binding-spec"] }
 
-[[bin]]
-name = "package"
-path = "bin/package/main.rs"
-required-features = ["package-bin"]
-
 [features]
-package-bin = ["dep:flate2", "dep:tar"]
 default = []
-bindgen = ["dep:bindgen", "dear-imgui-sys/bindgen"]
+bindgen = ["build-support/bindgen", "dear-imgui-sys/bindgen"]
 # Docking is always enabled; feature removed.
 # Enable multi-viewport support (commented out while WIP)
 # multi-viewport = ["dear-imgui-sys/multi-viewport"]
