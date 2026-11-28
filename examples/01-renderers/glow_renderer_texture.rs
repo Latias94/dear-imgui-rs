@@ -456,7 +456,7 @@ impl AppWindow {
             });
         texture.pending_command = requested_command;
 
-        platform.prepare_render(&ui, &self.window)?;
+        platform.prepare_render(ui, &self.window)?;
         let gl = renderer
             .gl_context()
             .expect("GlowRenderer should retain its OpenGL function table");

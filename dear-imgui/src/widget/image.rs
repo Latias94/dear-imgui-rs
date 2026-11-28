@@ -52,7 +52,7 @@ fn is_transparent_color(color: [f32; 4]) -> bool {
 /// - Using an ImGui-managed texture:
 /// ```no_run
 /// # use dear_imgui_rs::*;
-/// # fn demo(context: &mut Context) -> Result<(), texture::TextureDataError> {
+/// # fn demo(context: &mut Context) -> Result<(), texture::TextureError> {
 /// let tex = texture::OwnedTextureData::from_pixels(
 ///     texture::TextureFormat::RGBA32,
 ///     64,

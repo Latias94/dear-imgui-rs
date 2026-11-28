@@ -218,10 +218,10 @@ pub(in crate::ui) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState
 
                         let from_path = state.ui.operations.places.edit.place_from_path.clone();
                         let is_duplicate = group_places.iter().any(|x| {
-                            if let Some(from) = &from_path {
-                                if x.path == *from {
-                                    return false;
-                                }
+                            if let Some(from) = &from_path
+                                && x.path == *from
+                            {
+                                return false;
                             }
                             x.path == p
                         });

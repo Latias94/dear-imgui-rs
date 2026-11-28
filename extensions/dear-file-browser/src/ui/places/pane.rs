@@ -232,24 +232,23 @@ pub(in crate::ui) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> O
                             .button_config("-##places_group_remove")
                             .size([btn, btn])
                             .build()
+                            && let Some(sel) = selected_path.clone()
                         {
-                            if let Some(sel) = selected_path.clone() {
-                                remove_place = Some((g.label.clone(), sel.clone()));
-                                if state
-                                    .ui
-                                    .operations
-                                    .places
-                                    .inline_edit
-                                    .target
-                                    .as_ref()
-                                    .is_some_and(|(group, path)| group == &g.label && *path == sel)
-                                {
-                                    state.ui.operations.places.inline_edit.target = None;
-                                    state.ui.operations.places.inline_edit.buffer.clear();
-                                    state.ui.operations.places.inline_edit.focus_next = false;
-                                }
-                                state.ui.operations.places.selected = None;
+                            remove_place = Some((g.label.clone(), sel.clone()));
+                            if state
+                                .ui
+                                .operations
+                                .places
+                                .inline_edit
+                                .target
+                                .as_ref()
+                                .is_some_and(|(group, path)| group == &g.label && *path == sel)
+                            {
+                                state.ui.operations.places.inline_edit.target = None;
+                                state.ui.operations.places.inline_edit.buffer.clear();
+                                state.ui.operations.places.inline_edit.focus_next = false;
                             }
+                            state.ui.operations.places.selected = None;
                         }
                     }
                 }
@@ -374,7 +373,7 @@ pub(in crate::ui) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> O
                     .as_ref()
                     .is_some_and(|(group, path)| group == &g.label && path == &p.path);
 
-            let display_label = state
+            let display_label = if state
                 .ui
                 .operations
                 .places
@@ -382,8 +381,11 @@ pub(in crate::ui) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> O
                 .target
                 .as_ref()
                 .is_some_and(|(group, path)| group == &g.label && path == &p.path)
-                .then(|| state.ui.operations.places.inline_edit.buffer.as_str())
-                .unwrap_or(p.label.as_str());
+            {
+                state.ui.operations.places.inline_edit.buffer.as_str()
+            } else {
+                p.label.as_str()
+            };
 
             // Render the row label as a full-width selectable, then overlay a compact edit
             // button on the right (IGFD-like). This avoids left-side jitter and keeps the

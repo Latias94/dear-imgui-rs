@@ -470,7 +470,7 @@ mod tests {
             fn quiesce(
                 &self,
                 _context: &dear_imgui_rs::ContextTeardown<'_>,
-            ) -> Result<(), dear_imgui_rs::ContextAttachmentTeardownError> {
+            ) -> Result<(), dear_imgui_rs::ContextError> {
                 drop(self.editor.borrow_mut().take());
                 drop(self.context.borrow_mut().take());
                 self.quiesced.set(true);

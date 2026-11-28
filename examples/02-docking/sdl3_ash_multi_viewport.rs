@@ -44,8 +44,9 @@ use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
 #[path = "../support/ash_frame_sync.rs"]
 mod ash_frame_sync;
 use ash_frame_sync::{
-    FrameSync, clear_fence_references, create_frame_syncs, create_present_semaphores,
-    destroy_frame_syncs, destroy_present_semaphores, replace_frame_sync,
+    FrameSync, MainCommandTarget, clear_fence_references, create_frame_syncs,
+    create_present_semaphores, destroy_frame_syncs, destroy_present_semaphores,
+    record_command_buffer, replace_frame_sync,
 };
 
 const FRAMES_IN_FLIGHT: usize = 2;
@@ -555,96 +556,6 @@ impl SwapchainState {
     }
 }
 
-fn record_command_buffer<F, T>(
-    device: &Device,
-    command_buffer: vk::CommandBuffer,
-    _render_target: MainRenderTarget,
-    #[cfg(not(feature = "ash-dynamic-rendering"))] framebuffer: vk::Framebuffer,
-    #[cfg(feature = "ash-dynamic-rendering")] image: vk::Image,
-    #[cfg(feature = "ash-dynamic-rendering")] image_view: vk::ImageView,
-    #[cfg(feature = "ash-dynamic-rendering")] old_layout: vk::ImageLayout,
-    extent: vk::Extent2D,
-    clear_color: [f32; 4],
-    record: F,
-) -> Result<T, Box<dyn Error>>
-where
-    F: FnOnce(vk::CommandBuffer) -> Result<T, Box<dyn Error>>,
-{
-    let result;
-    unsafe {
-        device.begin_command_buffer(
-            command_buffer,
-            &vk::CommandBufferBeginInfo::default()
-                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-        )?;
-
-        let clear_value = vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: clear_color,
-            },
-        };
-
-        #[cfg(not(feature = "ash-dynamic-rendering"))]
-        device.cmd_begin_render_pass(
-            command_buffer,
-            &vk::RenderPassBeginInfo::default()
-                .render_pass(_render_target.render_pass)
-                .framebuffer(framebuffer)
-                .render_area(vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent,
-                })
-                .clear_values(std::slice::from_ref(&clear_value)),
-            vk::SubpassContents::INLINE,
-        );
-
-        #[cfg(feature = "ash-dynamic-rendering")]
-        {
-            ash_frame_sync::transition_swapchain_image(
-                device,
-                command_buffer,
-                image,
-                old_layout,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            );
-            let color_attachment = vk::RenderingAttachmentInfo::default()
-                .image_view(image_view)
-                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                .load_op(vk::AttachmentLoadOp::CLEAR)
-                .store_op(vk::AttachmentStoreOp::STORE)
-                .clear_value(clear_value);
-            device.cmd_begin_rendering(
-                command_buffer,
-                &vk::RenderingInfo::default()
-                    .render_area(vk::Rect2D {
-                        offset: vk::Offset2D { x: 0, y: 0 },
-                        extent,
-                    })
-                    .layer_count(1)
-                    .color_attachments(std::slice::from_ref(&color_attachment)),
-            );
-        }
-
-        result = record(command_buffer)?;
-
-        #[cfg(not(feature = "ash-dynamic-rendering"))]
-        device.cmd_end_render_pass(command_buffer);
-        #[cfg(feature = "ash-dynamic-rendering")]
-        {
-            device.cmd_end_rendering(command_buffer);
-            ash_frame_sync::transition_swapchain_image(
-                device,
-                command_buffer,
-                image,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                vk::ImageLayout::PRESENT_SRC_KHR,
-            );
-        }
-        device.end_command_buffer(command_buffer)?;
-    }
-    Ok(result)
-}
-
 #[cfg(not(feature = "ash-dynamic-rendering"))]
 fn create_render_pass(device: &Device, format: vk::Format) -> Result<vk::RenderPass, vk::Result> {
     let attachments = [vk::AttachmentDescription::default()
@@ -923,7 +834,6 @@ fn create_external_rgba_texture(
         flags: vk::MemoryPropertyFlags,
     ) -> Option<u32> {
         for i in 0..props.memory_type_count {
-            let i = i as u32;
             let matches = (type_filter & (1u32 << i)) != 0;
             let has_flags = props.memory_types[i as usize]
                 .property_flags
@@ -946,7 +856,7 @@ fn create_external_rgba_texture(
             let on = ((x / 8) + (y / 8)) % 2 == 0;
             let i = ((y * width + x) * 4) as usize;
             let (r, g, b) = if on { (240, 240, 240) } else { (20, 20, 20) };
-            pixels[i + 0] = r;
+            pixels[i] = r;
             pixels[i + 1] = g;
             pixels[i + 2] = b;
             pixels[i + 3] = 255;
@@ -1159,7 +1069,7 @@ fn create_external_rgba_texture(
 }
 
 enum RendererRuntime {
-    Single(AshRenderer),
+    Single(Box<AshRenderer>),
     Viewports(Sdl3ViewportRoute),
 }
 
@@ -1477,12 +1387,11 @@ impl Drop for AppInit {
 
         if let Some(context) = self.context.as_mut() {
             context.end_frame();
-            if let Some(renderer) = self.renderer.as_mut() {
-                if renderer.shutdown(context).is_ok()
-                    && let Some(ctx) = self.ctx.as_mut()
-                {
-                    ctx.note_renderer_shutdown();
-                }
+            if let Some(renderer) = self.renderer.as_mut()
+                && renderer.shutdown(context).is_ok()
+                && let Some(ctx) = self.ctx.as_mut()
+            {
+                ctx.note_renderer_shutdown();
             }
             if let Some(sdl3_backend) = self.sdl3_backend.as_mut() {
                 let _ = sdl3_backend.shutdown(context);
@@ -1644,7 +1553,7 @@ impl App {
         for y in 0..tex_h {
             for x in 0..tex_w {
                 let i = ((y * tex_w + x) * 4) as usize;
-                pixels[i + 0] = (x as f32 / tex_w as f32 * 255.0) as u8;
+                pixels[i] = (x as f32 / tex_w as f32 * 255.0) as u8;
                 pixels[i + 1] = (y as f32 / tex_h as f32 * 255.0) as u8;
                 pixels[i + 2] = 128;
                 pixels[i + 3] = 255;
@@ -1729,7 +1638,7 @@ impl App {
             }
         };
         renderer.set_viewport_clear_color([0.1, 0.12, 0.15, 1.0]);
-        init.renderer = Some(RendererRuntime::Single(renderer));
+        init.renderer = Some(RendererRuntime::Single(Box::new(renderer)));
 
         let renderer = match init.renderer.take() {
             Some(RendererRuntime::Single(renderer)) => renderer,
@@ -1772,7 +1681,7 @@ impl App {
                         sdl3_backend
                             .as_ref()
                             .expect("SDL3 platform was initialized"),
-                        renderer,
+                        *renderer,
                         viewport_config,
                     )
                 }
@@ -1781,7 +1690,7 @@ impl App {
                 Ok(route) => RendererRuntime::Viewports(route),
                 Err(error) => {
                     let (error, renderer) = error.into_parts();
-                    init.renderer = Some(RendererRuntime::Single(renderer));
+                    init.renderer = Some(RendererRuntime::Single(Box::new(renderer)));
                     return Err(error.into());
                 }
             }
@@ -1911,7 +1820,7 @@ impl App {
                 let i = ((y * w + x) * 4) as usize;
                 let fx = x as f32 / w as f32;
                 let fy = y as f32 / h as f32;
-                pixels[i + 0] = ((fx * 255.0 + t.sin() * 128.0).clamp(0.0, 255.0)) as u8;
+                pixels[i] = ((fx * 255.0 + t.sin() * 128.0).clamp(0.0, 255.0)) as u8;
                 pixels[i + 1] = ((fy * 255.0 + (t * 1.7).cos() * 128.0).clamp(0.0, 255.0)) as u8;
                 pixels[i + 2] = (((fx + fy + t * 0.1).sin().abs()) * 255.0) as u8;
                 pixels[i + 3] = 255;
@@ -2170,10 +2079,9 @@ fn render_main_window(
                 .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())?;
         }
 
-        let completion = record_command_buffer(
-            &vk_state.ctx.device,
-            command_buffer,
-            vk_state.render_target,
+        let target = MainCommandTarget {
+            #[cfg(not(feature = "ash-dynamic-rendering"))]
+            render_pass: vk_state.render_target.render_pass,
             #[cfg(not(feature = "ash-dynamic-rendering"))]
             framebuffer,
             #[cfg(feature = "ash-dynamic-rendering")]
@@ -2182,8 +2090,13 @@ fn render_main_window(
             image_view,
             #[cfg(feature = "ash-dynamic-rendering")]
             old_layout,
-            vk_state.swapchain.extent,
+            extent: vk_state.swapchain.extent,
             clear_color,
+        };
+        let completion = record_command_buffer(
+            &vk_state.ctx.device,
+            command_buffer,
+            target,
             // SAFETY: cmd is recording inside the compatible render pass and is submitted before
             // any renderer resource can be retired or destroyed.
             |cmd| unsafe { renderer.cmd_draw_main(cmd, prepared) },
@@ -2318,10 +2231,10 @@ impl Sdl3AshApp {
     }
 
     fn app_quit(state: Option<&Self>) {
-        if let Some(app) = state {
-            if let Err(error) = app.main.assert_get().borrow_mut().app.shutdown() {
-                eprintln!("SDL3 Ash shutdown failed: {error}");
-            }
+        if let Some(app) = state
+            && let Err(error) = app.main.assert_get().borrow_mut().app.shutdown()
+        {
+            eprintln!("SDL3 Ash shutdown failed: {error}");
         }
     }
 }

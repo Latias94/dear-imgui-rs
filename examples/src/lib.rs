@@ -1,5 +1,9 @@
 //! Shared application-level helpers for repository examples.
 
+#[cfg(all(feature = "ash-winit-multi-viewport", not(target_arch = "wasm32")))]
+#[path = "../support/ash_multi_viewport.rs"]
+pub mod ash_multi_viewport;
+
 #[cfg(feature = "sdl3-platform")]
 pub mod sdl3_callbacks;
 

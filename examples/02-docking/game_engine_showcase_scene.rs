@@ -101,8 +101,7 @@ var<uniform> u: SceneUniform;
 
         let uniform_alignment = device.limits().min_uniform_buffer_offset_alignment as u64;
         let uniform_size = std::mem::size_of::<SceneUniform>() as u64;
-        let uniform_stride =
-            (uniform_size + uniform_alignment - 1) / uniform_alignment * uniform_alignment;
+        let uniform_stride = uniform_size.div_ceil(uniform_alignment) * uniform_alignment;
         let max_objects = 128usize;
 
         let uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -605,12 +604,10 @@ impl RenderTarget {
         encoder: &mut wgpu::CommandEncoder,
         scene_renderer: &SceneRenderer,
         queue: &wgpu::Queue,
-        view: Mat4,
-        proj: Mat4,
+        view_proj: Mat4,
         models: &[Mat4],
         show_grid: bool,
     ) {
-        let view_proj = proj * view;
         scene_renderer.render(encoder, self, queue, view_proj, models, show_grid);
     }
 }

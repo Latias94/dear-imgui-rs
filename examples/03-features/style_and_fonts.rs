@@ -180,7 +180,7 @@ impl StyleAndFontsApp {
 
     fn install_startup_fonts(
         context: &mut dear_imgui_rs::Context,
-    ) -> Result<AppFonts, dear_imgui_rs::StbTrueTypeFontError> {
+    ) -> Result<AppFonts, dear_imgui_rs::FontError> {
         let roboto_data = StbTrueTypeFontData::from_slice(ROBOTO_MEDIUM)?;
         let atlas = context.font_atlas();
         let vector = atlas.add_font(&[FontSource::default_vector_with_size(16.0)

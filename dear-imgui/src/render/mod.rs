@@ -99,8 +99,9 @@ mod frame;
 pub mod snapshot;
 
 // Re-export commonly used types
+pub use crate::error::FrameError;
 #[doc(hidden)]
-pub use callback_state::{RendererRenderStateGuard, RendererRenderStateGuardError};
+pub use callback_state::RendererRenderStateGuard;
 pub use draw_data::{
     DrawCmd, DrawCmdIterator, DrawCmdParams, DrawData, DrawIdx, DrawList, DrawListIterator,
     DrawRequirements, DrawVert, RawCallbackCommand,
@@ -108,9 +109,8 @@ pub use draw_data::{
 pub use frame::{PendingFrame, ReconciledFrame};
 pub use snapshot::{
     DetachedRendererConsumer, DrawCmdSnapshot, DrawDataSnapshot, DrawListSnapshot, FrameSnapshot,
-    RendererConsumerCapability, RendererConsumerError, RendererResetSignal, SnapshotCommitError,
-    SnapshotCompletionProgress, SnapshotEpoch, SnapshotError, SnapshotTextureId,
-    SynchronousRendererConsumer, TextureBinding, TextureFeedback, TextureFeedbackError, TextureOp,
+    RendererConsumerCapability, RendererResetSignal, SnapshotCompletionProgress, SnapshotEpoch,
+    SnapshotTextureId, SynchronousRendererConsumer, TextureBinding, TextureFeedback, TextureOp,
     TextureRequest, TextureRequestKind, TextureUploadIdentity, TextureUploadRect,
     ViewportDrawDataSnapshot,
 };

@@ -34,9 +34,9 @@ use dear_imgui_rs::platform_io::Viewport;
 ))]
 use dear_imgui_rs::render::{SnapshotTextureId, TextureRequest};
 use dear_imgui_rs::{
-    Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextBinding, ContextDestroyed, ContextId, ContextLifecycle,
-    ContextTeardown, NativeWindowInstanceId, TextureData, sys,
+    Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole, ContextBinding,
+    ContextDestroyed, ContextError, ContextId, ContextLifecycle, ContextTeardown,
+    NativeWindowInstanceId, TextureData, sys,
 };
 
 struct Sdl3PlatformAttachmentMarker;
@@ -281,7 +281,7 @@ impl RuntimeFault {
             Self::NativeWindowOwnerLeased => Sdl3BackendError::NativeWindowOwnerLeased,
             Self::NativeWindowLeaseUnavailable => Sdl3BackendError::NativeWindowLeaseUnavailable,
             Self::NativeWindowIdentityExhausted => {
-                dear_imgui_rs::NativeWindowIdentityExhausted.into()
+                dear_imgui_rs::ContextError::NativeWindowIdentityExhausted.into()
             }
             Self::CallbackReplaced(callback) => {
                 Sdl3BackendError::PlatformCallbackReplaced { callback }
@@ -574,10 +574,10 @@ impl Drop for PlatformDispatchGuard<'_> {
         }
         let mut scopes = self.control.dispatch_failures.borrow_mut();
         let completed = scopes.pop();
-        if let Some(completed) = completed {
-            if let Some(parent) = scopes.last_mut() {
-                parent.extend(completed);
-            }
+        if let Some(completed) = completed
+            && let Some(parent) = scopes.last_mut()
+        {
+            parent.extend(completed);
         }
         drop(scopes);
         self.control

@@ -30,20 +30,15 @@ pub enum DialogMode {
 }
 
 /// Backend preference
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Backend {
     /// Use native for standalone opens. ImGui embedding is selected by the caller.
+    #[default]
     Auto,
     /// Force native (rfd) backend
     Native,
     /// Force ImGui UI backend
     ImGui,
-}
-
-impl Default for Backend {
-    fn default() -> Self {
-        Backend::Auto
-    }
 }
 
 /// File filter (e.g., "Images" -> ["png", "jpg"]).
@@ -469,18 +464,13 @@ pub enum SortBy {
 }
 
 /// String comparison mode used for sorting.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum SortMode {
     /// Natural ordering (e.g. `file2` < `file10`).
+    #[default]
     Natural,
     /// Simple lexicographic ordering on lowercased strings.
     Lexicographic,
-}
-
-impl Default for SortMode {
-    fn default() -> Self {
-        Self::Natural
-    }
 }
 
 /// Builder for launching file dialogs

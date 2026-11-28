@@ -12,8 +12,8 @@ use super::{
     ownership::RuntimeOwnership,
     renderer::AppRenderer,
     surface::{
-        FrameDriver, MainFrameOutput, MainFrameTarget, RecordedApplicationFrame,
-        RuntimeSurfaceAdmission, drive_frame, record_application_frame,
+        FrameDriver, FrameRecordingOptions, MainFrameOutput, MainFrameTarget,
+        RecordedApplicationFrame, RuntimeSurfaceAdmission, drive_frame, record_application_frame,
     },
 };
 use crate::{AppConfig, Application, ApplicationStage, RunError, ViewportFrameContext};
@@ -141,8 +141,10 @@ pub(super) fn render_frame<A: Application>(
         application,
         config,
         wake,
-        frame_index,
-        None,
+        FrameRecordingOptions {
+            frame_index,
+            target: None,
+        },
     )?;
     let gpu = &generation.gpu;
     let AppRenderer::Multi(route) = &gpu.renderer else {

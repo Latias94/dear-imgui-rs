@@ -575,10 +575,10 @@ pub(super) fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState) {
             }
             ui.close_current_popup();
             state.ui.runtime.error = super::ops::run_paste_job_until_wait_or_done(state).err();
-        } else if let Some(job) = state.ui.operations.paste.job.as_mut() {
-            if let Some(conflict) = job.conflict.as_mut() {
-                conflict.apply_to_all = apply_to_all;
-            }
+        } else if let Some(job) = state.ui.operations.paste.job.as_mut()
+            && let Some(conflict) = job.conflict.as_mut()
+        {
+            conflict.apply_to_all = apply_to_all;
         }
     }
 }

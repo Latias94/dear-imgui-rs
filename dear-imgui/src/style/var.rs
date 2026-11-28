@@ -131,20 +131,20 @@ pub enum StyleVarVec2 {
 impl StyleVarVec2 {
     pub(crate) const fn raw(self) -> i32 {
         match self {
-            Self::WindowPadding => crate::sys::ImGuiStyleVar_WindowPadding as i32,
-            Self::WindowMinSize => crate::sys::ImGuiStyleVar_WindowMinSize as i32,
-            Self::WindowTitleAlign => crate::sys::ImGuiStyleVar_WindowTitleAlign as i32,
-            Self::FramePadding => crate::sys::ImGuiStyleVar_FramePadding as i32,
-            Self::ItemSpacing => crate::sys::ImGuiStyleVar_ItemSpacing as i32,
-            Self::ItemInnerSpacing => crate::sys::ImGuiStyleVar_ItemInnerSpacing as i32,
-            Self::CellPadding => crate::sys::ImGuiStyleVar_CellPadding as i32,
+            Self::WindowPadding => crate::sys::ImGuiStyleVar_WindowPadding,
+            Self::WindowMinSize => crate::sys::ImGuiStyleVar_WindowMinSize,
+            Self::WindowTitleAlign => crate::sys::ImGuiStyleVar_WindowTitleAlign,
+            Self::FramePadding => crate::sys::ImGuiStyleVar_FramePadding,
+            Self::ItemSpacing => crate::sys::ImGuiStyleVar_ItemSpacing,
+            Self::ItemInnerSpacing => crate::sys::ImGuiStyleVar_ItemInnerSpacing,
+            Self::CellPadding => crate::sys::ImGuiStyleVar_CellPadding,
             Self::TableAngledHeadersTextAlign => {
-                crate::sys::ImGuiStyleVar_TableAngledHeadersTextAlign as i32
+                crate::sys::ImGuiStyleVar_TableAngledHeadersTextAlign
             }
-            Self::ButtonTextAlign => crate::sys::ImGuiStyleVar_ButtonTextAlign as i32,
-            Self::SelectableTextAlign => crate::sys::ImGuiStyleVar_SelectableTextAlign as i32,
-            Self::SeparatorTextAlign => crate::sys::ImGuiStyleVar_SeparatorTextAlign as i32,
-            Self::SeparatorTextPadding => crate::sys::ImGuiStyleVar_SeparatorTextPadding as i32,
+            Self::ButtonTextAlign => crate::sys::ImGuiStyleVar_ButtonTextAlign,
+            Self::SelectableTextAlign => crate::sys::ImGuiStyleVar_SelectableTextAlign,
+            Self::SeparatorTextAlign => crate::sys::ImGuiStyleVar_SeparatorTextAlign,
+            Self::SeparatorTextPadding => crate::sys::ImGuiStyleVar_SeparatorTextPadding,
         }
     }
 }

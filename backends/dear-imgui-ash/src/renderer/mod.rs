@@ -109,17 +109,14 @@ use crate::TextureUpdateResult;
 use crate::{RendererError, RendererResult};
 use ash::Instance;
 use ash::{Device, vk};
-use dear_imgui_backend_support::{
-    ScopedRenderState as RendererRenderStateGuard,
-    ScopedRenderStateError as RendererRenderStateGuardError,
-};
-use dear_imgui_rs::Context;
+use dear_imgui_backend_support::ScopedRenderState as RendererRenderStateGuard;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 use dear_imgui_rs::ViewportFlags;
 use dear_imgui_rs::render::{
     PendingFrame, ReconciledFrame, SnapshotTextureId, SynchronousRendererConsumer, TextureFeedback,
     TextureOp, TextureRequest, TextureUploadRect,
 };
+use dear_imgui_rs::{Context, FrameError};
 use dear_imgui_rs::{TextureData, TextureFormat as ImGuiTextureFormat, TextureId, TextureStatus};
 use std::collections::HashMap;
 
@@ -153,17 +150,18 @@ use self::texture::TextureManager;
 use self::uploads::{UploadRing, grown_buffer_capacity};
 use self::vulkan::*;
 
-fn map_renderer_render_state_error(error: RendererRenderStateGuardError) -> RendererError {
+fn map_renderer_render_state_error(error: FrameError) -> RendererError {
     match error {
-        RendererRenderStateGuardError::MissingPlatformIo => RendererError::InvalidRenderState(
+        FrameError::MissingPlatformIo => RendererError::InvalidRenderState(
             "bound Dear ImGui context has no PlatformIO".to_owned(),
         ),
-        RendererRenderStateGuardError::AlreadyOccupied => RendererError::InvalidRenderState(
+        FrameError::AlreadyOccupied => RendererError::InvalidRenderState(
             "Dear ImGui Renderer_RenderState is already occupied".to_owned(),
         ),
-        RendererRenderStateGuardError::Drift => RendererError::RendererStateDrift {
+        FrameError::Drift => RendererError::RendererStateDrift {
             field: "Renderer_RenderState",
         },
+        error => RendererError::Frame(error),
     }
 }
 

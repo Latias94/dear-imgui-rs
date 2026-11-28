@@ -142,12 +142,12 @@ impl Sdl3WindowConfig {
                 });
             }
         }
-        if let (Some(min), Some(max)) = (self.min_client_size, self.max_client_size) {
-            if min[0] > max[0] || min[1] > max[1] {
-                return Err(Sdl3BackendError::InvalidWindowConfiguration {
-                    reason: "minimum client size exceeds maximum client size",
-                });
-            }
+        if let (Some(min), Some(max)) = (self.min_client_size, self.max_client_size)
+            && (min[0] > max[0] || min[1] > max[1])
+        {
+            return Err(Sdl3BackendError::InvalidWindowConfiguration {
+                reason: "minimum client size exceeds maximum client size",
+            });
         }
         Ok(())
     }
@@ -450,15 +450,15 @@ impl RuntimeControl {
             return;
         };
         let mut registry = self.owned_viewports.borrow_mut();
-        if let Some(lease) = registry.get_mut(&address) {
-            if lease.last_snapshot.is_none() {
-                lease.last_snapshot = Some(snapshot);
-                self.callback_window_targets
-                    .publish(snapshot.window_id, snapshot.target);
-                self.window_lifecycle_events
-                    .borrow_mut()
-                    .push(Sdl3WindowLifecycleEvent::Created(snapshot));
-            }
+        if let Some(lease) = registry.get_mut(&address)
+            && lease.last_snapshot.is_none()
+        {
+            lease.last_snapshot = Some(snapshot);
+            self.callback_window_targets
+                .publish(snapshot.window_id, snapshot.target);
+            self.window_lifecycle_events
+                .borrow_mut()
+                .push(Sdl3WindowLifecycleEvent::Created(snapshot));
         }
     }
 

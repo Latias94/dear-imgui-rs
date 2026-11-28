@@ -8,7 +8,7 @@ use ash::vk;
 
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextBinding, ContextTeardown, FrameLifecycleState, Id, sys,
+    ContextBinding, ContextError, ContextTeardown, FrameLifecycleState, Id, sys,
 };
 use static_assertions::{assert_impl_all, assert_not_impl_any};
 
@@ -46,10 +46,7 @@ impl SurfaceAdapter for InertSurfaceAdapter {
 struct TestPlatformAttachment;
 
 impl ContextAttachment for TestPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         context.with_bound_context(clear_test_main_handle_raw);
         Ok(())
     }
@@ -76,10 +73,7 @@ struct OrderingPlatformAttachment {
 }
 
 impl ContextAttachment for OrderingPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         self.renderer_released_first.set(
             self.control
                 .borrow()
@@ -171,7 +165,7 @@ fn attach_requires_registered_platform_role_without_claiming_callbacks() {
 
     assert!(matches!(
         error,
-        AshViewportError::Attachment(dear_imgui_rs::ContextAttachmentError::MissingPlatform)
+        AshViewportError::Context(dear_imgui_rs::ContextError::MissingPlatformAttachment)
     ));
     assert!(context.platform_io().renderer_callbacks_are_empty());
     clear_test_main_handle_raw();

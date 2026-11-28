@@ -134,7 +134,7 @@ pub struct StyleRule {
 /// Registry of file styles applied in the in-UI file browser.
 ///
 /// Rules are evaluated in insertion order. The first matching rule wins.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct FileStyleRegistry {
     /// Ordered rule list.
     pub rules: Vec<StyleRule>,
@@ -264,22 +264,12 @@ impl FileStyleRegistry {
 
     /// Resolve style as an owned value, checking callback first then static rules.
     pub fn style_for_owned(&mut self, name: &str, kind: EntryKind) -> Option<FileStyle> {
-        if let Some(cb) = &self.callback {
-            if let Some(style) = cb.resolve(name, kind) {
-                return Some(style);
-            }
+        if let Some(cb) = &self.callback
+            && let Some(style) = cb.resolve(name, kind)
+        {
+            return Some(style);
         }
         self.style_for(name, kind).cloned()
-    }
-}
-
-impl Default for FileStyleRegistry {
-    fn default() -> Self {
-        Self {
-            rules: Vec::new(),
-            callback: None,
-            regex_cache: HashMap::new(),
-        }
     }
 }
 

@@ -228,7 +228,7 @@ impl AppWindow {
         self.imgui.total_frame_time += delta_secs;
 
         // Log frame statistics every 60 frames
-        if self.imgui.frame_count % 60 == 0 {
+        if self.imgui.frame_count.is_multiple_of(60) {
             let avg_frame_time = self.imgui.total_frame_time / 60.0;
             debug!(
                 frame_time_ms = avg_frame_time * 1000.0,
@@ -367,7 +367,7 @@ impl AppWindow {
             ui.show_demo_window(&mut self.imgui.demo_open);
         }
 
-        self.imgui.platform.prepare_render(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(ui, &self.window)?;
 
         let view = frame
             .texture

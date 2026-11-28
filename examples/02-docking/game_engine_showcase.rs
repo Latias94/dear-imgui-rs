@@ -509,17 +509,18 @@ impl AppWindow {
             &mut encoder,
             &imgui.scene_renderer,
             &self.queue,
-            imgui.editor.camera_view,
-            imgui.editor.camera_proj,
+            imgui.editor.camera_proj * imgui.editor.camera_view,
             &models,
             imgui.editor.show_grid,
         );
+        let game_view = rh::view::look_at_mat4(Vec3::new(4.0, 3.2, 4.0), Vec3::ZERO, Vec3::Y);
+        let game_projection =
+            rh::proj::directx::perspective(45.0_f32.to_radians(), 16.0 / 9.0, 0.1, 100.0);
         imgui.game_target.render_into(
             &mut encoder,
             &imgui.scene_renderer,
             &self.queue,
-            rh::view::look_at_mat4(Vec3::new(4.0, 3.2, 4.0), Vec3::ZERO, Vec3::Y),
-            rh::proj::directx::perspective(45.0_f32.to_radians(), 16.0 / 9.0, 0.1, 100.0),
+            game_projection * game_view,
             &models,
             true,
         );

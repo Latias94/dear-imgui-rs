@@ -5,7 +5,7 @@
 //! C++ ImReflect library.
 //!
 //! At a high level:
-//! - derive [`ImGuiReflect`](trait.ImGuiReflect.html) for your structs/enums;
+//! - derive [`trait@ImGuiReflect`] for your structs/enums;
 //! - keep a [`ReflectSession`] beside the owning Dear ImGui context;
 //! - import [`ImGuiReflectExt`], then create an [`Inspector`] each frame with
 //!   [`ImGuiReflectExt::inspector`] and call [`Inspector::input`];
@@ -96,7 +96,7 @@
 //!
 //! fn configure_reflect(
 //!     session: &mut reflect::ReflectSession,
-//! ) -> Result<(), reflect::imgui::NumericFormatError> {
+//! ) -> Result<(), reflect::imgui::ContextError> {
 //!     {
 //!         let s = session.settings_mut();
 //!         // Make all Vec<T> non-reorderable by default.
@@ -123,7 +123,7 @@
 //!
 //! fn configure_per_field(
 //!     session: &mut reflect::ReflectSession,
-//! ) -> Result<(), reflect::imgui::NumericFormatError> {
+//! ) -> Result<(), reflect::imgui::ContextError> {
 //!     {
 //!         let s = session.settings_mut();
 //!         // For Settings::weights, allow reordering only.
@@ -321,7 +321,7 @@ pub mod __private {
 ///
 /// This is implemented for common primitive types and can be implemented
 /// manually for your own types. Most users will interact with
-/// [`ImGuiReflect`](trait.ImGuiReflect.html) instead of this trait directly.
+/// [`trait@ImGuiReflect`] instead of this trait directly.
 pub trait ImGuiValue {
     /// Draw a widget for this value.
     ///

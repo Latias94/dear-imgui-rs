@@ -533,62 +533,48 @@ fn draw_flow_icon(
     let tip_right = [right, center_y];
     let tip_bottom = [canvas[0] + canvas_w * 0.5, bottom];
 
-    path_flow_icon(
-        draw_list, left, top, bottom, rounding, tip_top, tip_right, tip_bottom, tip_round,
-    );
+    let trace_path = || {
+        draw_list.path_line_to([left, top + rounding]);
+        draw_list.path_bezier_cubic_curve_to(
+            [left, top],
+            [left, top],
+            [left + rounding, top],
+            DrawSegmentCount::AUTO,
+        );
+        draw_list.path_line_to(tip_top);
+        draw_list.path_line_to([
+            tip_top[0] + (tip_right[0] - tip_top[0]) * tip_round,
+            tip_top[1] + (tip_right[1] - tip_top[1]) * tip_round,
+        ]);
+        draw_list.path_bezier_cubic_curve_to(
+            tip_right,
+            tip_right,
+            [
+                tip_bottom[0] + (tip_right[0] - tip_bottom[0]) * tip_round,
+                tip_bottom[1] + (tip_right[1] - tip_bottom[1]) * tip_round,
+            ],
+            DrawSegmentCount::AUTO,
+        );
+        draw_list.path_line_to(tip_bottom);
+        draw_list.path_line_to([left + rounding, bottom]);
+        draw_list.path_bezier_cubic_curve_to(
+            [left, bottom],
+            [left, bottom],
+            [left, bottom - rounding],
+            DrawSegmentCount::AUTO,
+        );
+    };
+
+    trace_path();
     if filled {
         draw_list.path_fill_convex(color, DrawFlags::NONE);
     } else {
         if inner_color[3] > 0.0 {
             draw_list.path_fill_convex(inner_color, DrawFlags::NONE);
-            path_flow_icon(
-                draw_list, left, top, bottom, rounding, tip_top, tip_right, tip_bottom, tip_round,
-            );
+            trace_path();
         }
         draw_list.path_stroke(color, 2.0 * outline_scale, DrawFlags::CLOSED);
     }
-}
-
-fn path_flow_icon(
-    draw_list: &DrawListMut<'_>,
-    left: f32,
-    top: f32,
-    bottom: f32,
-    rounding: f32,
-    tip_top: [f32; 2],
-    tip_right: [f32; 2],
-    tip_bottom: [f32; 2],
-    tip_round: f32,
-) {
-    draw_list.path_line_to([left, top + rounding]);
-    draw_list.path_bezier_cubic_curve_to(
-        [left, top],
-        [left, top],
-        [left + rounding, top],
-        DrawSegmentCount::AUTO,
-    );
-    draw_list.path_line_to(tip_top);
-    draw_list.path_line_to([
-        tip_top[0] + (tip_right[0] - tip_top[0]) * tip_round,
-        tip_top[1] + (tip_right[1] - tip_top[1]) * tip_round,
-    ]);
-    draw_list.path_bezier_cubic_curve_to(
-        tip_right,
-        tip_right,
-        [
-            tip_bottom[0] + (tip_right[0] - tip_bottom[0]) * tip_round,
-            tip_bottom[1] + (tip_right[1] - tip_bottom[1]) * tip_round,
-        ],
-        DrawSegmentCount::AUTO,
-    );
-    draw_list.path_line_to(tip_bottom);
-    draw_list.path_line_to([left + rounding, bottom]);
-    draw_list.path_bezier_cubic_curve_to(
-        [left, bottom],
-        [left, bottom],
-        [left, bottom - rounding],
-        DrawSegmentCount::AUTO,
-    );
 }
 
 fn draw_diamond_icon(

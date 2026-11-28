@@ -10,7 +10,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 use dear_imgui_rs::render::ReconciledFrame;
 use dear_imgui_rs::{
-    BackendFlags, Context, ContextBindingError, ContextId, FrameLifecycleState, FrameToken, Ui,
+    BackendFlags, Context, ContextError, ContextId, FrameLifecycleState, FrameToken, Ui,
 };
 
 use crate::results::RunCompletion;
@@ -353,7 +353,7 @@ pub enum RunnerError<
         actual: ContextId,
     },
     /// The attached Context could not be bound for the complete run.
-    ContextBinding(ContextBindingError),
+    ContextBinding(ContextError),
     /// The runner was entered while another owner held an open frame.
     FrameAlreadyOpen,
     /// Application UI construction failed.
@@ -399,6 +399,21 @@ pub enum RunnerError<
 pub type HeadlessRunnerError<ApplicationError> =
     RunnerError<ApplicationError, HeadlessPrepareError, Infallible, Infallible>;
 
+type DriverResult<T, ApplicationError, Driver, CaptureError = Infallible> = Result<
+    T,
+    RunnerError<
+        ApplicationError,
+        <Driver as TestFrameDriver>::PrepareError,
+        <Driver as TestFrameDriver>::RenderError,
+        <Driver as TestFrameDriver>::PresentError,
+        CaptureError,
+    >,
+>;
+
+/// Result produced by a graphical run for a concrete frame driver.
+pub type DriverRunResult<ApplicationError, Driver> =
+    DriverResult<RunReport, ApplicationError, Driver>;
+
 /// Infrastructure failure produced by [`TestRunner::run_graphical_with_capture`].
 #[cfg(feature = "capture")]
 pub type CapturingRunnerError<
@@ -417,15 +432,11 @@ pub type CapturingRunnerError<
 
 /// Result produced by a capturing graphical run for a concrete frame driver.
 #[cfg(feature = "capture")]
-pub type CapturingDriverRunResult<ApplicationError, Driver> = Result<
+pub type CapturingDriverRunResult<ApplicationError, Driver> = DriverResult<
     RunReport,
-    CapturingRunnerError<
-        ApplicationError,
-        <Driver as TestFrameDriver>::PrepareError,
-        <Driver as TestFrameDriver>::RenderError,
-        <Driver as TestFrameDriver>::PresentError,
-        <Driver as CapturingTestFrameDriver>::CaptureError,
-    >,
+    ApplicationError,
+    Driver,
+    CaptureProviderError<<Driver as CapturingTestFrameDriver>::CaptureError>,
 >;
 
 impl<ApplicationError, PrepareError, RenderError, PresentError, CaptureError> From<TestEngineError>
@@ -636,15 +647,7 @@ impl<'engine> TestRunner<'engine> {
         context: &mut Context,
         application_ui: ApplicationUi,
         driver: &mut Driver,
-    ) -> Result<
-        RunReport,
-        RunnerError<
-            ApplicationError,
-            Driver::PrepareError,
-            Driver::RenderError,
-            Driver::PresentError,
-        >,
-    >
+    ) -> DriverRunResult<ApplicationError, Driver>
     where
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: TestFrameDriver,
@@ -763,16 +766,7 @@ impl<'engine> TestRunner<'engine> {
         mode: RunMode,
         mut application_ui: ApplicationUi,
         driver: &mut Driver,
-    ) -> Result<
-        RunReport,
-        RunnerError<
-            ApplicationError,
-            Driver::PrepareError,
-            Driver::RenderError,
-            Driver::PresentError,
-            CaptureError,
-        >,
-    >
+    ) -> DriverResult<RunReport, ApplicationError, Driver, CaptureError>
     where
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: TestFrameDriver,
@@ -811,16 +805,7 @@ impl<'engine> TestRunner<'engine> {
         mode: RunMode,
         application_ui: &mut ApplicationUi,
         driver: &mut Driver,
-    ) -> Result<
-        RunReport,
-        RunnerError<
-            ApplicationError,
-            Driver::PrepareError,
-            Driver::RenderError,
-            Driver::PresentError,
-            CaptureError,
-        >,
-    >
+    ) -> DriverResult<RunReport, ApplicationError, Driver, CaptureError>
     where
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: TestFrameDriver,
@@ -859,16 +844,7 @@ impl<'engine> TestRunner<'engine> {
         &mut self,
         frame_index: u64,
         pump: &mut FramePump<'_, ApplicationUi, Driver>,
-    ) -> Result<
-        RunnerControl,
-        RunnerError<
-            ApplicationError,
-            Driver::PrepareError,
-            Driver::RenderError,
-            Driver::PresentError,
-            CaptureError,
-        >,
-    >
+    ) -> DriverResult<RunnerControl, ApplicationError, Driver, CaptureError>
     where
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: TestFrameDriver,
@@ -896,16 +872,7 @@ impl<'engine> TestRunner<'engine> {
         requested: RunOutcome,
         frames: u64,
         pump: &mut FramePump<'_, ApplicationUi, Driver>,
-    ) -> Result<
-        RunReport,
-        RunnerError<
-            ApplicationError,
-            Driver::PrepareError,
-            Driver::RenderError,
-            Driver::PresentError,
-            CaptureError,
-        >,
-    >
+    ) -> DriverResult<RunReport, ApplicationError, Driver, CaptureError>
     where
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: TestFrameDriver,

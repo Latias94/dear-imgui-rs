@@ -245,7 +245,7 @@ impl NumericTypeSettings<i32> {
     pub fn try_with_format(
         self,
         format: impl Into<String>,
-    ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+    ) -> Result<Self, dear_imgui_rs::ContextError> {
         Ok(self.with_format(dear_imgui_rs::NumericFormat::<i32>::new(format.into())?))
     }
 
@@ -258,7 +258,7 @@ impl NumericTypeSettings<i32> {
     pub fn try_with_zero_padded_decimal(
         self,
         width: u32,
-    ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+    ) -> Result<Self, dear_imgui_rs::ContextError> {
         self.try_with_format(format!("%0{width}d"))
     }
 }
@@ -268,7 +268,7 @@ impl NumericTypeSettings<u32> {
     pub fn try_with_format(
         self,
         format: impl Into<String>,
-    ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+    ) -> Result<Self, dear_imgui_rs::ContextError> {
         Ok(self.with_format(dear_imgui_rs::NumericFormat::<u32>::new(format.into())?))
     }
 
@@ -292,7 +292,7 @@ impl NumericTypeSettings<u32> {
     pub fn try_with_zero_padded_decimal(
         self,
         width: u32,
-    ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+    ) -> Result<Self, dear_imgui_rs::ContextError> {
         self.try_with_format(format!("%0{width}u"))
     }
 }
@@ -304,7 +304,7 @@ macro_rules! impl_float_numeric_settings {
             pub fn try_with_format(
                 self,
                 format: impl Into<String>,
-            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+            ) -> Result<Self, dear_imgui_rs::ContextError> {
                 Ok(self.with_format(dear_imgui_rs::NumericFormat::<$ty>::new(format.into())?))
             }
 
@@ -312,7 +312,7 @@ macro_rules! impl_float_numeric_settings {
             pub fn try_with_fixed(
                 self,
                 precision: u32,
-            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+            ) -> Result<Self, dear_imgui_rs::ContextError> {
                 self.try_with_format(format!("%.{precision}f"))
             }
 
@@ -321,7 +321,7 @@ macro_rules! impl_float_numeric_settings {
                 self,
                 precision: u32,
                 uppercase: bool,
-            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+            ) -> Result<Self, dear_imgui_rs::ContextError> {
                 let conversion = if uppercase { 'E' } else { 'e' };
                 self.try_with_format(format!("%.{precision}{conversion}"))
             }
@@ -330,7 +330,7 @@ macro_rules! impl_float_numeric_settings {
             pub fn try_with_percentage(
                 self,
                 precision: u32,
-            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+            ) -> Result<Self, dear_imgui_rs::ContextError> {
                 self.try_with_format(format!("%.{precision}f%%"))
             }
 
@@ -338,7 +338,7 @@ macro_rules! impl_float_numeric_settings {
             pub fn try_slider_0_to_1(
                 mut self,
                 precision: u32,
-            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+            ) -> Result<Self, dear_imgui_rs::ContextError> {
                 self.widget = NumericWidgetKind::Slider;
                 self.range = NumericRange::Explicit { min: 0.0, max: 1.0 };
                 self.clamp = true;
@@ -350,7 +350,7 @@ macro_rules! impl_float_numeric_settings {
             pub fn try_slider_minus1_to_1(
                 mut self,
                 precision: u32,
-            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+            ) -> Result<Self, dear_imgui_rs::ContextError> {
                 self.widget = NumericWidgetKind::Slider;
                 self.range = NumericRange::Explicit {
                     min: -1.0,
@@ -366,7 +366,7 @@ macro_rules! impl_float_numeric_settings {
                 mut self,
                 speed: f64,
                 precision: u32,
-            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+            ) -> Result<Self, dear_imgui_rs::ContextError> {
                 self.widget = NumericWidgetKind::Drag;
                 self.range = NumericRange::None;
                 self.speed = Some(speed);
@@ -377,7 +377,7 @@ macro_rules! impl_float_numeric_settings {
             pub fn try_percentage_slider_0_to_1(
                 mut self,
                 precision: u32,
-            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+            ) -> Result<Self, dear_imgui_rs::ContextError> {
                 self.widget = NumericWidgetKind::Slider;
                 self.range = NumericRange::Explicit { min: 0.0, max: 1.0 };
                 self.clamp = true;

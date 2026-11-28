@@ -395,7 +395,7 @@ impl AppWindow {
                 gl.clear(glow::COLOR_BUFFER_BIT);
             }
         }
-        self.imgui.platform.prepare_render(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(ui, &self.window)?;
         let pending_frame = self
             .imgui
             .context

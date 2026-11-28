@@ -7,7 +7,8 @@ use std::num::NonZeroU16;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
+
+use crate::error::context::{ContextError, IniDateKind};
 
 const FIRST_PACKED_YEAR: u16 = 2001;
 const LAST_PACKED_YEAR: u16 = 2127;
@@ -60,8 +61,9 @@ impl<'de> Deserialize<'de> for IniSessionDate {
 
 impl IniSessionDate {
     /// Creates a date that is representable by Dear ImGui's packed `.ini` format.
-    pub fn new(year: u16, month: u8, day: u8) -> Result<Self, IniSessionDateError> {
+    pub fn new(year: u16, month: u8, day: u8) -> Result<Self, ContextError> {
         Self::from_parts(u32::from(year), u32::from(month), u32::from(day))
+            .map_err(ContextError::IniSessionDate)
     }
 
     /// Returns the calendar year.
@@ -96,16 +98,20 @@ impl IniSessionDate {
         (self.year - FIRST_PACKED_YEAR) * 12 + (self.month - 1) as u16
     }
 
-    fn from_parts(year: u32, month: u32, day: u32) -> Result<Self, IniSessionDateError> {
+    fn from_packed(value: u32) -> Result<Self, IniDateKind> {
+        Self::from_parts(value / 10_000, (value / 100) % 100, value % 100)
+    }
+
+    fn from_parts(year: u32, month: u32, day: u32) -> Result<Self, IniDateKind> {
         if !(u32::from(FIRST_PACKED_YEAR)..=u32::from(LAST_PACKED_YEAR)).contains(&year) {
-            return Err(IniSessionDateError::YearOutOfRange { year });
+            return Err(IniDateKind::YearOutOfRange { year });
         }
         if !(1..=12).contains(&month) {
-            return Err(IniSessionDateError::MonthOutOfRange { month });
+            return Err(IniDateKind::MonthOutOfRange { month });
         }
         let days_in_month = days_in_month(year, month);
         if !(1..=days_in_month).contains(&day) {
-            return Err(IniSessionDateError::DayOutOfRange { year, month, day });
+            return Err(IniDateKind::DayOutOfRange { year, month, day });
         }
 
         Ok(Self {
@@ -117,10 +123,10 @@ impl IniSessionDate {
 }
 
 impl TryFrom<u32> for IniSessionDate {
-    type Error = IniSessionDateError;
+    type Error = ContextError;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
-        Self::from_parts(value / 10_000, (value / 100) % 100, value % 100)
+        Self::from_packed(value).map_err(ContextError::IniSessionDate)
     }
 }
 
@@ -139,20 +145,6 @@ impl fmt::Display for IniSessionDate {
             self.year, self.month, self.day
         )
     }
-}
-
-/// Errors returned when constructing an [`IniSessionDate`].
-#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
-pub enum IniSessionDateError {
-    /// The year cannot round-trip through Dear ImGui's packed representation.
-    #[error("year {year} is outside Dear ImGui's supported packed-date range 2001 through 2127")]
-    YearOutOfRange { year: u32 },
-    /// The month is not a Gregorian calendar month.
-    #[error("month {month} is outside the Gregorian range 1 through 12")]
-    MonthOutOfRange { month: u32 },
-    /// The day is invalid for the supplied Gregorian year and month.
-    #[error("day {day} is invalid for {year:04}-{month:02}")]
-    DayOutOfRange { year: u32, month: u32, day: u32 },
 }
 
 /// One coherent `.ini` retention configuration owned by a [`crate::Context`].
@@ -242,7 +234,7 @@ impl IniSettingsRetention {
         !matches!(self, Self::Disabled { .. })
     }
 
-    pub(crate) fn validate(self) -> Result<(), IniSettingsRetentionError> {
+    pub(crate) fn validate(self) -> Result<(), ContextError> {
         if let Self::AutoDiscard {
             session_date,
             months,
@@ -250,7 +242,7 @@ impl IniSettingsRetention {
         {
             let max_months = session_date.max_auto_discard_months();
             if months.get() > max_months {
-                return Err(IniSettingsRetentionError::RetentionUnderflowsSessionDate {
+                return Err(ContextError::RetentionUnderflowsSessionDate {
                     session_date,
                     months,
                     max_months,
@@ -289,22 +281,28 @@ impl IniSettingsRetention {
         session_date: i32,
         save_last_used_date: bool,
         auto_discard_months: i32,
-    ) -> Result<Self, IniSettingsRetentionError> {
+    ) -> Result<Self, ContextError> {
         let session_date = match session_date {
             0 => None,
-            raw if raw > 0 => IniSessionDate::try_from(raw as u32)
-                .map(Some)
-                .map_err(|_| IniSettingsRetentionError::InvalidNativeSessionDate { raw })?,
-            raw => return Err(IniSettingsRetentionError::InvalidNativeSessionDate { raw }),
+            raw if raw > 0 => {
+                IniSessionDate::from_packed(raw as u32)
+                    .map(Some)
+                    .map_err(|source| ContextError::InvalidNativeSessionDate {
+                        raw,
+                        source: Some(source),
+                    })?
+            }
+            raw => return Err(ContextError::InvalidNativeSessionDate { raw, source: None }),
         };
         let months = match auto_discard_months {
             0 => None,
-            raw if raw > 0 => {
-                NonZeroU16::new(u16::try_from(raw).map_err(|_| {
-                    IniSettingsRetentionError::InvalidNativeAutoDiscardMonths { raw }
-                })?)
-            }
-            raw => return Err(IniSettingsRetentionError::InvalidNativeAutoDiscardMonths { raw }),
+            raw if raw > 0 => NonZeroU16::new(u16::try_from(raw).map_err(|source| {
+                ContextError::InvalidNativeAutoDiscardMonths {
+                    raw,
+                    source: Some(source),
+                }
+            })?),
+            raw => return Err(ContextError::InvalidNativeAutoDiscardMonths { raw, source: None }),
         };
 
         match (save_last_used_date, session_date, months) {
@@ -318,49 +316,14 @@ impl IniSettingsRetention {
                 retention.validate()?;
                 Ok(retention)
             }
-            (false, _, Some(_)) => Err(IniSettingsRetentionError::InvalidNativeState {
+            (false, _, Some(_)) => Err(ContextError::InvalidNativeState {
                 reason: "automatic discard is enabled while last-used dates are disabled",
             }),
-            (true, None, Some(_)) => Err(IniSettingsRetentionError::InvalidNativeState {
+            (true, None, Some(_)) => Err(ContextError::InvalidNativeState {
                 reason: "automatic discard is enabled without a session date",
             }),
         }
     }
-}
-
-/// Errors returned while reading or applying [`IniSettingsRetention`].
-#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
-pub enum IniSettingsRetentionError {
-    /// The requested period would underflow Dear ImGui's packed date year.
-    #[error(
-        "automatic discard period of {months} months exceeds the {max_months}-month limit for session date {session_date}"
-    )]
-    RetentionUnderflowsSessionDate {
-        /// Date used as the retention upper bound.
-        session_date: IniSessionDate,
-        /// Requested automatic-discard period.
-        months: NonZeroU16,
-        /// Largest supported period for `session_date`.
-        max_months: u16,
-    },
-    /// The session date is immutable after Dear ImGui has started its first frame.
-    #[error("`.ini` retention must be configured before the first Dear ImGui frame")]
-    LockedAfterFirstFrame,
-    /// Automatic cleanup cannot be changed after settings have already been loaded.
-    #[error("`.ini` retention must be configured before loading Dear ImGui settings")]
-    LockedAfterSettingsLoad,
-    /// Native platform state contains a date outside the safe packed range.
-    #[error("native Platform_SessionDate {raw} is not a valid Dear ImGui packed date")]
-    InvalidNativeSessionDate { raw: i32 },
-    /// Native IO state contains an unsupported automatic-discard period.
-    #[error("native ConfigIniSettingsAutoDiscardMonths {raw} is invalid")]
-    InvalidNativeAutoDiscardMonths { raw: i32 },
-    /// Native settings fields encode a combination that cannot be represented safely.
-    #[error("native `.ini` retention state is invalid: {reason}")]
-    InvalidNativeState {
-        /// Explanation of the inconsistent native fields.
-        reason: &'static str,
-    },
 }
 
 fn days_in_month(year: u32, month: u32) -> u32 {

@@ -6,10 +6,11 @@ use std::ffi::{c_char, c_void};
 #[cfg(feature = "multi-viewport")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::error::context::{BindingKind, ContextError, Operation, ScopeKind};
+
 use super::{
-    Context, ContextAttachment, ContextAttachmentDetachError, ContextAttachmentError,
-    ContextAttachmentRole, ContextBindingError, ContextDestroyed,
-    ContextPlatformAttachmentReleaseError, ContextTeardown, binding::with_bound_context,
+    Context, ContextAttachment, ContextAttachmentRole, ContextDestroyed, ContextTeardown,
+    binding::with_bound_context,
 };
 
 struct PlatformMarker;
@@ -52,14 +53,14 @@ impl ContextAttachment for ExplicitPlatformWindowTeardownAttachment {
     fn begin_platform_window_teardown(
         &self,
         context: &super::ContextPlatformWindowTeardown<'_>,
-    ) -> Result<(), super::ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         context.with_bound_context(|| {
             self.bound
                 .set(!unsafe { crate::sys::igGetCurrentContext() }.is_null());
         });
         self.log.borrow_mut().push("begin");
         if self.reject.get() {
-            return Err(super::ContextAttachmentTeardownError::new(
+            return Err(ContextError::attachment_teardown(
                 "test platform teardown rejection",
             ));
         }
@@ -69,10 +70,10 @@ impl ContextAttachment for ExplicitPlatformWindowTeardownAttachment {
     fn end_platform_window_teardown(
         &self,
         _context: &super::ContextPlatformWindowTeardown<'_>,
-    ) -> Result<(), super::ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         self.log.borrow_mut().push("end");
         if self.reject_after_native_teardown.get() {
-            return Err(super::ContextAttachmentTeardownError::new(
+            return Err(ContextError::attachment_teardown(
                 "test platform teardown postflight rejection",
             ));
         }
@@ -82,10 +83,7 @@ impl ContextAttachment for ExplicitPlatformWindowTeardownAttachment {
 
 #[cfg(feature = "multi-viewport")]
 impl ContextAttachment for TestViewportPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), super::ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         context.with_bound_context(|| unsafe {
             crate::sys::igDestroyPlatformWindows();
         });
@@ -197,10 +195,7 @@ impl RecordingAttachment {
 }
 
 impl ContextAttachment for RecordingAttachment {
-    fn quiesce(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), super::ContextAttachmentTeardownError> {
+    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         assert_eq!(context.phase(), super::ContextAttachmentPhase::Quiesce);
         if self.inspect_native_state_during_quiesce {
             context.with_bound_context(|| {
@@ -211,7 +206,7 @@ impl ContextAttachment for RecordingAttachment {
         if let Some(binding) = &self.binding {
             self.ordinary_rejected.set(matches!(
                 binding.try_with_bound_context(|| ()),
-                Err(ContextBindingError::Dropping)
+                Err(ContextError::Binding(BindingKind::Dropping))
             ));
             context.with_bound_context(|| {
                 self.teardown_bound
@@ -226,24 +221,21 @@ impl ContextAttachment for RecordingAttachment {
     fn release_renderer_resources(
         &self,
         context: &ContextTeardown<'_>,
-    ) -> Result<(), super::ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         assert_eq!(
             context.phase(),
             super::ContextAttachmentPhase::RendererResources
         );
         self.log.borrow_mut().push("renderer");
         if self.fail_during_renderer_release {
-            return Err(super::ContextAttachmentTeardownError::new(
+            return Err(ContextError::attachment_teardown(
                 "renderer attachment failure",
             ));
         }
         Ok(())
     }
 
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), super::ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         assert_eq!(
             context.phase(),
             super::ContextAttachmentPhase::PlatformWindows
@@ -298,7 +290,7 @@ where
     fn release_renderer_resources(
         &self,
         context: &ContextTeardown<'_>,
-    ) -> Result<(), super::ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         let consumer = &self.consumer;
         let expected_binding = self.expected_binding;
         let observation = Rc::clone(&self.observation);
@@ -318,7 +310,7 @@ where
                 );
             }
             if self.release_fails {
-                return Err(super::ContextAttachmentTeardownError::new(
+                return Err(ContextError::attachment_teardown(
                     "test renderer resource release failed",
                 ));
             }
@@ -346,10 +338,7 @@ impl<C> ContextAttachment for WrongPhaseRendererTextureResetAttachment<C>
 where
     C: crate::render::RendererConsumerCapability + 'static,
 {
-    fn quiesce(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), super::ContextAttachmentTeardownError> {
+    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         let result = context.with_renderer_texture_reset(&self.consumer, || {
             self.observation
                 .release_calls
@@ -732,7 +721,13 @@ fn rejected_platform_window_teardown_does_not_leave_the_scope_active() {
         .expect_err("attachment rejection must prevent native teardown");
     assert!(matches!(
         error,
-        super::ContextPlatformWindowTeardownError::AttachmentPreflight(_)
+        ContextError::PlatformWindowTeardownPreflight(_)
+    ));
+    let source =
+        std::error::Error::source(&error).and_then(|source| source.downcast_ref::<ContextError>());
+    assert!(matches!(
+        source,
+        Some(ContextError::AttachmentTeardown { message, .. }) if message == "test platform teardown rejection"
     ));
     reject.set(false);
     context
@@ -766,7 +761,13 @@ fn postflight_platform_window_teardown_error_does_not_leave_the_scope_active() {
         .expect_err("postflight rejection must reach the caller");
     assert!(matches!(
         error,
-        super::ContextPlatformWindowTeardownError::AttachmentPostflight(_)
+        ContextError::PlatformWindowTeardownPostflight(_)
+    ));
+    let source =
+        std::error::Error::source(&error).and_then(|source| source.downcast_ref::<ContextError>());
+    assert!(matches!(
+        source,
+        Some(ContextError::AttachmentTeardown { message, .. }) if message == "test platform teardown postflight rejection"
     ));
     reject_after_native_teardown.set(false);
     context
@@ -969,10 +970,7 @@ fn scoped_context_operation_error_closes_an_open_frame_and_can_reenter() {
         context.frame().text("frame left open by an error");
         Err::<(), _>("stop")
     });
-    assert!(matches!(
-        error,
-        Err(super::ContextOperationError::Closure("stop"))
-    ));
+    assert!(matches!(error, Err(Operation::Closure("stop"))));
 
     suspended
         .try_with_current(|context| {
@@ -1008,10 +1006,7 @@ fn scoped_context_operation_success_reports_and_closes_an_open_frame() {
         })
         .expect_err("a successful closure must not leave a frame open");
 
-    assert!(matches!(
-        error,
-        super::ContextOperationError::Scope(super::ContextScopeError::FrameLeftOpen)
-    ));
+    assert!(matches!(error, Operation::Scope(ScopeKind::FrameLeftOpen)));
     assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, other.raw);
     suspended
         .try_with_current(|context| {
@@ -1074,7 +1069,7 @@ fn context_binding_rejects_destroyed_context() {
     assert!(!alive.is_alive());
     assert!(matches!(
         binding.try_with_bound_context(|| ()),
-        Err(ContextBindingError::NativeDestroyed)
+        Err(ContextError::Binding(BindingKind::NativeDestroyed))
     ));
 }
 
@@ -1100,7 +1095,7 @@ fn binding_does_not_restore_a_previous_context_destroyed_inside_the_scope() {
 
 #[test]
 fn alternating_contexts_preserves_open_frame_and_scoped_binding() {
-    use super::{ContextScopeError, FrameLifecycleState, FramePrepareOptions};
+    use super::{FrameLifecycleState, FramePrepareOptions};
 
     let _guard = crate::test_support::imgui_context_guard();
     let mut first = Context::create();
@@ -1119,10 +1114,7 @@ fn alternating_contexts_preserves_open_frame_and_scoped_binding() {
     let error = first
         .try_with_current::<(), ()>(|_| panic!("an existing frame must not be claimed"))
         .unwrap_err();
-    assert_eq!(
-        error.scope_error(),
-        Some(ContextScopeError::FrameAlreadyOpen)
-    );
+    assert_eq!(error.scope_error(), Some(ScopeKind::FrameAlreadyOpen));
     assert_eq!(first.frame_lifecycle_state(), FrameLifecycleState::InFrame);
 
     second
@@ -1191,10 +1183,7 @@ fn live_contexts_confine_process_global_imgui_state_to_one_thread() {
     })
     .join()
     .expect("thread-conflict probe must not panic");
-    assert!(matches!(
-        error,
-        crate::error::ImGuiError::ContextThreadConflict
-    ));
+    assert!(matches!(error, ContextError::ThreadConflict));
 
     drop(suspended);
     std::thread::spawn(|| {
@@ -1211,42 +1200,36 @@ fn attachment_registration_preflight_is_non_mutating() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
 
-    assert_eq!(
+    assert!(matches!(
         ctx.preflight_attachment_registration::<RendererMarker>(ContextAttachmentRole::Renderer),
-        Err(ContextAttachmentError::MissingPlatform)
-    );
-    assert_eq!(
-        ctx.preflight_attachment_registration::<PlatformMarker>(ContextAttachmentRole::Platform),
-        Ok(())
-    );
+        Err(ContextError::MissingPlatformAttachment)
+    ));
+    ctx.preflight_attachment_registration::<PlatformMarker>(ContextAttachmentRole::Platform)
+        .unwrap();
 
     let platform = Rc::new(RecordingAttachment::new(Rc::new(RefCell::new(Vec::new()))));
     let mut platform_lease = ctx
         .register_attachment::<PlatformMarker>(ContextAttachmentRole::Platform, platform)
         .unwrap();
 
-    assert_eq!(
+    assert!(matches!(
         ctx.preflight_attachment_registration::<PlatformMarker>(ContextAttachmentRole::Platform),
-        Err(ContextAttachmentError::DuplicateAttachment)
-    );
-    assert_eq!(
+        Err(ContextError::DuplicateAttachment)
+    ));
+    assert!(matches!(
         ctx.preflight_attachment_registration::<ExtensionMarker>(ContextAttachmentRole::Platform),
-        Err(ContextAttachmentError::RoleOccupied(
+        Err(ContextError::AttachmentRoleOccupied(
             ContextAttachmentRole::Platform
         ))
-    );
-    assert_eq!(
-        ctx.preflight_attachment_registration::<RendererMarker>(ContextAttachmentRole::Renderer),
-        Ok(())
-    );
+    ));
+    ctx.preflight_attachment_registration::<RendererMarker>(ContextAttachmentRole::Renderer)
+        .unwrap();
 
-    assert_eq!(platform_lease.detach(), Ok(true));
+    assert!(platform_lease.detach().unwrap());
     let shared_context = &ctx;
-    assert_eq!(
-        shared_context
-            .preflight_attachment_registration::<PlatformMarker>(ContextAttachmentRole::Platform),
-        Ok(())
-    );
+    shared_context
+        .preflight_attachment_registration::<PlatformMarker>(ContextAttachmentRole::Platform)
+        .unwrap();
     let replacement = Rc::new(RecordingAttachment::new(Rc::new(RefCell::new(Vec::new()))));
     let _replacement_lease = ctx
         .register_attachment::<PlatformMarker>(ContextAttachmentRole::Platform, replacement)
@@ -1274,31 +1257,31 @@ fn platform_release_is_generation_bound_and_rejects_active_renderer_dependencies
 
     assert!(matches!(
         ctx.prepare_platform_attachment_release(&platform),
-        Err(ContextPlatformAttachmentReleaseError::RendererActive)
+        Err(ContextError::RendererAttachmentActive)
     ));
     assert!(platform.is_attached());
-    assert_eq!(
+    assert!(matches!(
         platform_lease.detach(),
-        Err(ContextAttachmentDetachError::RendererActive)
-    );
+        Err(ContextError::RendererAttachmentActive)
+    ));
     assert!(platform_lease.is_attached());
 
-    assert_eq!(renderer_lease.detach(), Ok(true));
+    assert!(renderer_lease.detach().unwrap());
     {
         let mut permit = ctx
             .prepare_platform_attachment_release(&platform)
             .expect("renderer release must make platform shutdown retryable");
         assert!(platform.is_attached());
-        assert_eq!(
+        assert!(matches!(
             platform_lease.detach(),
-            Err(ContextAttachmentDetachError::ReleaseInProgress)
-        );
+            Err(ContextError::PlatformReleaseInProgress)
+        ));
         assert!(matches!(
             permit.context_mut().register_attachment::<RendererMarker>(
                 ContextAttachmentRole::Renderer,
                 Rc::new(RecordingAttachment::new(Rc::clone(&log))),
             ),
-            Err(ContextAttachmentError::MissingPlatform)
+            Err(ContextError::MissingPlatformAttachment)
         ));
         drop(permit);
     }
@@ -1363,7 +1346,7 @@ fn renderer_detach_commits_role_state_before_dropping_user_attachment() {
     }));
     assert!(panic.is_err());
     assert!(!renderer_lease.is_attached());
-    assert_eq!(platform_lease.detach(), Ok(true));
+    assert!(platform_lease.detach().unwrap());
 }
 
 #[test]
@@ -1417,7 +1400,7 @@ fn platform_release_rejects_a_foreign_context_generation_without_mutation() {
         .unwrap();
     assert!(matches!(
         foreign.prepare_platform_attachment_release(&owner_handle),
-        Err(ContextPlatformAttachmentReleaseError::PlatformGenerationMismatch)
+        Err(ContextError::PlatformGenerationMismatch)
     ));
     assert!(owner_handle.is_attached());
     assert!(foreign_lease.is_attached());
@@ -1593,7 +1576,7 @@ fn attachment_registration_enforces_roles_and_detach_is_idempotent() {
     );
     assert!(matches!(
         missing_platform,
-        Err(ContextAttachmentError::MissingPlatform)
+        Err(ContextError::MissingPlatformAttachment)
     ));
 
     let mut platform_lease = ctx
@@ -1606,23 +1589,20 @@ fn attachment_registration_enforces_roles_and_detach_is_idempotent() {
         ContextAttachmentRole::Extension,
         Rc::new(RecordingAttachment::new(Rc::clone(&log))),
     );
-    assert!(matches!(
-        duplicate,
-        Err(ContextAttachmentError::DuplicateAttachment)
-    ));
+    assert!(matches!(duplicate, Err(ContextError::DuplicateAttachment)));
     let occupied = ctx.register_attachment::<ExtensionMarker>(
         ContextAttachmentRole::Platform,
         Rc::new(RecordingAttachment::new(Rc::clone(&log))),
     );
     assert!(matches!(
         occupied,
-        Err(ContextAttachmentError::RoleOccupied(
+        Err(ContextError::AttachmentRoleOccupied(
             ContextAttachmentRole::Platform
         ))
     ));
 
-    assert_eq!(platform_lease.detach(), Ok(true));
-    assert_eq!(platform_lease.detach(), Ok(false));
+    assert!(platform_lease.detach().unwrap());
+    assert!(!platform_lease.detach().unwrap());
     drop(ctx);
     assert!(log.borrow().is_empty());
 }
@@ -1641,7 +1621,7 @@ fn detaching_attachment_releases_context_ownership_immediately() {
         .unwrap();
 
     assert_eq!(Rc::strong_count(&attachment), 2);
-    assert_eq!(lease.detach(), Ok(true));
+    assert!(lease.detach().unwrap());
     assert_eq!(Rc::strong_count(&attachment), 1);
     drop(ctx);
 }

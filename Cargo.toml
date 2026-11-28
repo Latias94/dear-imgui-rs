@@ -68,7 +68,6 @@ dear-app = { version = "0.23.0", path = "dear-app" }
 dear-file-browser = { version = "0.23.0", path = "extensions/dear-file-browser" }
 dear-imgui-ash = { version = "0.23.0", path = "backends/dear-imgui-ash" }
 dear-imgui-backend-support = { version = "0.23.0", path = "backends/dear-imgui-backend-support" }
-dear-imgui-bevy = { version = "0.23.0", path = "backends/dear-imgui-bevy" }
 dear-imgui-cte = { version = "0.23.0", path = "extensions/dear-imgui-cte" }
 dear-imgui-cte-sys = { version = "0.23.0", path = "extensions/dear-imgui-cte-sys", default-features = false }
 dear-imgui-glow = { version = "0.23.0", path = "backends/dear-imgui-glow" }
@@ -100,6 +99,7 @@ parking_lot = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 glam = "0.34"
+ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 
 # Graphics and windowing
 wgpu = "30.0"

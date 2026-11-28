@@ -33,8 +33,9 @@ mod ash_frame_sync;
 #[path = "../support/ash_portability.rs"]
 mod ash_portability;
 use ash_frame_sync::{
-    FrameSync, clear_fence_references, create_frame_syncs, create_present_semaphores,
-    destroy_frame_syncs, destroy_present_semaphores, replace_frame_sync,
+    FrameSync, MainCommandTarget, clear_fence_references, create_frame_syncs,
+    create_present_semaphores, destroy_frame_syncs, destroy_present_semaphores,
+    record_command_buffer, replace_frame_sync,
 };
 
 const FRAMES_IN_FLIGHT: usize = 2;
@@ -167,11 +168,11 @@ impl VulkanContextInit {
 impl Drop for VulkanContextInit {
     fn drop(&mut self) {
         unsafe {
-            if let Some(device) = self.device.as_ref() {
-                if self.command_pool != vk::CommandPool::null() {
-                    device.destroy_command_pool(self.command_pool, None);
-                    self.command_pool = vk::CommandPool::null();
-                }
+            if let Some(device) = self.device.as_ref()
+                && self.command_pool != vk::CommandPool::null()
+            {
+                device.destroy_command_pool(self.command_pool, None);
+                self.command_pool = vk::CommandPool::null();
             }
             if let Some(device) = self.device.take() {
                 device.destroy_device(None);
@@ -924,7 +925,7 @@ impl AppWindow {
             ui.show_demo_window(demo_open);
         }
 
-        platform.prepare_render(&ui, window)?;
+        platform.prepare_render(ui, window)?;
         let pending_frame = context.render(renderer.renderer_consumer()?);
 
         let frame_slot = vk.frame_index % vk.frames.len();
@@ -1024,10 +1025,9 @@ impl AppWindow {
                 )?;
             }
 
-            let texture_retirement = record_command_buffer(
-                &vk.ctx.device,
-                command_buffer,
-                &vk.render_target,
+            let target = MainCommandTarget {
+                #[cfg(not(feature = "ash-dynamic-rendering"))]
+                render_pass: vk.render_target.render_pass,
                 #[cfg(not(feature = "ash-dynamic-rendering"))]
                 framebuffer,
                 #[cfg(feature = "ash-dynamic-rendering")]
@@ -1036,8 +1036,13 @@ impl AppWindow {
                 image_view,
                 #[cfg(feature = "ash-dynamic-rendering")]
                 old_layout,
-                vk.swapchain.extent,
-                *clear_color,
+                extent: vk.swapchain.extent,
+                clear_color: *clear_color,
+            };
+            let texture_retirement = record_command_buffer(
+                &vk.ctx.device,
+                command_buffer,
+                target,
                 // SAFETY: cmd is recording inside the compatible render pass and is submitted
                 // before any renderer resource can be retired or destroyed.
                 |cmd| {
@@ -1456,96 +1461,6 @@ fn destroy_framebuffers(device: &Device, framebuffers: Vec<vk::Framebuffer>) {
             device.destroy_framebuffer(framebuffer, None);
         }
     }
-}
-
-fn record_command_buffer<F>(
-    device: &Device,
-    cmd: vk::CommandBuffer,
-    _render_target: &MainRenderTarget,
-    #[cfg(not(feature = "ash-dynamic-rendering"))] framebuffer: vk::Framebuffer,
-    #[cfg(feature = "ash-dynamic-rendering")] image: vk::Image,
-    #[cfg(feature = "ash-dynamic-rendering")] image_view: vk::ImageView,
-    #[cfg(feature = "ash-dynamic-rendering")] old_layout: vk::ImageLayout,
-    extent: vk::Extent2D,
-    clear_color: [f32; 4],
-    record_draws: F,
-) -> Result<Option<TextureRetirementBatch>, Box<dyn std::error::Error>>
-where
-    F: FnOnce(vk::CommandBuffer) -> dear_imgui_ash::RendererResult<Option<TextureRetirementBatch>>,
-{
-    let texture_retirement;
-    unsafe {
-        device.begin_command_buffer(
-            cmd,
-            &vk::CommandBufferBeginInfo::default()
-                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-        )?;
-
-        let clear_value = vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: clear_color,
-            },
-        };
-
-        #[cfg(not(feature = "ash-dynamic-rendering"))]
-        device.cmd_begin_render_pass(
-            cmd,
-            &vk::RenderPassBeginInfo::default()
-                .render_pass(_render_target.render_pass)
-                .framebuffer(framebuffer)
-                .render_area(vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent,
-                })
-                .clear_values(std::slice::from_ref(&clear_value)),
-            vk::SubpassContents::INLINE,
-        );
-
-        #[cfg(feature = "ash-dynamic-rendering")]
-        {
-            ash_frame_sync::transition_swapchain_image(
-                device,
-                cmd,
-                image,
-                old_layout,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            );
-            let color_attachment = vk::RenderingAttachmentInfo::default()
-                .image_view(image_view)
-                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                .load_op(vk::AttachmentLoadOp::CLEAR)
-                .store_op(vk::AttachmentStoreOp::STORE)
-                .clear_value(clear_value);
-            device.cmd_begin_rendering(
-                cmd,
-                &vk::RenderingInfo::default()
-                    .render_area(vk::Rect2D {
-                        offset: vk::Offset2D { x: 0, y: 0 },
-                        extent,
-                    })
-                    .layer_count(1)
-                    .color_attachments(std::slice::from_ref(&color_attachment)),
-            );
-        }
-
-        texture_retirement = record_draws(cmd)?;
-
-        #[cfg(not(feature = "ash-dynamic-rendering"))]
-        device.cmd_end_render_pass(cmd);
-        #[cfg(feature = "ash-dynamic-rendering")]
-        {
-            device.cmd_end_rendering(cmd);
-            ash_frame_sync::transition_swapchain_image(
-                device,
-                cmd,
-                image,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                vk::ImageLayout::PRESENT_SRC_KHR,
-            );
-        }
-        device.end_command_buffer(cmd)?;
-    }
-    Ok(texture_retirement)
 }
 
 fn is_srgb_format(format: vk::Format) -> bool {

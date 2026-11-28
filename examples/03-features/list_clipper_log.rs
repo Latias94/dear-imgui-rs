@@ -181,15 +181,15 @@ impl LogViewer {
             if add_count > 0 {
                 self.generate(add_count);
             }
-            if let Some(index) = duplicate {
-                if let Some(entry) = self.entries.get(index).cloned() {
-                    self.entries.insert(index + 1, entry);
-                }
+            if let Some(index) = duplicate
+                && let Some(entry) = self.entries.get(index).cloned()
+            {
+                self.entries.insert(index + 1, entry);
             }
-            if let Some(index) = delete {
-                if index < self.entries.len() {
-                    self.entries.remove(index);
-                }
+            if let Some(index) = delete
+                && index < self.entries.len()
+            {
+                self.entries.remove(index);
             }
         }
         if let Some(message) = remember {

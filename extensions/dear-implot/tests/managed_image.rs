@@ -3,7 +3,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, OnceLock};
 
 use dear_imgui_rs::render::{DrawCmdSnapshot, SnapshotTextureId, TextureBinding, TextureOp};
-use dear_imgui_rs::{BackendFlags, Context, ManagedTextureError, ManagedTextureId, TextureId};
+use dear_imgui_rs::{BackendFlags, Context, ManagedTextureId, TextureError, TextureId};
 use dear_implot::{ImPlotPoint, PlotContext};
 
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -216,7 +216,7 @@ fn managed_image_rejects_a_stale_generation_before_plot_ffi() {
     assert_ne!(stale, replacement);
     assert_eq!(
         imgui.with_texture(stale, |_| ()),
-        Err(ManagedTextureError::StaleGeneration(stale)),
+        Err(TextureError::StaleGeneration(stale)),
         "the refreshed slot must reject its retired generation"
     );
     let plot = PlotContext::create(&imgui);

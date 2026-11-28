@@ -36,28 +36,25 @@ mod snapshot;
 
 use crate::{RendererError, RendererResult, Uniforms, WgpuBackendData, WgpuTextureManager};
 pub use core::WgpuRenderer;
-use dear_imgui_backend_support::{
-    ScopedRenderState as RendererRenderStateGuard,
-    ScopedRenderStateError as RendererRenderStateGuardError,
-};
+use dear_imgui_backend_support::ScopedRenderState as RendererRenderStateGuard;
+use dear_imgui_rs::FrameError;
 pub use draw::FramebufferExtent;
 pub use snapshot::{
     WgpuPreparedSnapshot, WgpuSnapshotError, WgpuSnapshotExecutor, WgpuSnapshotRenderer,
     WgpuSnapshotReport, WgpuSnapshotSubmission, WgpuSnapshotTarget, WgpuSnapshotTargetRecording,
 };
 
-pub(super) fn map_renderer_render_state_error(
-    error: RendererRenderStateGuardError,
-) -> RendererError {
+pub(super) fn map_renderer_render_state_error(error: FrameError) -> RendererError {
     match error {
-        RendererRenderStateGuardError::MissingPlatformIo => RendererError::InvalidRenderState(
+        FrameError::MissingPlatformIo => RendererError::InvalidRenderState(
             "PlatformIO not available for renderer render state".to_owned(),
         ),
-        RendererRenderStateGuardError::AlreadyOccupied => RendererError::InvalidRenderState(
+        FrameError::AlreadyOccupied => RendererError::InvalidRenderState(
             "PlatformIO Renderer_RenderState is already occupied".to_owned(),
         ),
-        RendererRenderStateGuardError::Drift => RendererError::RendererStateDrift {
+        FrameError::Drift => RendererError::RendererStateDrift {
             field: "Renderer_RenderState",
         },
+        error => RendererError::Frame(error),
     }
 }

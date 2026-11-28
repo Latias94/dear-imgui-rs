@@ -16,10 +16,9 @@ pub mod font;
 pub mod glyph;
 
 pub use atlas::{
-    CustomRectData, CustomRectId, CustomRectSnapshot, FontAtlas, FontAtlasFlags,
-    FontAtlasLoaderError, FontAtlasModeError, FontAtlasTexture, FontConfig, FontId, FontLoadError,
-    FontLoader, FontLoaderFlags, FontSource, LegacyFontAtlas, SharedFontAtlas, StbTrueTypeFontData,
-    StbTrueTypeFontError, StbTrueTypeFontLoadError,
+    CustomRectData, CustomRectId, CustomRectSnapshot, FontAtlas, FontAtlasFlags, FontAtlasTexture,
+    FontConfig, FontId, FontLoader, FontLoaderFlags, FontSource, LegacyFontAtlas, SharedFontAtlas,
+    StbTrueTypeFontData,
 };
 pub use baked::BakedFont;
 pub use glyph::Glyph;

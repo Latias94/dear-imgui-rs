@@ -31,9 +31,7 @@ impl Ui {
     pub fn button_config<'ui>(&'ui self, label: impl Into<Cow<'ui, str>>) -> Button<'ui> {
         Button::new(self, label)
     }
-}
 
-impl Ui {
     /// Creates a checkbox
     #[doc(alias = "Checkbox")]
     pub fn checkbox(&self, label: impl AsRef<str>, value: &mut bool) -> bool {

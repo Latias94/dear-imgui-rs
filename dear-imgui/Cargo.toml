@@ -23,6 +23,7 @@ dear-imgui-sys.workspace = true
 parking_lot.workspace = true
 thiserror.workspace = true
 serde = { workspace = true, optional = true }
+ttf-parser.workspace = true
 
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
 arboard = { version = "3.7", default-features = false, optional = true }

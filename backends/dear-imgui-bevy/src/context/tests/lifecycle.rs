@@ -1407,7 +1407,7 @@ fn headless_driver_reports_managed_font_atlas_conflicts() {
             .unwrap(),
         Some(ImguiContextError::FontAtlasMode {
             context_id,
-            source: dear_imgui_rs::FontAtlasModeError::ManagedRendererActive,
+            source: dear_imgui_rs::FontError::ManagedRendererActive,
         }) if *context_id == primary
     ));
 

@@ -37,7 +37,7 @@ pub enum ImguiRendererOwnershipError {
 }
 
 /// Failure to enter or finish a temporary active-Context scope.
-pub type ImguiContextScopeError = dear_imgui_rs::ContextScopeError;
+pub type ImguiContextScopeError = dear_imgui_rs::error::context::ScopeKind;
 
 pub(crate) enum ImguiRendererContextError<E> {
     Operation(E),
@@ -50,7 +50,7 @@ pub(crate) enum ImguiRendererContextError<E> {
 
 impl<E> ImguiRendererContextError<E> {
     pub(crate) fn from_context_operation(
-        error: dear_imgui_rs::ContextOperationError<Self>,
+        error: dear_imgui_rs::error::context::Operation<Self>,
     ) -> Self {
         error
             .into_closure_error()
@@ -81,7 +81,7 @@ pub enum ImguiContextRemovalPendingReason {
     /// The Context could not enter or finish the scope required for teardown.
     ContextScope(ImguiContextScopeError),
     RenderWorldReleasePending,
-    Renderer(dear_imgui_rs::render::RendererConsumerError),
+    Renderer(dear_imgui_rs::FrameError),
     #[cfg(feature = "render")]
     RendererOwnership(ImguiRendererOwnershipError),
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -112,7 +112,7 @@ impl std::fmt::Display for ImguiContextRemovalPendingReason {
 
 impl ImguiContextRemovalPendingReason {
     pub(crate) fn from_context_operation(
-        error: dear_imgui_rs::ContextOperationError<Self>,
+        error: dear_imgui_rs::error::context::Operation<Self>,
     ) -> Self {
         error
             .into_closure_error()
@@ -625,7 +625,7 @@ impl ImguiRendererRuntimeContract {
 
 #[cfg(test)]
 mod context_scope_error_tests {
-    use dear_imgui_rs::{ContextBindingError, ContextOperationError};
+    use dear_imgui_rs::error::context::{BindingKind, Operation};
 
     use super::{
         ImguiContextRemovalPendingReason, ImguiContextScopeError, ImguiRendererContextError,
@@ -636,17 +636,15 @@ mod context_scope_error_tests {
         for scope in [
             ImguiContextScopeError::FrameAlreadyOpen,
             ImguiContextScopeError::FrameLeftOpen,
-            ImguiContextScopeError::ContextUnavailable(ContextBindingError::NativeDestroyed),
+            ImguiContextScopeError::ContextUnavailable(BindingKind::NativeDestroyed),
         ] {
             assert_eq!(
-                ImguiContextRemovalPendingReason::from_context_operation(
-                    ContextOperationError::Scope(scope),
-                ),
+                ImguiContextRemovalPendingReason::from_context_operation(Operation::Scope(scope),),
                 ImguiContextRemovalPendingReason::ContextScope(scope),
             );
             assert!(matches!(
                 ImguiRendererContextError::<()>::from_context_operation(
-                    ContextOperationError::Scope(scope),
+                    Operation::Scope(scope),
                 ),
                 ImguiRendererContextError::ContextScope(error) if error == scope
             ));
@@ -656,17 +654,15 @@ mod context_scope_error_tests {
     #[test]
     fn backend_translation_keeps_closure_errors_on_the_operation_channel() {
         assert!(matches!(
-            ImguiRendererContextError::from_context_operation(ContextOperationError::Closure(
+            ImguiRendererContextError::from_context_operation(Operation::Closure(
                 ImguiRendererContextError::Operation("operation failed"),
             )),
             ImguiRendererContextError::Operation("operation failed")
         ));
         assert_eq!(
-            ImguiContextRemovalPendingReason::from_context_operation(
-                ContextOperationError::Closure(
-                    ImguiContextRemovalPendingReason::RenderWorldReleasePending,
-                )
-            ),
+            ImguiContextRemovalPendingReason::from_context_operation(Operation::Closure(
+                ImguiContextRemovalPendingReason::RenderWorldReleasePending,
+            )),
             ImguiContextRemovalPendingReason::RenderWorldReleasePending,
         );
     }

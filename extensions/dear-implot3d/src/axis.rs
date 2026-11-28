@@ -70,6 +70,10 @@ impl Plot3DSetup<'_> {
     }
 
     /// Sets all three axis limits with the same bounds as [`Self::setup_axis_limits`].
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Keeps the native SetupAxesLimits argument order for the existing public API"
+    )]
     pub fn setup_axes_limits(
         &self,
         x_min: f64,

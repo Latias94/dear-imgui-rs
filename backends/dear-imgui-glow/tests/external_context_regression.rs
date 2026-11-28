@@ -11,7 +11,7 @@ use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
 use dear_imgui_glow::GlowRenderer;
 use dear_imgui_rs::{
-    Condition, Context as ImguiContext, ManagedTextureError, ManagedTextureId, TextureId,
+    Condition, Context as ImguiContext, ManagedTextureId, TextureError, TextureId,
     texture::{OwnedTextureData, TextureStatus},
 };
 use dear_imgui_winit::WinitPlatform;
@@ -416,8 +416,8 @@ impl AppWindow {
                     .context
                     .with_texture(self.imgui.managed_texture, |_| ())
                 {
-                    Err(ManagedTextureError::Retiring(_)) => {}
-                    Err(ManagedTextureError::AlreadyRemoved(_)) => {
+                    Err(TextureError::Retiring(_)) => {}
+                    Err(TextureError::AlreadyRemoved(_)) => {
                         self.imgui.live_texture_id.ok_or_else(|| {
                             boxed_error("missing TextureId before destroy verification")
                         })?;
@@ -462,13 +462,11 @@ impl AppWindow {
                 (texture.status(), texture.texture_id())
             })
             .unwrap_or_else(|error| match error {
-                ManagedTextureError::Retiring(_) => (
+                TextureError::Retiring(_) => (
                     TextureStatus::WantDestroy,
                     self.imgui.live_texture_id.unwrap_or(TextureId::null()),
                 ),
-                ManagedTextureError::AlreadyRemoved(_) => {
-                    (TextureStatus::Destroyed, TextureId::null())
-                }
+                TextureError::AlreadyRemoved(_) => (TextureStatus::Destroyed, TextureId::null()),
                 _ => panic!("managed texture inspection failed: {error}"),
             });
 
@@ -523,7 +521,7 @@ impl AppWindow {
             self.gl.disable(glow::FRAMEBUFFER_SRGB);
         }
 
-        self.imgui.platform.prepare_render(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(ui, &self.window)?;
         let pending_frame = self
             .imgui
             .context
@@ -625,10 +623,11 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if self.success_message.is_none() && self.failure_message.is_none() {
-            if let Some(window) = &self.window {
-                window.window.request_redraw();
-            }
+        if self.success_message.is_none()
+            && self.failure_message.is_none()
+            && let Some(window) = &self.window
+        {
+            window.window.request_redraw();
         }
     }
 

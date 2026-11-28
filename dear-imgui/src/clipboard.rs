@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "system-clipboard")]
 mod system;
 #[cfg(feature = "system-clipboard")]
-pub use system::{SystemClipboard, SystemClipboardError};
+pub use system::SystemClipboard;
 
 struct ClipboardBorrowGuard<'a> {
     borrowed: &'a AtomicBool,

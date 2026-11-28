@@ -7,8 +7,7 @@ use std::sync::{Mutex, OnceLock};
 
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextTeardown, FrameLifecycleState, FramePrepareOptions,
-    TextureFormat, sys,
+    ContextError, ContextTeardown, FrameLifecycleState, FramePrepareOptions, TextureFormat, sys,
 };
 
 use super::callbacks::renderer_render_window_sys;
@@ -28,10 +27,7 @@ struct TestPlatformMarker;
 struct TestPlatformAttachment;
 
 impl ContextAttachment for TestPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        _context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, _context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         Ok(())
     }
 }
@@ -43,10 +39,7 @@ struct OrderingPlatformAttachment {
 }
 
 impl ContextAttachment for OrderingPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        _context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, _context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         self.renderer_deletes_seen
             .set(DELETED_TEXTURES.load(Ordering::SeqCst));
         Ok(())
@@ -229,7 +222,7 @@ fn render_empty_runtime_frame(context: &mut Context, runtime: &GlowViewportRunti
     let frame = context.begin_frame();
     let prepared = runtime.prepare_frame(frame).unwrap();
     let rendered = runtime
-        .render_main(prepared, || Ok::<(), ()>(()), || Vec::<()>::new())
+        .render_main(prepared, || Ok::<(), ()>(()), Vec::<()>::new)
         .unwrap();
     assert!(rendered.secondary_report().rendered_viewports().is_empty());
 }
@@ -245,7 +238,7 @@ fn attach_requires_a_registered_platform_role_and_returns_the_renderer() {
     let failure = unsafe { GlowViewportRuntime::attach(&mut context, renderer) }.unwrap_err();
     assert!(matches!(
         failure.error(),
-        GlowViewportError::Attachment(dear_imgui_rs::ContextAttachmentError::MissingPlatform)
+        GlowViewportError::Context(dear_imgui_rs::ContextError::MissingPlatformAttachment)
     ));
     let (_error, mut renderer) = failure.into_parts();
     assert!(renderer.renderer_consumer.is_some());

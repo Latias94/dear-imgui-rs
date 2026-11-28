@@ -1146,6 +1146,27 @@ pub(super) use native_callbacks::{
     renderer_render_window_callback_for_test, renderer_set_window_size_callback_for_test,
 };
 
+impl PlatformCallbackOwnership {
+    pub(super) fn original_callbacks(&self) -> PlatformCallbacks {
+        self.original.snapshot()
+    }
+
+    pub(super) unsafe fn owns_live_slot(&self, slot: PlatformCallbackSlot) -> bool {
+        let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
+        if platform_io.is_null() {
+            return false;
+        }
+        let current = unsafe { PlatformCallbacks::capture(platform_io) };
+        self.installed.same_window_callback(&current, slot)
+    }
+
+    #[cfg(test)]
+    pub(super) fn wraps_slot(&self, slot: PlatformCallbackSlot) -> bool {
+        self.original.window_callback_is_some(slot)
+            && !self.original.same_window_callback(&self.installed, slot)
+    }
+}
+
 #[cfg(test)]
 mod inventory_tests {
     #[test]
@@ -1181,26 +1202,5 @@ mod inventory_tests {
                 "Platform_CreateVkSurface",
             ]
         );
-    }
-}
-
-impl PlatformCallbackOwnership {
-    pub(super) fn original_callbacks(&self) -> PlatformCallbacks {
-        self.original.snapshot()
-    }
-
-    pub(super) unsafe fn owns_live_slot(&self, slot: PlatformCallbackSlot) -> bool {
-        let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
-        if platform_io.is_null() {
-            return false;
-        }
-        let current = unsafe { PlatformCallbacks::capture(platform_io) };
-        self.installed.same_window_callback(&current, slot)
-    }
-
-    #[cfg(test)]
-    pub(super) fn wraps_slot(&self, slot: PlatformCallbackSlot) -> bool {
-        self.original.window_callback_is_some(slot)
-            && !self.original.same_window_callback(&self.installed, slot)
     }
 }

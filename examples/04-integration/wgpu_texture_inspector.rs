@@ -261,14 +261,11 @@ impl Application for Inspector {
                 .external_bindings
                 .iter()
                 .find(|binding| Some(binding.texture.texture_id()) == hdr_id)
+                && observation.stage >= dear_imgui_wgpu::WgpuFrameStage::Submitted
+                && binding.revision.get() >= 2
+                && !hdr_targets.contains(&observation.target.instance_id)
             {
-                if observation.stage >= dear_imgui_wgpu::WgpuFrameStage::Submitted
-                    && binding.revision.get() >= 2
-                {
-                    if !hdr_targets.contains(&observation.target.instance_id) {
-                        hdr_targets.push(observation.target.instance_id);
-                    }
-                }
+                hdr_targets.push(observation.target.instance_id);
             }
             self.observations.push(format!(
                 "instance {:?}; viewport {:?}; main {}; stage {:?}; bindings {:?}; outcome {:?}",

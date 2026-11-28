@@ -1,7 +1,7 @@
 use super::{PlotContext, validation::axis_tick_count_to_i32};
 use crate::sys;
 use crate::{Axis, PlotCond, XAxis, YAxis};
-use dear_imgui_rs::{Context, ContextBindingError};
+use dear_imgui_rs::{Context, ContextError};
 use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, OnceLock};
@@ -357,13 +357,18 @@ fn plot_owner_keeps_its_thread_and_destroys_the_native_plot_after_imgui_drops() 
     let entered = Cell::new(false);
     let result = plot.try_with_bound_context(|| entered.set(true));
 
-    assert!(matches!(result, Err(ContextBindingError::NativeDestroyed)));
+    assert!(matches!(
+        result,
+        Err(ContextError::Binding(
+            dear_imgui_rs::error::context::BindingKind::NativeDestroyed
+        ))
+    ));
     assert!(!entered.get());
 
     std::thread::spawn(|| {
         assert!(matches!(
             dear_imgui_rs::ContextThreadLease::acquire(),
-            Err(dear_imgui_rs::ImGuiError::ContextThreadConflict)
+            Err(ContextError::ThreadConflict)
         ))
     })
     .join()

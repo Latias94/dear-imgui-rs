@@ -153,6 +153,8 @@ impl Sdl3SurfaceWindowLease {
     }
 }
 
+type NativeWindowLeaseChain = (Sdl3WindowSnapshot, Vec<Rc<NativeWindowAllocation>>);
+
 impl RuntimeControl {
     pub(crate) fn record_native_window_owner_unavailable(&self) {
         self.record_fault(RuntimeFault::NativeWindowLeaseUnavailable);
@@ -217,8 +219,7 @@ impl RuntimeControl {
     fn native_window_allocations_for_lease(
         &self,
         instance_id: NativeWindowInstanceId,
-    ) -> Result<Option<(Sdl3WindowSnapshot, Vec<Rc<NativeWindowAllocation>>)>, Sdl3BackendError>
-    {
+    ) -> Result<Option<NativeWindowLeaseChain>, Sdl3BackendError> {
         self.with_window_query(|| {
             let address = self
                 .owned_viewports

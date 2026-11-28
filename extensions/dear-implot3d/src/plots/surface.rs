@@ -269,12 +269,9 @@ pub(crate) fn submit_surface_grid(
 pub(crate) unsafe fn submit_surface_raw(
     ui: &Plot3DScope<'_>,
     label: SurfaceLabel<'_>,
-    xs: &[f32],
-    ys: &[f32],
-    zs: &[f32],
+    [xs, ys, zs]: [&[f32]; 3],
     shape: SurfaceGridShape,
-    scale_min: f64,
-    scale_max: f64,
+    [scale_min, scale_max]: [f64; 2],
     flags: Surface3DFlags,
     layout: Plot3DDataLayout,
 ) -> Result<(), Plot3DError> {

@@ -18,53 +18,6 @@ env:
   # Reduce disk usage in CI (helps avoid "No space left on device" from LLVM/rustc).
   CARGO_INCREMENTAL: "0"
   RUSTFLAGS: "-Cdebuginfo=0"
-  # Existing workspace-wide lint debt. Broad Clippy routes deny every warning except this
-  # explicit baseline; new release and binding tooling below has no allowances.
-  CLIPPY_HISTORICAL_LINTS: >-
-    -A dead_code
-    -A clippy::assertions_on_constants
-    -A clippy::collapsible_if
-    -A clippy::collapsible_match
-    -A clippy::default_constructed_unit_structs
-    -A clippy::derivable_impls
-    -A clippy::doc_lazy_continuation
-    -A clippy::drop_non_drop
-    -A clippy::explicit_auto_deref
-    -A clippy::explicit_counter_loop
-    -A clippy::field_reassign_with_default
-    -A clippy::get_first
-    -A clippy::if_same_then_else
-    -A clippy::items_after_test_module
-    -A clippy::large_enum_variant
-    -A clippy::let_and_return
-    -A clippy::manual_c_str_literals
-    -A clippy::manual_div_ceil
-    -A clippy::manual_is_multiple_of
-    -A clippy::manual_unwrap_or
-    -A clippy::manual_unwrap_or_default
-    -A clippy::missing_const_for_thread_local
-    -A clippy::missing_safety_doc
-    -A clippy::module_inception
-    -A clippy::needless_borrow
-    -A clippy::needless_lifetimes
-    -A clippy::needless_option_as_deref
-    -A clippy::needless_range_loop
-    -A clippy::new_ret_no_self
-    -A clippy::new_without_default
-    -A clippy::nonminimal_bool
-    -A clippy::obfuscated_if_else
-    -A clippy::question_mark
-    -A clippy::redundant_closure
-    -A clippy::result_large_err
-    -A clippy::should_implement_trait
-    -A clippy::single_match
-    -A clippy::too_many_arguments
-    -A clippy::type_complexity
-    -A clippy::unnecessary_cast
-    -A clippy::unnecessary_lazy_evaluations
-    -A clippy::useless_conversion
-    -A clippy::vec_box
-    -A clippy::wrong_self_convention
 
 jobs:
   workflow-lint:

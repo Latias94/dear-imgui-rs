@@ -866,8 +866,10 @@ fn secondary_window_callback_recreation_retires_the_previous_registration() {
         Rc::new(Cell::new(0)),
         synthetic_create_window,
     );
-    let mut viewport = sys::ImGuiViewport::default();
-    viewport.ID = 41;
+    let mut viewport = sys::ImGuiViewport {
+        ID: 41,
+        ..Default::default()
+    };
     let address = (&mut viewport) as *mut sys::ImGuiViewport as usize;
     let create = |viewport: &mut sys::ImGuiViewport| {
         context

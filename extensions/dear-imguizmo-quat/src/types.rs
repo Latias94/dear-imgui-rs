@@ -1,7 +1,7 @@
 pub use dear_imgui_rs::math::Vec3Like;
 use dear_imguizmo_quat_sys as sys;
 
-/// Trait for quaternion-like types convertible to/from [x,y,z,w].
+/// Trait for quaternion-like types convertible to/from `[x, y, z, w]`.
 ///
 /// Implemented for `[f32; 4]`, `glam::Quat` (feature `glam`) and
 /// `mint::Quaternion<f32>` (feature `mint`).
@@ -10,7 +10,7 @@ pub trait QuatLike {
     fn set_from_xyzw(&mut self, v: [f32; 4]);
 }
 
-/// Trait for vec4-like types convertible to/from [x,y,z,w].
+/// Trait for vec4-like types convertible to/from `[x, y, z, w]`.
 ///
 /// Implemented for `[f32; 4]`, `glam::Vec4` (feature `glam`) and
 /// `mint::Vector4<f32>` (feature `mint`).

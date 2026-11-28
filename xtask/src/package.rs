@@ -570,9 +570,9 @@ mod tests {
     fn coff_normalization_preserves_payload_and_index_offsets() -> Result<()> {
         let mut library = b"!<arch>\n".to_vec();
         for (name, payload) in [("/", b"index".as_slice()), ("main.o/", b"object")] {
-            write!(
+            writeln!(
                 library,
-                "{name:<16}{:<12}{:<6}{:<6}{:<8}{:<10}`\n",
+                "{name:<16}{:<12}{:<6}{:<6}{:<8}{:<10}`",
                 1_795_850_420,
                 0,
                 0,

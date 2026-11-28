@@ -425,8 +425,10 @@ pub(super) fn render_application_frame<A: Application>(
         application,
         config,
         wake,
-        frame_index,
-        Some(target.texture()),
+        FrameRecordingOptions {
+            frame_index,
+            target: Some(target.texture()),
+        },
     )?;
     let gpu = &mut generation.gpu;
     let mut driver = AdmittedWgpuFrameDriver {
@@ -448,6 +450,12 @@ pub(super) struct RecordedApplicationFrame<'ctx> {
     framebuffer_extent: FramebufferExtent,
 }
 
+pub(super) struct FrameRecordingOptions<'a> {
+    pub(super) frame_index: u64,
+    /// The acquired texture, when main surface admission precedes recording.
+    pub(super) target: Option<&'a wgpu::Texture>,
+}
+
 pub(super) fn record_application_frame<'ctx, A: Application>(
     ui: &'ctx mut UiState,
     generation: &mut RuntimeGeneration,
@@ -455,8 +463,10 @@ pub(super) fn record_application_frame<'ctx, A: Application>(
     application: &mut A,
     config: &AppConfig,
     wake: &AppWakeHandle,
-    frame_index: u64,
-    target: Option<&wgpu::Texture>,
+    FrameRecordingOptions {
+        frame_index,
+        target,
+    }: FrameRecordingOptions<'_>,
 ) -> Result<RecordedApplicationFrame<'ctx>, RunError> {
     let (frame, exit_requested) =
         build_application_frame(ui, generation, window, application, config, wake)?;

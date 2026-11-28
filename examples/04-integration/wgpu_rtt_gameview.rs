@@ -473,7 +473,7 @@ impl AppWindow {
                 label: Some("Main Encoder"),
             });
 
-        platform.prepare_render(&ui, &self.window)?;
+        platform.prepare_render(ui, &self.window)?;
         let pending_frame = context.render(renderer.renderer_consumer()?);
 
         {

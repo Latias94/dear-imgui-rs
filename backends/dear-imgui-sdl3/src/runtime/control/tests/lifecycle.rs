@@ -129,8 +129,8 @@ fn platform_only_shutdown_rejects_an_active_renderer_before_closing_the_frame() 
 
     assert!(matches!(
         runtime.shutdown_platform(&mut context),
-        Err(Sdl3BackendError::PlatformAttachmentRelease(
-            dear_imgui_rs::ContextPlatformAttachmentReleaseError::RendererActive
+        Err(Sdl3BackendError::Context(
+            dear_imgui_rs::ContextError::RendererAttachmentActive
         ))
     ));
     assert_eq!(
@@ -140,7 +140,7 @@ fn platform_only_shutdown_rejects_an_active_renderer_before_closing_the_frame() 
     assert_eq!(runtime.control.state(), RuntimeState::Attached);
     assert_eq!(platform_count.get(), 0);
 
-    assert_eq!(renderer.detach(), Ok(true));
+    assert!(renderer.detach().unwrap());
     runtime.shutdown_platform(&mut context).unwrap();
     assert_eq!(platform_count.get(), 1);
 }
@@ -212,9 +212,11 @@ fn vulkan_provider_validates_callback_and_viewport_immediately_before_invocation
     let provider = runtime
         .acquire_vulkan_surface_provider(&context)
         .expect("Vulkan SDL runtime must issue a provider");
-    let mut viewport = sys::ImGuiViewport::default();
-    viewport.PlatformUserData = OWNED_VIEWPORT_DATA as *mut _;
-    viewport.PlatformHandle = OWNED_VIEWPORT_HANDLE as *mut _;
+    let mut viewport = sys::ImGuiViewport {
+        PlatformUserData: OWNED_VIEWPORT_DATA as *mut _,
+        PlatformHandle: OWNED_VIEWPORT_HANDLE as *mut _,
+        ..Default::default()
+    };
     runtime
         .control
         .remember_owned_viewport(&mut viewport, unsafe {
@@ -258,7 +260,7 @@ fn context_renderer_phase_releases_provider_before_sdl_platform_phase() {
         fn release_renderer_resources(
             &self,
             _context: &ContextTeardown<'_>,
-        ) -> Result<(), ContextAttachmentTeardownError> {
+        ) -> Result<(), ContextError> {
             self.0.borrow_mut().take();
             Ok(())
         }
@@ -401,16 +403,13 @@ impl ContextAttachment for TeardownPhaseObserver {
     fn release_renderer_resources(
         &self,
         _context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         self.renderer_phase_counts
             .set((self.renderer_count.get(), self.platform_count.get()));
         Ok(())
     }
 
-    fn release_platform_windows(
-        &self,
-        _context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, _context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         self.platform_phase_counts
             .set((self.renderer_count.get(), self.platform_count.get()));
         Ok(())

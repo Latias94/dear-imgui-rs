@@ -10,8 +10,8 @@ use dear_imgui_rs::{
     Context, ContextId, Id,
     platform_io::NativeWindowTarget,
     render::{
-        DetachedRendererConsumer, FrameSnapshot, RendererResetSignal, SnapshotCommitError,
-        SnapshotEpoch, TextureFeedback,
+        DetachedRendererConsumer, FrameError, FrameSnapshot, RendererResetSignal, SnapshotEpoch,
+        TextureFeedback,
     },
 };
 
@@ -218,7 +218,7 @@ pub struct WgpuSnapshotError {
     /// Earlier observations, with no claim about queue submission or GPU completion.
     pub report: WgpuSnapshotReport,
     /// Failure to deliver feedback, usually because the Context was destroyed.
-    pub completion_error: Option<SnapshotCommitError>,
+    pub completion_error: Option<FrameError>,
 }
 
 /// Context-free WGPU state. On native WGPU backends it is automatically `Send`.
@@ -709,7 +709,7 @@ impl WgpuPreparedSnapshot<'_> {
         Ok(report)
     }
 
-    fn commit(&mut self) -> Option<SnapshotCommitError> {
+    fn commit(&mut self) -> Option<FrameError> {
         self.snapshot
             .take()
             .and_then(|snapshot| snapshot.commit(std::mem::take(&mut self.feedback)).err())

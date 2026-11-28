@@ -111,17 +111,13 @@ pub enum RendererError {
     #[error("Allocator error: {0}")]
     Allocator(String),
 
-    /// Managed renderer-consumer contract error.
-    #[error("Renderer consumer error: {0}")]
-    RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
-
-    /// Finalizing the Dear ImGui frame failed before Ash could reconcile it.
-    #[error("failed to finalize the Dear ImGui frame: {0}")]
-    FrameCapture(#[from] dear_imgui_rs::render::SnapshotError),
+    /// The Context's frame or renderer consumer rejected the operation.
+    #[error("Dear ImGui frame error: {0}")]
+    Frame(#[from] dear_imgui_rs::FrameError),
 
     /// Managed texture feedback did not match its request.
     #[error("Texture feedback error: {0}")]
-    TextureFeedback(#[from] dear_imgui_rs::render::TextureFeedbackError),
+    TextureFeedback(#[from] dear_imgui_rs::TextureError),
 
     /// GPU allocator error (when `gpu-allocator` feature is enabled).
     #[cfg(all(not(target_arch = "wasm32"), feature = "gpu-allocator"))]

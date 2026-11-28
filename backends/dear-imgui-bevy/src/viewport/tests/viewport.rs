@@ -138,7 +138,7 @@ impl imgui::ContextAttachment for ForeignDropObserver {
     fn release_platform_windows(
         &self,
         context: &imgui::ContextTeardown<'_>,
-    ) -> Result<(), imgui::ContextAttachmentTeardownError> {
+    ) -> Result<(), imgui::ContextError> {
         context.with_bound_context(|| unsafe {
             let io = sys::igGetIO_Nil();
             let main_viewport = sys::igGetMainViewport();

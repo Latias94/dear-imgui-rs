@@ -4,7 +4,7 @@ use std::{cell::Cell, marker::PhantomData, ptr::NonNull, rc::Rc};
 
 use crate::GlVertexArray;
 use crate::{GlBuffer, GlProgram, GlSampler, GlTexture, GlVersion, RenderError};
-use dear_imgui_backend_support::ScopedRenderStateError;
+use dear_imgui_rs::FrameError;
 use dear_imgui_rs::sys;
 use glow::{Context, HasContext};
 use thiserror::Error;
@@ -122,14 +122,13 @@ impl GlowRenderState<'_> {
     }
 }
 
-pub(crate) fn map_renderer_render_state_error(error: ScopedRenderStateError) -> RenderError {
+pub(crate) fn map_renderer_render_state_error(error: FrameError) -> RenderError {
     match error {
-        ScopedRenderStateError::MissingPlatformIo => RenderError::MissingPlatformIo,
-        ScopedRenderStateError::AlreadyOccupied | ScopedRenderStateError::Drift => {
-            RenderError::RendererStateDrift {
-                field: "Renderer_RenderState",
-            }
-        }
+        FrameError::MissingPlatformIo => RenderError::MissingPlatformIo,
+        FrameError::AlreadyOccupied | FrameError::Drift => RenderError::RendererStateDrift {
+            field: "Renderer_RenderState",
+        },
+        error => RenderError::Frame(error),
     }
 }
 

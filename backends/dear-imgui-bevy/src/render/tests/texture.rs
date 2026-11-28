@@ -425,7 +425,7 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
         .unwrap();
     assert!(matches!(
         primary_texture_state,
-        Err(imgui::ManagedTextureError::Retiring(texture)) if texture == primary_texture
+        Err(imgui::TextureError::Retiring(texture)) if texture == primary_texture
     ));
     app.world_mut()
         .resource_mut::<ContextManagedTextures>()

@@ -97,7 +97,7 @@ use dear_imgui_reflect as reflect;
 
 fn configure(
     session: &mut reflect::ReflectSession,
-) -> Result<(), reflect::imgui::NumericFormatError> {
+) -> Result<(), reflect::imgui::ContextError> {
     let settings = session.settings_mut();
     *settings.vec_mut() = reflect::VecSettings::reorder_only();
     *settings.maps_mut() = reflect::MapSettings::const_map();
@@ -122,7 +122,7 @@ keyed by the exact reflected type and generated member path:
 # struct Material { color: (f32, f32, f32, f32), layers: Vec<i32> }
 fn configure_material(
     session: &mut reflect::ReflectSession,
-) -> Result<(), reflect::imgui::NumericFormatError> {
+) -> Result<(), reflect::imgui::ContextError> {
     let settings = session.settings_mut();
     settings
         .for_member::<Material>("layers")

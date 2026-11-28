@@ -162,9 +162,9 @@ pub enum RunError {
     #[error("WGPU device request failed: {0}")]
     DeviceRequest(#[source] wgpu::RequestDeviceError),
     #[error("Dear ImGui context creation failed: {0}")]
-    ImGuiContext(#[source] imgui::ImGuiError),
+    ImGuiContext(#[source] imgui::ContextError),
     #[error("Dear ImGui frame admission failed: {0}")]
-    ImGuiFrame(#[source] imgui::render::RendererConsumerError),
+    ImGuiFrame(#[source] imgui::FrameError),
     #[error(
         "application callback during {stage} changed Dear ImGui frame ownership from {before:?} to {after:?}"
     )]
@@ -182,7 +182,7 @@ pub enum RunError {
     #[error("WGPU renderer release failed: {0}")]
     RendererRelease(#[source] dear_imgui_wgpu::RendererError),
     #[error("Dear ImGui dockspace submission failed: {0}")]
-    Dockspace(#[source] imgui::DockspaceError),
+    Dockspace(#[source] imgui::ContextError),
     #[error("Winit platform operation `{operation}` failed: {source}")]
     Platform {
         operation: &'static str,
@@ -578,7 +578,7 @@ macro_rules! impl_context_resource_access {
                 &self,
                 id: imgui::ManagedTextureId,
                 operation: impl for<'texture> FnOnce(imgui::ManagedTextureRef<'texture>) -> R,
-            ) -> Result<R, imgui::ManagedTextureError> {
+            ) -> Result<R, imgui::TextureError> {
                 self.imgui.with_texture(id, operation)
             }
 
@@ -587,7 +587,7 @@ macro_rules! impl_context_resource_access {
                 &mut self,
                 id: imgui::ManagedTextureId,
                 operation: impl for<'texture> FnOnce(imgui::ManagedTextureMut<'texture>) -> R,
-            ) -> Result<R, imgui::ManagedTextureError> {
+            ) -> Result<R, imgui::TextureError> {
                 self.imgui.with_texture_mut(id, operation)
             }
 
@@ -597,8 +597,8 @@ macro_rules! impl_context_resource_access {
                 id: imgui::ManagedTextureId,
                 operation: impl for<'texture> FnOnce(
                     imgui::ManagedTextureMut<'texture>,
-                ) -> Result<R, imgui::TextureDataError>,
-            ) -> Result<R, imgui::ManagedTextureMutationError> {
+                ) -> Result<R, imgui::TextureError>,
+            ) -> Result<R, imgui::TextureError> {
                 self.imgui.try_with_texture_mut(id, operation)
             }
 
@@ -606,7 +606,7 @@ macro_rules! impl_context_resource_access {
             pub fn remove_texture(
                 &mut self,
                 id: imgui::ManagedTextureId,
-            ) -> Result<(), imgui::ManagedTextureError> {
+            ) -> Result<(), imgui::TextureError> {
                 self.imgui.remove_texture(id)
             }
         }

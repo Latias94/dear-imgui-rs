@@ -1,3 +1,5 @@
+use crate::FrameError;
+
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::num::NonZeroU64;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
@@ -6,11 +8,11 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use crate::render::snapshot::capture_platform_io;
 use crate::render::snapshot::{
     DetachedRendererConsumer, FrameSnapshot, PendingSnapshot, PendingTextureRequest,
-    RendererConsumerCapability, RendererConsumerError, RendererResetSignal,
-    SnapshotCompletionOutcome, SnapshotCompletionProgress, SnapshotEpoch, SnapshotError,
-    SnapshotMessage, SnapshotTextureId, SynchronousRendererConsumer, TextureFeedback,
-    TextureRequest, TextureRequestKey, capture_draw_data, capture_texture_requests_only,
-    finalize_texture_requests, validate_texture_feedback,
+    RendererConsumerCapability, RendererResetSignal, SnapshotCompletionOutcome,
+    SnapshotCompletionProgress, SnapshotEpoch, SnapshotMessage, SnapshotTextureId,
+    SynchronousRendererConsumer, TextureFeedback, TextureRequest, TextureRequestKey,
+    capture_draw_data, capture_texture_requests_only, finalize_texture_requests,
+    validate_texture_feedback,
 };
 
 use super::binding::{CTX_MUTEX, RawBoundContextGuard};
@@ -64,7 +66,7 @@ pub(super) struct SnapshotHub {
     next_epoch: Option<NonZeroU64>,
     completion_watermark: u64,
     outstanding: BTreeMap<u64, OutstandingEpoch>,
-    pending_errors: VecDeque<RendererConsumerError>,
+    pending_errors: VecDeque<FrameError>,
     synchronous_frame: Option<SynchronousFrameState>,
 }
 
@@ -111,19 +113,19 @@ impl SnapshotHub {
         })
     }
 
-    pub(super) fn validate_consumer_admission(&self) -> Result<NonZeroU64, RendererConsumerError> {
+    pub(super) fn validate_consumer_admission(&self) -> Result<NonZeroU64, FrameError> {
         if let Some(error) = self.pending_errors.front().copied() {
             return Err(error);
         }
         match self.phase {
             ConsumerPhase::Active(_) => {
-                return Err(RendererConsumerError::ConsumerAlreadyActive);
+                return Err(FrameError::ConsumerAlreadyActive);
             }
-            ConsumerPhase::Draining(_) => return Err(RendererConsumerError::ConsumerDraining),
+            ConsumerPhase::Draining(_) => return Err(FrameError::ConsumerDraining),
             ConsumerPhase::Unbound => {}
         }
         self.next_consumer_generation
-            .ok_or(RendererConsumerError::ConsumerGenerationExhausted)
+            .ok_or(FrameError::ConsumerGenerationExhausted)
     }
 
     fn commit_consumer_admission(&mut self, generation: NonZeroU64) {
@@ -167,7 +169,7 @@ impl SnapshotHub {
         requests: Vec<PendingTextureRequest>,
         registry: &mut ManagedTextureRegistry,
         atlas: &FontAtlasSnapshotTarget,
-    ) -> Result<FrameSnapshot, SnapshotError> {
+    ) -> Result<FrameSnapshot, FrameError> {
         let generation = self.validate_consumer(consumer)?;
         let sequence = self.allocate_epoch()?;
         let epoch = SnapshotEpoch::new(self.context, generation, sequence);
@@ -199,7 +201,7 @@ impl SnapshotHub {
         consumer: &SynchronousRendererConsumer,
         pending: Vec<PendingTextureRequest>,
         atlas: &FontAtlasSnapshotTarget,
-    ) -> Result<(SnapshotEpoch, Vec<TextureRequest>), RendererConsumerError> {
+    ) -> Result<(SnapshotEpoch, Vec<TextureRequest>), FrameError> {
         let generation = self.validate_consumer(consumer)?;
         debug_assert!(self.outstanding.is_empty());
         let sequence = self.allocate_epoch()?;
@@ -233,7 +235,7 @@ impl SnapshotHub {
         feedback: Vec<TextureFeedback>,
         registry: &mut ManagedTextureRegistry,
         atlas: FontAtlasSnapshotTarget,
-    ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
+    ) -> Result<SnapshotCompletionProgress, FrameError> {
         let result = self
             .set_direct_completion(epoch, SnapshotCompletionOutcome::Committed(feedback))
             .and_then(|()| self.advance(registry, &atlas));
@@ -274,20 +276,20 @@ impl SnapshotHub {
         &mut self,
         epoch: SnapshotEpoch,
         outcome: SnapshotCompletionOutcome,
-    ) -> Result<(), RendererConsumerError> {
+    ) -> Result<(), FrameError> {
         let Some(outstanding) = self.outstanding.get_mut(&epoch.sequence()) else {
-            return Err(RendererConsumerError::UnknownEpoch {
+            return Err(FrameError::UnknownEpoch {
                 epoch: epoch.sequence(),
             });
         };
         if outstanding.epoch != epoch {
-            return Err(RendererConsumerError::StaleConsumerGeneration {
+            return Err(FrameError::StaleConsumerGeneration {
                 expected: outstanding.epoch.consumer_generation(),
                 actual: epoch.consumer_generation(),
             });
         }
         if outstanding.completion.is_some() {
-            return Err(RendererConsumerError::EpochAlreadyCompleted {
+            return Err(FrameError::EpochAlreadyCompleted {
                 epoch: epoch.sequence(),
             });
         }
@@ -298,11 +300,8 @@ impl SnapshotHub {
         Ok(())
     }
 
-    fn allocate_epoch(&mut self) -> Result<NonZeroU64, RendererConsumerError> {
-        let sequence = self
-            .next_epoch
-            .take()
-            .ok_or(RendererConsumerError::EpochExhausted)?;
+    fn allocate_epoch(&mut self) -> Result<NonZeroU64, FrameError> {
+        let sequence = self.next_epoch.take().ok_or(FrameError::EpochExhausted)?;
         self.next_epoch = sequence.get().checked_add(1).and_then(NonZeroU64::new);
         Ok(sequence)
     }
@@ -310,14 +309,14 @@ impl SnapshotHub {
     pub(super) fn validate_consumer(
         &self,
         consumer: &impl RendererConsumerCapability,
-    ) -> Result<NonZeroU64, RendererConsumerError> {
+    ) -> Result<NonZeroU64, FrameError> {
         let generation = self.validate_consumer_identity(consumer)?;
         if self
             .texture_owner
             .as_ref()
             .is_some_and(|owner| owner.generation() != generation)
         {
-            return Err(RendererConsumerError::RendererTextureResetRequired);
+            return Err(FrameError::RendererTextureResetRequired);
         }
         Ok(generation)
     }
@@ -325,18 +324,18 @@ impl SnapshotHub {
     fn validate_consumer_identity(
         &self,
         consumer: &impl RendererConsumerCapability,
-    ) -> Result<NonZeroU64, RendererConsumerError> {
+    ) -> Result<NonZeroU64, FrameError> {
         if consumer.context_id() != self.context {
-            return Err(RendererConsumerError::ForeignContext {
+            return Err(FrameError::ForeignContext {
                 expected: self.context,
                 actual: consumer.context_id(),
             });
         }
         match self.phase {
-            ConsumerPhase::Unbound => Err(RendererConsumerError::NoActiveConsumer),
-            ConsumerPhase::Draining(_) => Err(RendererConsumerError::ConsumerDraining),
+            ConsumerPhase::Unbound => Err(FrameError::NoActiveConsumer),
+            ConsumerPhase::Draining(_) => Err(FrameError::ConsumerDraining),
             ConsumerPhase::Active(expected) if expected != consumer_generation_raw(consumer) => {
-                Err(RendererConsumerError::StaleConsumerGeneration {
+                Err(FrameError::StaleConsumerGeneration {
                     expected: expected.get(),
                     actual: consumer.generation(),
                 })
@@ -349,7 +348,7 @@ impl SnapshotHub {
         &mut self,
         registry: &mut ManagedTextureRegistry,
         atlas: &FontAtlasSnapshotTarget,
-    ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
+    ) -> Result<SnapshotCompletionProgress, FrameError> {
         self.drain_messages();
         self.advance(registry, atlas)
     }
@@ -372,7 +371,7 @@ impl SnapshotHub {
         &mut self,
         registry: &mut ManagedTextureRegistry,
         atlas: &FontAtlasSnapshotTarget,
-    ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
+    ) -> Result<SnapshotCompletionProgress, FrameError> {
         let mut progress = SnapshotCompletionProgress {
             watermark: self.completion_watermark,
             ..Default::default()
@@ -438,31 +437,28 @@ impl SnapshotHub {
                 Ok(SnapshotMessage::Completion(completion)) => {
                     let sequence = completion.epoch.sequence();
                     if completion.epoch.context_id() != self.context {
-                        self.pending_errors
-                            .push_back(RendererConsumerError::ForeignContext {
-                                expected: self.context,
-                                actual: completion.epoch.context_id(),
-                            });
+                        self.pending_errors.push_back(FrameError::ForeignContext {
+                            expected: self.context,
+                            actual: completion.epoch.context_id(),
+                        });
                         continue;
                     }
                     let Some(outstanding) = self.outstanding.get_mut(&sequence) else {
                         self.pending_errors
-                            .push_back(RendererConsumerError::UnknownEpoch { epoch: sequence });
+                            .push_back(FrameError::UnknownEpoch { epoch: sequence });
                         continue;
                     };
                     if outstanding.epoch != completion.epoch {
-                        self.pending_errors.push_back(
-                            RendererConsumerError::StaleConsumerGeneration {
+                        self.pending_errors
+                            .push_back(FrameError::StaleConsumerGeneration {
                                 expected: outstanding.epoch.consumer_generation(),
                                 actual: completion.epoch.consumer_generation(),
-                            },
-                        );
+                            });
                         continue;
                     }
                     if outstanding.completion.is_some() {
-                        self.pending_errors.push_back(
-                            RendererConsumerError::EpochAlreadyCompleted { epoch: sequence },
-                        );
+                        self.pending_errors
+                            .push_back(FrameError::EpochAlreadyCompleted { epoch: sequence });
                         continue;
                     }
                     outstanding.completion = Some(completion.outcome);
@@ -472,11 +468,10 @@ impl SnapshotHub {
                     generation,
                 }) => {
                     if context != self.context {
-                        self.pending_errors
-                            .push_back(RendererConsumerError::ForeignContext {
-                                expected: self.context,
-                                actual: context,
-                            });
+                        self.pending_errors.push_back(FrameError::ForeignContext {
+                            expected: self.context,
+                            actual: context,
+                        });
                         continue;
                     }
                     match self.phase {
@@ -485,16 +480,14 @@ impl SnapshotHub {
                         }
                         ConsumerPhase::Draining(active) if active == generation => {}
                         ConsumerPhase::Active(active) | ConsumerPhase::Draining(active) => {
-                            self.pending_errors.push_back(
-                                RendererConsumerError::StaleConsumerGeneration {
+                            self.pending_errors
+                                .push_back(FrameError::StaleConsumerGeneration {
                                     expected: active.get(),
                                     actual: generation.get(),
-                                },
-                            );
+                                });
                         }
                         ConsumerPhase::Unbound => {
-                            self.pending_errors
-                                .push_back(RendererConsumerError::NoActiveConsumer);
+                            self.pending_errors.push_back(FrameError::NoActiveConsumer);
                         }
                     }
                 }
@@ -551,7 +544,7 @@ impl Context {
     /// Pending detached completions are not polled by this method. Call
     /// [`Self::poll_snapshot_completions`] first when retrying after a consumer entered its
     /// draining phase.
-    pub fn preflight_renderer_consumer(&self) -> Result<(), RendererConsumerError> {
+    pub fn preflight_renderer_consumer(&self) -> Result<(), FrameError> {
         let _guard = CTX_MUTEX.lock();
         self.validate_renderer_consumer_admission_unlocked("Context::preflight_renderer_consumer()")
             .map(|_| ())
@@ -564,13 +557,13 @@ impl Context {
     ///
     /// A [`SharedFontAtlas`](crate::SharedFontAtlas) must be registered with exactly one context
     /// before it can enter managed renderer mode. If multiple contexts still share the atlas, this
-    /// returns [`RendererConsumerError::SharedFontAtlasRequiresExclusiveContext`]. Multiple-context
+    /// returns [`FrameError::SharedFontAtlasRequiresExclusiveContext`]. Multiple-context
     /// shared atlases remain available to legacy renderer-managed texture handling.
     /// A replacement renderer requires the predecessor to confirm resource release through its
     /// reset signal or commit [`Self::prepare_renderer_texture_reset`].
     pub fn create_synchronous_renderer_consumer(
         &mut self,
-    ) -> Result<SynchronousRendererConsumer, RendererConsumerError> {
+    ) -> Result<SynchronousRendererConsumer, FrameError> {
         let _guard = CTX_MUTEX.lock();
         let generation = self.commit_renderer_consumer_admission_unlocked(
             "Context::create_synchronous_renderer_consumer()",
@@ -588,7 +581,7 @@ impl Context {
     /// reset signal or commit [`Self::prepare_renderer_texture_reset`].
     pub fn create_detached_renderer_consumer(
         &mut self,
-    ) -> Result<DetachedRendererConsumer, RendererConsumerError> {
+    ) -> Result<DetachedRendererConsumer, FrameError> {
         let _guard = CTX_MUTEX.lock();
         let generation = self.commit_renderer_consumer_admission_unlocked(
             "Context::create_detached_renderer_consumer()",
@@ -601,7 +594,7 @@ impl Context {
     fn commit_renderer_consumer_admission_unlocked(
         &mut self,
         caller: &str,
-    ) -> Result<NonZeroU64, RendererConsumerError> {
+    ) -> Result<NonZeroU64, FrameError> {
         let _bound = RawBoundContextGuard::bind(self.raw);
         let atlas_target = self.font_atlas_snapshot_target();
         let _ = self.poll_snapshot_completions_with_target(&atlas_target)?;
@@ -613,7 +606,7 @@ impl Context {
     fn validate_renderer_consumer_admission_unlocked(
         &self,
         caller: &str,
-    ) -> Result<(*mut crate::sys::ImFontAtlas, NonZeroU64), RendererConsumerError> {
+    ) -> Result<(*mut crate::sys::ImFontAtlas, NonZeroU64), FrameError> {
         let io = self.io_ptr(caller);
         let atlas = unsafe { (*io).Fonts };
         crate::fonts::validate_font_atlas_managed_renderer(atlas, self.raw)?;
@@ -622,16 +615,14 @@ impl Context {
     }
 
     /// Merge all currently available detached completion messages.
-    pub fn poll_snapshot_completions(
-        &mut self,
-    ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
+    pub fn poll_snapshot_completions(&mut self) -> Result<SnapshotCompletionProgress, FrameError> {
         let _guard = CTX_MUTEX.lock();
         self.poll_snapshot_completions_unlocked()
     }
 
     pub(super) fn poll_snapshot_completions_unlocked(
         &mut self,
-    ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
+    ) -> Result<SnapshotCompletionProgress, FrameError> {
         let _bound = RawBoundContextGuard::bind(self.raw);
         let atlas = self.font_atlas_snapshot_target();
         self.poll_snapshot_completions_with_target(&atlas)
@@ -640,7 +631,7 @@ impl Context {
     fn poll_snapshot_completions_with_target(
         &mut self,
         atlas: &FontAtlasSnapshotTarget,
-    ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
+    ) -> Result<SnapshotCompletionProgress, FrameError> {
         let result = self
             .snapshot_hub
             .poll(&mut self.texture_registry.borrow_mut(), atlas);
@@ -671,7 +662,7 @@ impl Context {
     pub fn prepare_renderer_texture_reset<'context, 'consumer>(
         &'context mut self,
         consumer: &'consumer impl RendererConsumerCapability,
-    ) -> Result<RendererTextureReset<'context, 'consumer>, RendererConsumerError> {
+    ) -> Result<RendererTextureReset<'context, 'consumer>, FrameError> {
         let _guard = CTX_MUTEX.lock();
         self.prepare_renderer_texture_reset_unlocked(consumer)
     }
@@ -684,14 +675,14 @@ impl Context {
     pub(super) fn prepare_renderer_texture_reset_during_teardown(
         &mut self,
         consumer: &impl RendererConsumerCapability,
-    ) -> Result<u64, RendererConsumerError> {
+    ) -> Result<u64, FrameError> {
         self.validate_renderer_texture_reset_unlocked(consumer)
     }
 
     fn prepare_renderer_texture_reset_unlocked<'context, 'consumer>(
         &'context mut self,
         consumer: &'consumer impl RendererConsumerCapability,
-    ) -> Result<RendererTextureReset<'context, 'consumer>, RendererConsumerError> {
+    ) -> Result<RendererTextureReset<'context, 'consumer>, FrameError> {
         let watermark = self.validate_renderer_texture_reset_unlocked(consumer)?;
         Ok(RendererTextureReset {
             context: self,
@@ -703,13 +694,13 @@ impl Context {
     fn validate_renderer_texture_reset_unlocked(
         &mut self,
         consumer: &impl RendererConsumerCapability,
-    ) -> Result<u64, RendererConsumerError> {
+    ) -> Result<u64, FrameError> {
         let _bound = RawBoundContextGuard::bind(self.raw);
         self.snapshot_hub.validate_consumer_identity(consumer)?;
         let atlas = self.font_atlas_snapshot_target();
         let _ = self.poll_snapshot_completions_with_target(&atlas)?;
         if !self.snapshot_hub.outstanding.is_empty() {
-            return Err(RendererConsumerError::OutstandingEpochs {
+            return Err(FrameError::OutstandingEpochs {
                 count: self.snapshot_hub.outstanding.len(),
             });
         }
@@ -739,7 +730,7 @@ impl Context {
         &mut self,
         consumer: &DetachedRendererConsumer,
         draw_data: *const crate::render::DrawData,
-    ) -> Result<FrameSnapshot, SnapshotError> {
+    ) -> Result<FrameSnapshot, FrameError> {
         let atlas = self.font_atlas_snapshot_target();
         let _ = self.poll_snapshot_completions_with_target(&atlas)?;
         let pending = {
@@ -764,7 +755,7 @@ impl Context {
         &mut self,
         consumer: &SynchronousRendererConsumer,
         draw_data: *const crate::render::DrawData,
-    ) -> Result<(SnapshotEpoch, Vec<TextureRequest>), SnapshotError> {
+    ) -> Result<(SnapshotEpoch, Vec<TextureRequest>), FrameError> {
         let native_frame_count = unsafe { (*self.raw).FrameCount };
         self.snapshot_hub
             .begin_synchronous_native_frame(native_frame_count);
@@ -799,7 +790,7 @@ impl Context {
         &mut self,
         epoch: SnapshotEpoch,
         feedback: Vec<TextureFeedback>,
-    ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
+    ) -> Result<SnapshotCompletionProgress, FrameError> {
         let atlas = self.font_atlas_snapshot_target();
         self.snapshot_hub.complete_synchronous(
             epoch,
@@ -822,7 +813,7 @@ impl Context {
     pub(super) fn capture_platform_snapshot(
         &mut self,
         consumer: &DetachedRendererConsumer,
-    ) -> Result<FrameSnapshot, SnapshotError> {
+    ) -> Result<FrameSnapshot, FrameError> {
         let atlas = self.font_atlas_snapshot_target();
         let _ = self.poll_snapshot_completions_with_target(&atlas)?;
         let platform_io_ptr = self.platform_io_ptr("Context::capture_platform_snapshot()");
@@ -883,11 +874,9 @@ mod tests {
 
         assert_eq!(
             second.preflight_renderer_consumer(),
-            Err(
-                RendererConsumerError::SharedFontAtlasRequiresExclusiveContext {
-                    registered_contexts: 2,
-                }
-            )
+            Err(FrameError::SharedFontAtlasRequiresExclusiveContext {
+                registered_contexts: 2,
+            })
         );
 
         drop(second);
@@ -906,7 +895,7 @@ mod tests {
 
         assert!(matches!(
             context.create_synchronous_renderer_consumer(),
-            Err(RendererConsumerError::ConsumerGenerationExhausted)
+            Err(FrameError::ConsumerGenerationExhausted)
         ));
 
         let suspended = context;

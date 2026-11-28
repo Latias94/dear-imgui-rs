@@ -2,11 +2,12 @@ use std::cell::Cell;
 use std::ffi::{c_char, c_void};
 use std::rc::Rc;
 
+use dear_imgui_rs::error::context::BindingKind;
 use dear_imgui_rs::platform_io::PlatformIo;
 use dear_imgui_rs::render::RendererResetSignal;
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextBinding, ContextBindingError, ContextTeardown, sys,
+    ContextBinding, ContextError, ContextTeardown, sys,
 };
 
 use super::{
@@ -402,7 +403,10 @@ impl RendererContextState {
             let result = self
                 .binding
                 .try_with_bound_context(|| self.unpublish_bound());
-            if matches!(result, Err(ContextBindingError::NativeDestroyed)) {
+            if matches!(
+                result,
+                Err(ContextError::Binding(BindingKind::NativeDestroyed))
+            ) {
                 self.finish_unpublish();
             }
         }
@@ -430,7 +434,7 @@ impl ContextAttachment for RendererContextState {
     fn release_renderer_resources(
         &self,
         context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         // Viewport quiescence runs before this phase. Only the core publication is owned here.
         context.with_bound_context(|| self.unpublish_bound());
         Ok(())

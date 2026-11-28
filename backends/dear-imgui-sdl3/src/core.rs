@@ -298,8 +298,6 @@ pub enum Sdl3BackendError {
     PlatformSessionOccupied,
     #[error("SDL window {window_id} is already attached to an SDL3 platform session")]
     PlatformWindowOccupied { window_id: u32 },
-    #[error(transparent)]
-    NativeWindowIdentityExhausted(#[from] dear_imgui_rs::NativeWindowIdentityExhausted),
     #[error("SDL3 window policy is invalid: {reason}")]
     InvalidWindowConfiguration { reason: &'static str },
     #[error("SDL3 window policy `{attribute}` is unsupported by the active video driver")]
@@ -322,11 +320,7 @@ pub enum Sdl3BackendError {
     #[error("SDL3 text input contains an interior NUL byte")]
     TextInputContainsNul,
     #[error(transparent)]
-    Attachment(#[from] dear_imgui_rs::ContextAttachmentError),
-    #[error(transparent)]
-    PlatformAttachmentRelease(#[from] dear_imgui_rs::ContextPlatformAttachmentReleaseError),
-    #[error(transparent)]
-    Context(#[from] dear_imgui_rs::ContextBindingError),
+    Context(#[from] dear_imgui_rs::ContextError),
     #[error("another platform backend already owns `{callback}`")]
     PlatformCallbackOccupied { callback: &'static str },
     #[error("another platform backend already owns `{field}`")]
@@ -414,11 +408,9 @@ pub enum Sdl3BackendError {
     #[error("SDL3 shutdown is already releasing {phase}")]
     ShutdownInProgress { phase: &'static str },
     #[error(transparent)]
-    RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
+    Frame(#[from] dear_imgui_rs::FrameError),
     #[error(transparent)]
-    FrameCapture(#[from] dear_imgui_rs::render::SnapshotError),
-    #[error(transparent)]
-    TextureFeedback(#[from] dear_imgui_rs::render::TextureFeedbackError),
+    TextureFeedback(#[from] dear_imgui_rs::TextureError),
     #[error("managed texture {texture:?} received an update before renderer creation")]
     ManagedTextureNotCreated {
         texture: dear_imgui_rs::render::SnapshotTextureId,

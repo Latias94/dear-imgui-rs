@@ -1419,10 +1419,10 @@ impl FileDialogCore {
                 self.active_filter = Some(i.min(self.filters.len().saturating_sub(1)));
             }
             FilterSelectionMode::Manual => {
-                if let Some(i) = self.active_filter {
-                    if i >= self.filters.len() {
-                        self.active_filter = Some(0);
-                    }
+                if let Some(i) = self.active_filter
+                    && i >= self.filters.len()
+                {
+                    self.active_filter = Some(0);
                 }
             }
         }
@@ -1689,11 +1689,11 @@ impl FileDialogCore {
     ///
     /// If no selection exists, the focused item becomes selected, then confirm is attempted.
     pub(crate) fn activate_focused(&mut self) -> bool {
-        if self.selected_ids.is_empty() {
-            if let Some(id) = self.focused_id {
-                self.selected_ids.insert(id);
-                self.selection_anchor_id = Some(id);
-            }
+        if self.selected_ids.is_empty()
+            && let Some(id) = self.focused_id
+        {
+            self.selected_ids.insert(id);
+            self.selection_anchor_id = Some(id);
         }
         !self.selected_ids.is_empty()
     }
@@ -1811,35 +1811,33 @@ impl FileDialogCore {
         // IGFD-like footer entry: allow opening a file by typing a name/path when no selection exists.
         if matches!(self.mode, DialogMode::OpenFile | DialogMode::OpenFiles)
             && selected_entries.is_empty()
+            && let Some(typed) = typed_footer_name.map(str::trim)
+            && !typed.is_empty()
         {
-            if let Some(typed) = typed_footer_name.map(str::trim) {
-                if !typed.is_empty() {
-                    let raw = PathBuf::from(typed);
-                    let raw = if raw.is_absolute() {
-                        raw
-                    } else {
-                        self.cwd.join(&raw)
-                    };
-                    let p = fs.canonicalize(&raw).unwrap_or(raw.clone());
-                    match fs.metadata(&p) {
-                        Ok(md) => {
-                            if md.is_dir {
-                                self.navigate_to_with_history(p);
-                                return Ok(());
-                            }
-                            self.result = Some(Ok(Selection { paths: vec![p] }));
-                            return Ok(());
-                        }
-                        Err(e) => {
-                            use std::io::ErrorKind::*;
-                            let msg = match e.kind() {
-                                NotFound => format!("No such file: {}", typed),
-                                PermissionDenied => format!("Permission denied: {}", typed),
-                                _ => format!("Invalid file '{}': {}", typed, e),
-                            };
-                            return Err(FileDialogError::InvalidPath(msg));
-                        }
+            let raw = PathBuf::from(typed);
+            let raw = if raw.is_absolute() {
+                raw
+            } else {
+                self.cwd.join(&raw)
+            };
+            let p = fs.canonicalize(&raw).unwrap_or(raw.clone());
+            match fs.metadata(&p) {
+                Ok(md) => {
+                    if md.is_dir {
+                        self.navigate_to_with_history(p);
+                        return Ok(());
                     }
+                    self.result = Some(Ok(Selection { paths: vec![p] }));
+                    return Ok(());
+                }
+                Err(e) => {
+                    use std::io::ErrorKind::*;
+                    let msg = match e.kind() {
+                        NotFound => format!("No such file: {}", typed),
+                        PermissionDenied => format!("Permission denied: {}", typed),
+                        _ => format!("Invalid file '{}': {}", typed, e),
+                    };
+                    return Err(FileDialogError::InvalidPath(msg));
                 }
             }
         }
@@ -1857,7 +1855,7 @@ impl FileDialogCore {
         if matches!(self.mode, DialogMode::SaveFile) {
             let target = sel
                 .paths
-                .get(0)
+                .first()
                 .cloned()
                 .unwrap_or_else(|| self.cwd.clone());
             let exists = match fs.metadata(&target) {
@@ -2396,7 +2394,7 @@ fn compare_entry_order(
     }
 }
 
-fn igfd_type_dots_to_extract(active_filter: Option<&FileFilter>) -> usize {
+pub(crate) fn igfd_type_dots_to_extract(active_filter: Option<&FileFilter>) -> usize {
     let Some(filter) = active_filter else {
         return 1;
     };
@@ -2410,9 +2408,7 @@ fn igfd_type_dots_to_extract(active_filter: Option<&FileFilter>) -> usize {
             continue;
         }
         let dot_count = t.as_bytes().iter().filter(|&&b| b == b'.').count();
-        let token_dots = if t.contains('*') || t.contains('?') {
-            dot_count
-        } else if t.starts_with('.') {
+        let token_dots = if t.contains(['*', '?']) || t.starts_with('.') {
             dot_count
         } else {
             dot_count.saturating_add(1)

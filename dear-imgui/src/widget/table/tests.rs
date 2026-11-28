@@ -1,7 +1,4 @@
 use super::*;
-use crate::draw::ImColor32;
-use crate::widget::TableColumnFlags;
-use crate::widget::table::sort::sort_columns;
 use std::any::Any;
 
 fn setup_context() -> crate::Context {

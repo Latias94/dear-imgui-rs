@@ -38,18 +38,18 @@ fn texture_id_try_as_usize_reports_overflow() {
 fn from_pixels_rejects_invalid_dimensions_and_allocation_sizes() {
     assert_eq!(
         OwnedTextureData::from_pixels(TextureFormat::RGBA32, 0, 1, &[]).err(),
-        Some(TextureDataError::InvalidDimensions {
+        Some(TextureError::InvalidDimensions {
             width: 0,
             height: 1,
         })
     );
     assert_eq!(
         OwnedTextureData::from_pixels(TextureFormat::RGBA32, i32::MAX as u32 + 1, 1, &[],).err(),
-        Some(TextureDataError::WidthOutOfRange(i32::MAX as u32 + 1))
+        Some(TextureError::WidthOutOfRange(i32::MAX as u32 + 1))
     );
     assert_eq!(
         OwnedTextureData::from_pixels(TextureFormat::RGBA32, i32::MAX as u32, 2, &[]).err(),
-        Some(TextureDataError::ByteSizeOutOfRange {
+        Some(TextureError::ByteSizeOutOfRange {
             width: i32::MAX as u32,
             height: 2,
             bytes_per_pixel: 4,
@@ -100,7 +100,7 @@ fn replace_pixels_rejects_invalid_layout_before_allocating_or_copying() {
     let before = texture_state(&texture);
     assert_eq!(
         texture.replace_pixels(&[0; 4]),
-        Err(TextureDataError::ByteSizeOutOfRange {
+        Err(TextureError::ByteSizeOutOfRange {
             width: i32::MAX as u32,
             height: 2,
             bytes_per_pixel: 4,
@@ -121,9 +121,7 @@ fn replace_pixels_rejects_invalid_layout_before_allocating_or_copying() {
     let before = texture_state(&texture);
     assert_eq!(
         texture.replace_pixels(&[1, 2, 3, 4]),
-        Err(TextureDataError::MissingPixelStorage(
-            TextureStatus::WantCreate
-        ))
+        Err(TextureError::MissingPixelStorage(TextureStatus::WantCreate))
     );
     assert_eq!(texture_state(&texture), before);
 }
@@ -187,7 +185,7 @@ fn full_updates_reject_unrepresentable_dimensions_before_copying() {
 
     assert_eq!(
         result,
-        Err(TextureDataError::FullUpdateRectOutOfRange { width, height: 1 })
+        Err(TextureError::FullUpdateRectOutOfRange { width, height: 1 })
     );
     assert_eq!(texture_state(&texture), before);
 }
@@ -199,7 +197,7 @@ fn from_pixels_requires_an_exact_payload() {
             OwnedTextureData::from_pixels(TextureFormat::RGBA32, 16, 16, &vec![0; actual])
                 .err()
                 .unwrap(),
-            TextureDataError::ByteLengthMismatch {
+            TextureError::ByteLengthMismatch {
                 expected: 1024,
                 actual,
             }
@@ -222,7 +220,7 @@ fn replace_pixels_is_exact_and_failure_atomic() {
         let before = texture_state(&texture);
         assert_eq!(
             texture.replace_pixels(&vec![2; actual]),
-            Err(TextureDataError::ByteLengthMismatch {
+            Err(TextureError::ByteLengthMismatch {
                 expected: 16,
                 actual,
             })
@@ -246,7 +244,7 @@ fn replace_pixels_rejects_destroy_transitions_atomically() {
     let before = texture_state(&texture);
     assert_eq!(
         texture.replace_pixels(&[4, 3, 2, 1]),
-        Err(TextureDataError::InvalidStatus(TextureStatus::WantDestroy))
+        Err(TextureError::InvalidStatus(TextureStatus::WantDestroy))
     );
     assert_eq!(texture_state(&texture), before);
 
@@ -256,7 +254,7 @@ fn replace_pixels_rejects_destroy_transitions_atomically() {
     let before = texture_state(&texture);
     assert_eq!(
         texture.replace_pixels(&[4, 3, 2, 1]),
-        Err(TextureDataError::InvalidStatus(TextureStatus::Destroyed))
+        Err(TextureError::InvalidStatus(TextureStatus::Destroyed))
     );
     assert_eq!(texture_state(&texture), before);
 }
@@ -310,7 +308,7 @@ fn subresource_updates_validate_every_boundary_before_mutation() {
 
     assert_eq!(
         TextureRegion::new(0, 0, 0, 1),
-        Err(TextureDataError::InvalidRegionDimensions {
+        Err(TextureError::InvalidRegionDimensions {
             width: 0,
             height: 1,
         })
@@ -321,7 +319,7 @@ fn subresource_updates_validate_every_boundary_before_mutation() {
             region(3, 0, 2, 1),
             2,
             vec![1, 2],
-            TextureDataError::UpdateRegionOutOfBounds {
+            TextureError::UpdateRegionOutOfBounds {
                 region: region(3, 0, 2, 1),
                 width: 4,
                 height: 4,
@@ -331,7 +329,7 @@ fn subresource_updates_validate_every_boundary_before_mutation() {
             region(0, 0, 2, 2),
             1,
             vec![1, 2],
-            TextureDataError::RowPitchTooSmall {
+            TextureError::RowPitchTooSmall {
                 minimum: 2,
                 actual: 1,
             },
@@ -340,7 +338,7 @@ fn subresource_updates_validate_every_boundary_before_mutation() {
             region(0, 0, 2, 2),
             3,
             vec![1, 2, 3, 4],
-            TextureDataError::ByteLengthMismatch {
+            TextureError::ByteLengthMismatch {
                 expected: 5,
                 actual: 4,
             },
@@ -349,7 +347,7 @@ fn subresource_updates_validate_every_boundary_before_mutation() {
             region(0, 0, 2, 2),
             3,
             vec![1, 2, 3, 4, 5, 6],
-            TextureDataError::ByteLengthMismatch {
+            TextureError::ByteLengthMismatch {
                 expected: 5,
                 actual: 6,
             },
@@ -396,7 +394,7 @@ fn subresource_update_rejects_overflow_and_destroy_transitions_atomically() {
     let before = texture_state(&texture);
     assert_eq!(
         texture.update_subresource(TextureSubresource::new(rect, usize::MAX, &[])),
-        Err(TextureDataError::PayloadSizeOutOfRange {
+        Err(TextureError::PayloadSizeOutOfRange {
             row_pitch: usize::MAX,
             height: 2,
         })
@@ -410,7 +408,7 @@ fn subresource_update_rejects_overflow_and_destroy_transitions_atomically() {
     let before = texture_state(&texture);
     assert_eq!(
         texture.update_subresource(TextureSubresource::new(rect, 1, &[1, 2])),
-        Err(TextureDataError::InvalidStatus(TextureStatus::WantDestroy))
+        Err(TextureError::InvalidStatus(TextureStatus::WantDestroy))
     );
     assert_eq!(texture_state(&texture), before);
 }
@@ -463,16 +461,14 @@ fn live_subresource_updates_enforce_native_rectangle_boundaries_atomically() {
             width as usize,
             &vec![2; width as usize],
         )),
-        Err(TextureDataError::UpdateRegionNotRepresentable(
-            unrepresentable
-        ))
+        Err(TextureError::UpdateRegionNotRepresentable(unrepresentable))
     );
     assert_eq!(texture_state(&texture), before);
 
     let overflowing = TextureRegion::new(u32::MAX, 0, 1, 1).unwrap();
     assert_eq!(
         texture.update_subresource(TextureSubresource::new(overflowing, 1, &[3])),
-        Err(TextureDataError::UpdateRegionOutOfBounds {
+        Err(TextureError::UpdateRegionOutOfBounds {
             region: overflowing,
             width,
             height: 1,

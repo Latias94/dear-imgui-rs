@@ -1,9 +1,12 @@
+use ttf_parser::FromData;
+
+use crate::FontError;
+
 use super::{
-    MAX_COMPONENTS_PER_GLYPH, MAX_COMPOSITE_DEPTH, MAX_EXPANDED_GLYPH_COMPLEXITY, MaxpLimits,
-    StbTrueTypeFontError, Table,
+    MAX_COMPONENTS_PER_GLYPH, MAX_COMPOSITE_DEPTH, MAX_EXPANDED_GLYPH_COMPLEXITY, MaxpLimits, Table,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(super) enum GlyphKind {
     Empty,
     Simple {
@@ -16,7 +19,7 @@ pub(super) enum GlyphKind {
     },
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub(super) struct CompositeComponent {
     pub(super) glyph_id: u16,
     pub(super) transform: CompositeTransform,
@@ -46,24 +49,12 @@ impl Default for CompositeTransform {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-struct AxisBounds {
-    min: i16,
-    max: i16,
-}
-
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub(super) struct CoordinateBounds {
     pub(super) min_x: i16,
     pub(super) max_x: i16,
     pub(super) min_y: i16,
     pub(super) max_y: i16,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct CoordinateStream {
-    cursor: usize,
-    bounds: Option<AxisBounds>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -75,60 +66,78 @@ pub(super) struct ExpandedGlyph {
     bounds: Option<CoordinateBounds>,
 }
 
+#[derive(Clone, Copy)]
+struct Glyph<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+    id: u16,
+}
+
+impl<'a> Glyph<'a> {
+    fn error(self, offset: usize, reason: &'static str) -> FontError {
+        FontError::InvalidGlyph {
+            glyph_id: self.id,
+            offset: self.offset + offset,
+            reason,
+        }
+    }
+
+    fn range(self, offset: usize, len: usize, reason: &'static str) -> Result<&'a [u8], FontError> {
+        self.bytes
+            .get(offset..)
+            .and_then(|tail| tail.get(..len))
+            .ok_or_else(|| self.error(offset, reason))
+    }
+
+    fn read<T: FromData>(self, offset: usize) -> Result<T, FontError> {
+        let reason = "glyph byte stream is truncated";
+        T::parse(self.range(offset, T::SIZE, reason)?).ok_or_else(|| self.error(offset, reason))
+    }
+
+    fn skip_instructions(self, offset: usize, max_bytes: usize) -> Result<usize, FontError> {
+        let length = usize::from(self.read::<u16>(offset)?);
+        if length > max_bytes {
+            return Err(self.error(
+                offset,
+                "instruction length exceeds maxp.maxSizeOfInstructions",
+            ));
+        }
+        let start = offset + 2;
+        self.range(start, length, "glyph instructions are truncated")?;
+        Ok(start + length)
+    }
+}
+
 pub(super) fn validate_glyphs(
-    data: &[u8],
-    table: Table,
+    table: Table<'_>,
     locations: &[usize],
     limits: MaxpLimits,
-) -> Result<(), StbTrueTypeFontError> {
-    let glyf = table.bytes(data);
+) -> Result<(), FontError> {
     let glyph_count = usize::from(limits.glyph_count);
     let mut glyphs = Vec::with_capacity(glyph_count);
-
-    for glyph_index in 0..glyph_count {
-        let start = locations[glyph_index];
-        let end = locations[glyph_index + 1];
-        let glyph_id = glyph_index as u16;
+    for (index, pair) in locations.windows(2).enumerate() {
+        let start = pair[0];
+        let end = pair[1];
+        let glyph = Glyph {
+            bytes: &table.bytes[start..end],
+            offset: table.offset + start,
+            id: index as u16,
+        };
         if start == end {
             glyphs.push(GlyphKind::Empty);
             continue;
         }
-        if end - start < 10 {
-            return Err(invalid_glyph(
-                table,
-                glyph_id,
-                start,
-                "nonempty glyph is shorter than its ten-byte header",
-            ));
+        glyph.range(0, 10, "nonempty glyph is shorter than its ten-byte header")?;
+        if glyph.read::<i16>(2)? > glyph.read::<i16>(6)?
+            || glyph.read::<i16>(4)? > glyph.read::<i16>(8)?
+        {
+            return Err(glyph.error(2, "glyph bounding box minimum exceeds its maximum"));
         }
-        let bytes = &glyf[start..end];
-        let contour_count = glyph_i16(bytes, table, glyph_id, start, 0)?;
-        let x_min = glyph_i16(bytes, table, glyph_id, start, 2)?;
-        let y_min = glyph_i16(bytes, table, glyph_id, start, 4)?;
-        let x_max = glyph_i16(bytes, table, glyph_id, start, 6)?;
-        let y_max = glyph_i16(bytes, table, glyph_id, start, 8)?;
-        if x_min > x_max || y_min > y_max {
-            return Err(invalid_glyph(
-                table,
-                glyph_id,
-                start + 2,
-                "glyph bounding box minimum exceeds its maximum",
-            ));
-        }
-
-        let kind = if contour_count > 0 {
-            parse_simple_glyph(
-                bytes,
-                table,
-                glyph_id,
-                start,
-                contour_count as usize,
-                limits,
-            )?
-        } else if contour_count < 0 {
-            parse_composite_glyph(bytes, table, glyph_id, start, limits)?
-        } else {
-            GlyphKind::Empty
+        let contour_count = glyph.read::<i16>(0)?;
+        let kind = match contour_count {
+            1.. => parse_simple_glyph(glyph, contour_count as usize, limits)?,
+            ..=-1 => parse_composite_glyph(glyph, limits)?,
+            0 => GlyphKind::Empty,
         };
         glyphs.push(kind);
     }
@@ -138,224 +147,116 @@ pub(super) fn validate_glyphs(
     for glyph_index in 0..glyph_count {
         let expanded = expand_glyph(glyph_index, &glyphs, &mut states, &mut memo, 0)?;
         if matches!(glyphs[glyph_index], GlyphKind::Composite { .. }) {
-            if expanded.points > limits.max_composite_points {
-                return Err(invalid_glyph(
-                    table,
-                    glyph_index as u16,
-                    locations[glyph_index],
-                    "expanded point count exceeds maxp.maxCompositePoints",
-                ));
-            }
-            if expanded.contours > limits.max_composite_contours {
-                return Err(invalid_glyph(
-                    table,
-                    glyph_index as u16,
-                    locations[glyph_index],
-                    "expanded contour count exceeds maxp.maxCompositeContours",
-                ));
-            }
-            if expanded.depth > limits.max_component_depth {
-                return Err(invalid_glyph(
-                    table,
-                    glyph_index as u16,
-                    locations[glyph_index],
-                    "composite depth exceeds maxp.maxComponentDepth",
-                ));
-            }
+            let reason = if expanded.points > limits.max_composite_points {
+                "expanded point count exceeds maxp.maxCompositePoints"
+            } else if expanded.contours > limits.max_composite_contours {
+                "expanded contour count exceeds maxp.maxCompositeContours"
+            } else if expanded.depth > limits.max_component_depth {
+                "composite depth exceeds maxp.maxComponentDepth"
+            } else {
+                continue;
+            };
+            return Err(FontError::InvalidGlyph {
+                glyph_id: glyph_index as u16,
+                offset: table.offset + locations[glyph_index],
+                reason,
+            });
         }
     }
-
     Ok(())
 }
 
 fn parse_simple_glyph(
-    bytes: &[u8],
-    table: Table,
-    glyph_id: u16,
-    glyph_offset: usize,
+    glyph: Glyph<'_>,
     contour_count: usize,
     limits: MaxpLimits,
-) -> Result<GlyphKind, StbTrueTypeFontError> {
+) -> Result<GlyphKind, FontError> {
     if contour_count > limits.max_contours {
-        return Err(invalid_glyph(
-            table,
-            glyph_id,
-            glyph_offset,
-            "contour count exceeds maxp.maxContours",
-        ));
+        return Err(glyph.error(0, "contour count exceeds maxp.maxContours"));
     }
-    let endpoints_end = contour_count
-        .checked_mul(2)
-        .and_then(|length| length.checked_add(10))
-        .ok_or_else(|| {
-            invalid_glyph(
-                table,
-                glyph_id,
-                glyph_offset,
-                "contour endpoint array overflows usize",
-            )
-        })?;
-    let instruction_length_offset = endpoints_end;
-    let flags_start = instruction_length_offset.checked_add(2).ok_or_else(|| {
-        invalid_glyph(
-            table,
-            glyph_id,
-            glyph_offset,
-            "instruction length offset overflows usize",
-        )
-    })?;
-    require_glyph_range(
-        bytes,
-        table,
-        glyph_id,
-        glyph_offset,
-        instruction_length_offset,
-        2,
+    let endpoints = glyph.range(
+        10,
+        contour_count * 2,
         "simple glyph contour endpoints are truncated",
     )?;
-
-    let mut previous_endpoint = None;
+    let endpoints = endpoints.as_chunks::<2>().0;
     let mut point_count = 0;
-    for contour in 0..contour_count {
-        let endpoint = usize::from(glyph_u16(
-            bytes,
-            table,
-            glyph_id,
-            glyph_offset,
-            10 + contour * 2,
-        )?);
-        if previous_endpoint.is_some_and(|previous| endpoint <= previous) {
-            return Err(invalid_glyph(
-                table,
-                glyph_id,
-                glyph_offset + 10 + contour * 2,
+    for (index, &endpoint) in endpoints.iter().enumerate() {
+        let contour_end = usize::from(u16::from_be_bytes(endpoint)) + 1;
+        if contour_end <= point_count {
+            return Err(glyph.error(
+                10 + index * 2,
                 "simple glyph contour endpoints are not strictly increasing",
             ));
         }
-        previous_endpoint = Some(endpoint);
-        point_count = endpoint + 1;
+        point_count = contour_end;
     }
+    let instruction_offset = 10 + contour_count * 2;
     if point_count > limits.max_points {
-        return Err(invalid_glyph(
-            table,
-            glyph_id,
-            glyph_offset + endpoints_end - 2,
-            "point count exceeds maxp.maxPoints",
-        ));
+        return Err(glyph.error(instruction_offset - 2, "point count exceeds maxp.maxPoints"));
     }
 
-    let instruction_length = usize::from(glyph_u16(
-        bytes,
-        table,
-        glyph_id,
-        glyph_offset,
-        instruction_length_offset,
-    )?);
-    if instruction_length > limits.max_instruction_bytes {
-        return Err(invalid_glyph(
-            table,
-            glyph_id,
-            glyph_offset + instruction_length_offset,
-            "instruction length exceeds maxp.maxSizeOfInstructions",
-        ));
-    }
-    let mut cursor = flags_start.checked_add(instruction_length).ok_or_else(|| {
-        invalid_glyph(
-            table,
-            glyph_id,
-            glyph_offset + flags_start,
-            "instruction range overflows usize",
-        )
-    })?;
-    require_glyph_range(
-        bytes,
-        table,
-        glyph_id,
-        glyph_offset,
-        flags_start,
-        instruction_length,
-        "simple glyph instructions are truncated",
-    )?;
-
+    let mut cursor = glyph.skip_instructions(instruction_offset, limits.max_instruction_bytes)?;
     let mut flags = Vec::with_capacity(point_count);
     while flags.len() < point_count {
-        let flag = glyph_u8(bytes, table, glyph_id, glyph_offset, cursor)?;
+        let flag = glyph.read::<u8>(cursor)?;
         cursor += 1;
         flags.push(flag);
         if flag & 0x08 != 0 {
-            let repeats = usize::from(glyph_u8(bytes, table, glyph_id, glyph_offset, cursor)?);
-            cursor += 1;
+            let repeats = usize::from(glyph.read::<u8>(cursor)?);
             if repeats > point_count - flags.len() {
-                return Err(invalid_glyph(
-                    table,
-                    glyph_id,
-                    glyph_offset + cursor - 1,
+                return Err(glyph.error(
+                    cursor,
                     "simple glyph flag repeat exceeds the declared point count",
                 ));
             }
+            cursor += 1;
             flags.extend(std::iter::repeat_n(flag, repeats));
         }
     }
 
-    let x_coordinates = validate_coordinate_stream(
-        bytes,
-        table,
-        glyph_id,
-        glyph_offset,
-        cursor,
-        &flags,
-        0x02,
-        0x10,
-        "x-coordinate stream is truncated",
-    )?;
-    let y_coordinates = validate_coordinate_stream(
-        bytes,
-        table,
-        glyph_id,
-        glyph_offset,
-        x_coordinates.cursor,
-        &flags,
-        0x04,
-        0x20,
-        "y-coordinate stream is truncated",
-    )?;
-    let bounds = match (x_coordinates.bounds, y_coordinates.bounds) {
-        (Some(x), Some(y)) => Some(CoordinateBounds {
-            min_x: x.min,
-            max_x: x.max,
-            min_y: y.min,
-            max_y: y.max,
-        }),
-        (None, None) => None,
-        _ => unreachable!("x and y coordinate streams must describe the same points"),
-    };
+    let mut start = 0;
+    for (index, &endpoint) in endpoints.iter().enumerate() {
+        let end = usize::from(u16::from_be_bytes(endpoint)) + 1;
+        // stb reads the next vertex when a contour starts off curve. It must belong to this
+        // contour, and a final singleton would leave the native allocation entirely.
+        if end == start + 1 && flags[start] & 1 == 0 {
+            return Err(glyph.error(
+                10 + index * 2,
+                "a one-point contour must start on curve for stb_truetype",
+            ));
+        }
+        start = end;
+    }
 
+    let (min_x, max_x) = validate_coordinate_stream(glyph, &mut cursor, &flags, 0x02, 0x10)?;
+    let (min_y, max_y) = validate_coordinate_stream(glyph, &mut cursor, &flags, 0x04, 0x20)?;
     Ok(GlyphKind::Simple {
         points: point_count,
         contours: contour_count,
-        bounds,
+        bounds: Some(CoordinateBounds {
+            min_x,
+            max_x,
+            min_y,
+            max_y,
+        }),
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn validate_coordinate_stream(
-    bytes: &[u8],
-    table: Table,
-    glyph_id: u16,
-    glyph_offset: usize,
-    mut cursor: usize,
+    glyph: Glyph<'_>,
+    cursor: &mut usize,
     flags: &[u8],
     short_mask: u8,
     same_mask: u8,
-    truncated_reason: &'static str,
-) -> Result<CoordinateStream, StbTrueTypeFontError> {
-    let mut coordinate = 0_i32;
+) -> Result<(i16, i16), FontError> {
+    let mut coordinate = 0_i16;
     let mut min = i16::MAX;
     let mut max = i16::MIN;
     for &flag in flags {
         let delta = if flag & short_mask != 0 {
-            let magnitude = i32::from(glyph_u8(bytes, table, glyph_id, glyph_offset, cursor)?);
-            cursor += 1;
+            let magnitude = i16::from(glyph.read::<u8>(*cursor)?);
+            *cursor += 1;
             if flag & same_mask != 0 {
                 magnitude
             } else {
@@ -364,51 +265,23 @@ fn validate_coordinate_stream(
         } else if flag & same_mask != 0 {
             0
         } else {
-            require_glyph_range(
-                bytes,
-                table,
-                glyph_id,
-                glyph_offset,
-                cursor,
-                2,
-                truncated_reason,
-            )?;
-            let delta = i32::from(i16::from_be_bytes([bytes[cursor], bytes[cursor + 1]]));
-            cursor += 2;
+            let delta = glyph.read::<i16>(*cursor)?;
+            *cursor += 2;
             delta
         };
-        coordinate = coordinate.checked_add(delta).ok_or_else(|| {
-            invalid_glyph(
-                table,
-                glyph_id,
-                glyph_offset + cursor,
-                "coordinate accumulation overflowed i32",
-            )
-        })?;
-        let coordinate = i16::try_from(coordinate).map_err(|_| {
-            invalid_glyph(
-                table,
-                glyph_id,
-                glyph_offset + cursor,
+        coordinate = i16::try_from(i32::from(coordinate) + i32::from(delta)).map_err(|_| {
+            glyph.error(
+                *cursor,
                 "decoded coordinate is outside the signed 16-bit TrueType range",
             )
         })?;
         min = min.min(coordinate);
         max = max.max(coordinate);
     }
-    Ok(CoordinateStream {
-        cursor,
-        bounds: (!flags.is_empty()).then_some(AxisBounds { min, max }),
-    })
+    Ok((min, max))
 }
 
-fn parse_composite_glyph(
-    bytes: &[u8],
-    table: Table,
-    glyph_id: u16,
-    glyph_offset: usize,
-    limits: MaxpLimits,
-) -> Result<GlyphKind, StbTrueTypeFontError> {
+fn parse_composite_glyph(glyph: Glyph<'_>, limits: MaxpLimits) -> Result<GlyphKind, FontError> {
     const ARG_1_AND_2_ARE_WORDS: u16 = 0x0001;
     const ARGS_ARE_XY_VALUES: u16 = 0x0002;
     const WE_HAVE_A_SCALE: u16 = 0x0008;
@@ -416,150 +289,86 @@ fn parse_composite_glyph(
     const WE_HAVE_AN_X_AND_Y_SCALE: u16 = 0x0040;
     const WE_HAVE_A_TWO_BY_TWO: u16 = 0x0080;
     const WE_HAVE_INSTRUCTIONS: u16 = 0x0100;
+    const TRANSFORM_FLAGS: u16 = WE_HAVE_A_SCALE | WE_HAVE_AN_X_AND_Y_SCALE | WE_HAVE_A_TWO_BY_TWO;
 
     let mut cursor = 10;
     let mut components = Vec::new();
     let final_flags = loop {
-        let component_source_offset = table
-            .offset
-            .saturating_add(glyph_offset)
-            .saturating_add(cursor);
-        require_glyph_range(
-            bytes,
-            table,
-            glyph_id,
-            glyph_offset,
-            cursor,
-            4,
-            "composite component header is truncated",
-        )?;
-        let flags = glyph_u16(bytes, table, glyph_id, glyph_offset, cursor)?;
-        let component = glyph_u16(bytes, table, glyph_id, glyph_offset, cursor + 2)?;
+        let component_offset = cursor;
+        let flags = glyph.read::<u16>(cursor)?;
+        let child = glyph.read::<u16>(cursor + 2)?;
         cursor += 4;
-        if component >= limits.glyph_count {
-            return Err(StbTrueTypeFontError::InvalidGlyphReference {
-                glyph_id,
-                referenced_glyph: component,
+        if child >= limits.glyph_count {
+            return Err(FontError::InvalidGlyphReference {
+                glyph_id: glyph.id,
+                referenced_glyph: child,
                 glyph_count: limits.glyph_count,
             });
         }
         if flags & ARGS_ARE_XY_VALUES == 0 {
-            return Err(invalid_glyph(
-                table,
-                glyph_id,
-                glyph_offset + cursor - 4,
+            return Err(glyph.error(
+                component_offset,
                 "stb_truetype does not support point-matching composite arguments",
             ));
         }
         if flags & WE_HAVE_INSTRUCTIONS != 0 && flags & MORE_COMPONENTS != 0 {
-            return Err(invalid_glyph(
-                table,
-                glyph_id,
-                glyph_offset + cursor - 4,
+            return Err(glyph.error(
+                component_offset,
                 "WE_HAVE_INSTRUCTIONS may only appear on the final component",
             ));
         }
 
-        let arguments_are_words = flags & ARG_1_AND_2_ARE_WORDS != 0;
-        let argument_bytes = if arguments_are_words { 4 } else { 2 };
-        require_glyph_range(
-            bytes,
-            table,
-            glyph_id,
-            glyph_offset,
-            cursor,
-            argument_bytes,
-            "composite component arguments are truncated",
-        )?;
-        let (dx, dy) = if arguments_are_words {
-            (
-                glyph_i16(bytes, table, glyph_id, glyph_offset, cursor)?,
-                glyph_i16(bytes, table, glyph_id, glyph_offset, cursor + 2)?,
-            )
+        let (dx, dy) = if flags & ARG_1_AND_2_ARE_WORDS != 0 {
+            let pair = (glyph.read::<i16>(cursor)?, glyph.read::<i16>(cursor + 2)?);
+            cursor += 4;
+            pair
         } else {
-            (
-                i16::from(i8::from_be_bytes([glyph_u8(
-                    bytes,
-                    table,
-                    glyph_id,
-                    glyph_offset,
-                    cursor,
-                )?])),
-                i16::from(i8::from_be_bytes([glyph_u8(
-                    bytes,
-                    table,
-                    glyph_id,
-                    glyph_offset,
-                    cursor + 1,
-                )?])),
-            )
+            let dx = i16::from(glyph.read::<i8>(cursor)?);
+            let dy = i16::from(glyph.read::<i8>(cursor + 1)?);
+            cursor += 2;
+            (dx, dy)
         };
-        cursor += argument_bytes;
-
-        let transform_count = usize::from(flags & WE_HAVE_A_SCALE != 0)
-            + usize::from(flags & WE_HAVE_AN_X_AND_Y_SCALE != 0)
-            + usize::from(flags & WE_HAVE_A_TWO_BY_TWO != 0);
-        if transform_count > 1 {
-            return Err(invalid_glyph(
-                table,
-                glyph_id,
-                glyph_offset + cursor - argument_bytes - 4,
-                "composite component declares multiple transform encodings",
-            ));
-        }
         let mut transform = CompositeTransform {
             dx,
             dy,
             ..CompositeTransform::default()
         };
-        let transform_bytes = if flags & WE_HAVE_A_SCALE != 0 {
-            let scale =
-                f32::from(glyph_i16(bytes, table, glyph_id, glyph_offset, cursor)?) / 16_384.0;
-            transform.xx = scale;
-            transform.yy = scale;
-            2
-        } else if flags & WE_HAVE_AN_X_AND_Y_SCALE != 0 {
-            transform.xx =
-                f32::from(glyph_i16(bytes, table, glyph_id, glyph_offset, cursor)?) / 16_384.0;
-            transform.yy =
-                f32::from(glyph_i16(bytes, table, glyph_id, glyph_offset, cursor + 2)?) / 16_384.0;
-            4
-        } else if flags & WE_HAVE_A_TWO_BY_TWO != 0 {
-            transform.xx =
-                f32::from(glyph_i16(bytes, table, glyph_id, glyph_offset, cursor)?) / 16_384.0;
-            transform.yx =
-                f32::from(glyph_i16(bytes, table, glyph_id, glyph_offset, cursor + 2)?) / 16_384.0;
-            transform.xy =
-                f32::from(glyph_i16(bytes, table, glyph_id, glyph_offset, cursor + 4)?) / 16_384.0;
-            transform.yy =
-                f32::from(glyph_i16(bytes, table, glyph_id, glyph_offset, cursor + 6)?) / 16_384.0;
-            8
-        } else {
-            0
+        let mut read_scale = || -> Result<f32, FontError> {
+            let value = glyph.read::<i16>(cursor)?;
+            cursor += 2;
+            Ok(f32::from(value) / 16_384.0)
         };
-        require_glyph_range(
-            bytes,
-            table,
-            glyph_id,
-            glyph_offset,
-            cursor,
-            transform_bytes,
-            "composite transform is truncated",
-        )?;
-        cursor += transform_bytes;
-
+        match flags & TRANSFORM_FLAGS {
+            0 => {}
+            WE_HAVE_A_SCALE => {
+                transform.xx = read_scale()?;
+                transform.yy = transform.xx;
+            }
+            WE_HAVE_AN_X_AND_Y_SCALE => {
+                transform.xx = read_scale()?;
+                transform.yy = read_scale()?;
+            }
+            WE_HAVE_A_TWO_BY_TWO => {
+                transform.xx = read_scale()?;
+                transform.yx = read_scale()?;
+                transform.xy = read_scale()?;
+                transform.yy = read_scale()?;
+            }
+            _ => {
+                return Err(glyph.error(
+                    component_offset,
+                    "composite component declares multiple transform encodings",
+                ));
+            }
+        }
         components.push(CompositeComponent {
-            glyph_id: component,
+            glyph_id: child,
             transform,
-            source_offset: component_source_offset,
+            source_offset: glyph.offset + component_offset,
         });
-        if components.len() > limits.max_component_elements
-            || components.len() > MAX_COMPONENTS_PER_GLYPH
-        {
-            return Err(invalid_glyph(
-                table,
-                glyph_id,
-                glyph_offset + cursor,
+        if components.len() > limits.max_component_elements.min(MAX_COMPONENTS_PER_GLYPH) {
+            return Err(glyph.error(
+                cursor,
                 "component count exceeds maxp or the validated native-work limit",
             ));
         }
@@ -569,28 +378,8 @@ fn parse_composite_glyph(
     };
 
     if final_flags & WE_HAVE_INSTRUCTIONS != 0 {
-        let instruction_length =
-            usize::from(glyph_u16(bytes, table, glyph_id, glyph_offset, cursor)?);
-        if instruction_length > limits.max_instruction_bytes {
-            return Err(invalid_glyph(
-                table,
-                glyph_id,
-                glyph_offset + cursor,
-                "instruction length exceeds maxp.maxSizeOfInstructions",
-            ));
-        }
-        cursor += 2;
-        require_glyph_range(
-            bytes,
-            table,
-            glyph_id,
-            glyph_offset,
-            cursor,
-            instruction_length,
-            "composite instructions are truncated",
-        )?;
+        glyph.skip_instructions(cursor, limits.max_instruction_bytes)?;
     }
-
     Ok(GlyphKind::Composite { components })
 }
 
@@ -682,19 +471,19 @@ pub(super) fn expand_glyph(
     states: &mut [u8],
     memo: &mut [Option<ExpandedGlyph>],
     recursion_depth: usize,
-) -> Result<ExpandedGlyph, StbTrueTypeFontError> {
+) -> Result<ExpandedGlyph, FontError> {
     if let Some(expanded) = memo[glyph_index] {
         return Ok(expanded);
     }
     if recursion_depth > MAX_COMPOSITE_DEPTH {
-        return Err(StbTrueTypeFontError::CompositeDepth {
+        return Err(FontError::CompositeDepth {
             glyph_id: glyph_index as u16,
             depth: recursion_depth,
             limit: MAX_COMPOSITE_DEPTH,
         });
     }
     if states[glyph_index] == 1 {
-        return Err(StbTrueTypeFontError::CompositeCycle {
+        return Err(FontError::CompositeCycle {
             glyph_id: glyph_index as u16,
             referenced_glyph: glyph_index as u16,
         });
@@ -715,7 +504,8 @@ pub(super) fn expand_glyph(
             contours: *contours,
             references: 1,
             depth: 0,
-            bounds: *bounds,
+            // stb also transforms the zeroed control coordinates of move and line vertices.
+            bounds: bounds.map(|b| b.union(CoordinateBounds::default())),
         },
         GlyphKind::Composite { components } => {
             let mut expanded = ExpandedGlyph {
@@ -726,7 +516,7 @@ pub(super) fn expand_glyph(
             for component in components {
                 let component_index = usize::from(component.glyph_id);
                 if states[component_index] == 1 {
-                    return Err(StbTrueTypeFontError::CompositeCycle {
+                    return Err(FontError::CompositeCycle {
                         glyph_id: glyph_index as u16,
                         referenced_glyph: component.glyph_id,
                     });
@@ -741,7 +531,7 @@ pub(super) fn expand_glyph(
                     checked_complexity_add(glyph_index, expanded.references, child.references)?;
                 expanded.depth = expanded.depth.max(child.depth + 1);
                 if expanded.depth > MAX_COMPOSITE_DEPTH {
-                    return Err(StbTrueTypeFontError::CompositeDepth {
+                    return Err(FontError::CompositeDepth {
                         glyph_id: glyph_index as u16,
                         depth: expanded.depth,
                         limit: MAX_COMPOSITE_DEPTH,
@@ -751,7 +541,7 @@ pub(super) fn expand_glyph(
                     let transformed = component
                         .transform
                         .transform_bounds(child_bounds)
-                        .ok_or(StbTrueTypeFontError::InvalidGlyph {
+                        .ok_or(FontError::InvalidGlyph {
                             glyph_id: glyph_index as u16,
                             offset: component.source_offset,
                             reason:
@@ -776,102 +566,20 @@ fn checked_complexity_add(
     glyph_index: usize,
     left: usize,
     right: usize,
-) -> Result<usize, StbTrueTypeFontError> {
+) -> Result<usize, FontError> {
     let complexity = left
         .checked_add(right)
-        .ok_or(StbTrueTypeFontError::CompositeComplexity {
+        .ok_or(FontError::CompositeComplexity {
             glyph_id: glyph_index as u16,
             complexity: usize::MAX,
             limit: MAX_EXPANDED_GLYPH_COMPLEXITY,
         })?;
     if complexity > MAX_EXPANDED_GLYPH_COMPLEXITY {
-        return Err(StbTrueTypeFontError::CompositeComplexity {
+        return Err(FontError::CompositeComplexity {
             glyph_id: glyph_index as u16,
             complexity,
             limit: MAX_EXPANDED_GLYPH_COMPLEXITY,
         });
     }
     Ok(complexity)
-}
-
-fn invalid_glyph(
-    table: Table,
-    glyph_id: u16,
-    relative_offset: usize,
-    reason: &'static str,
-) -> StbTrueTypeFontError {
-    StbTrueTypeFontError::InvalidGlyph {
-        glyph_id,
-        offset: table.offset.saturating_add(relative_offset),
-        reason,
-    }
-}
-
-fn require_glyph_range(
-    bytes: &[u8],
-    table: Table,
-    glyph_id: u16,
-    glyph_offset: usize,
-    offset: usize,
-    length: usize,
-    reason: &'static str,
-) -> Result<(), StbTrueTypeFontError> {
-    if offset
-        .checked_add(length)
-        .is_none_or(|end| end > bytes.len())
-    {
-        return Err(invalid_glyph(
-            table,
-            glyph_id,
-            glyph_offset.saturating_add(offset),
-            reason,
-        ));
-    }
-    Ok(())
-}
-
-fn glyph_u8(
-    bytes: &[u8],
-    table: Table,
-    glyph_id: u16,
-    glyph_offset: usize,
-    offset: usize,
-) -> Result<u8, StbTrueTypeFontError> {
-    bytes.get(offset).copied().ok_or_else(|| {
-        invalid_glyph(
-            table,
-            glyph_id,
-            glyph_offset.saturating_add(offset),
-            "glyph byte stream is truncated",
-        )
-    })
-}
-
-fn glyph_u16(
-    bytes: &[u8],
-    table: Table,
-    glyph_id: u16,
-    glyph_offset: usize,
-    offset: usize,
-) -> Result<u16, StbTrueTypeFontError> {
-    require_glyph_range(
-        bytes,
-        table,
-        glyph_id,
-        glyph_offset,
-        offset,
-        2,
-        "glyph 16-bit field is truncated",
-    )?;
-    Ok(u16::from_be_bytes([bytes[offset], bytes[offset + 1]]))
-}
-
-fn glyph_i16(
-    bytes: &[u8],
-    table: Table,
-    glyph_id: u16,
-    glyph_offset: usize,
-    offset: usize,
-) -> Result<i16, StbTrueTypeFontError> {
-    glyph_u16(bytes, table, glyph_id, glyph_offset, offset).map(|value| value as i16)
 }

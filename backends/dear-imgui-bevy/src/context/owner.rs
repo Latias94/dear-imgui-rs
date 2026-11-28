@@ -3,7 +3,9 @@
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use std::rc::Rc;
 
-use dear_imgui_rs::{Context, ContextOperationError};
+use dear_imgui_rs::error::context::Operation;
+
+use dear_imgui_rs::Context;
 
 #[cfg(feature = "render")]
 use crate::render;
@@ -118,7 +120,7 @@ impl ContextOwner {
     pub(crate) fn try_with_current<T, E>(
         &mut self,
         operation: impl FnOnce(&mut Context) -> Result<T, E>,
-    ) -> Result<T, ContextOperationError<E>> {
+    ) -> Result<T, Operation<E>> {
         self.context
             .as_mut()
             .expect("owner must retain its Context")
@@ -614,7 +616,7 @@ impl ContextOwner {
     #[cfg(feature = "render")]
     pub(crate) fn try_recover_renderer(
         &mut self,
-    ) -> Result<(), ImguiRendererContextError<dear_imgui_rs::render::RendererConsumerError>> {
+    ) -> Result<(), ImguiRendererContextError<dear_imgui_rs::FrameError>> {
         let renderer_consumer = self
             .renderer_consumer
             .as_ref()

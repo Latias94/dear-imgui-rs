@@ -361,15 +361,15 @@ impl PlotUi<'_> {
 /// Legend location options (ImPlotLocation)
 #[repr(i32)]
 pub enum LegendLocation {
-    Center = sys::ImPlotLocation_Center as i32,
-    North = sys::ImPlotLocation_North as i32,
-    South = sys::ImPlotLocation_South as i32,
-    West = sys::ImPlotLocation_West as i32,
-    East = sys::ImPlotLocation_East as i32,
-    NorthWest = sys::ImPlotLocation_NorthWest as i32,
-    NorthEast = sys::ImPlotLocation_NorthEast as i32,
-    SouthWest = sys::ImPlotLocation_SouthWest as i32,
-    SouthEast = sys::ImPlotLocation_SouthEast as i32,
+    Center = sys::ImPlotLocation_Center as _,
+    North = sys::ImPlotLocation_North as _,
+    South = sys::ImPlotLocation_South as _,
+    West = sys::ImPlotLocation_West as _,
+    East = sys::ImPlotLocation_East as _,
+    NorthWest = sys::ImPlotLocation_NorthWest as _,
+    NorthEast = sys::ImPlotLocation_NorthEast as _,
+    SouthWest = sys::ImPlotLocation_SouthWest as _,
+    SouthEast = sys::ImPlotLocation_SouthEast as _,
 }
 
 bitflags::bitflags! {

@@ -9,10 +9,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::ThreadId;
 
 use parking_lot::{Mutex, ReentrantMutex};
-use thiserror::Error;
 
+use crate::error::context::{BindingKind, ContextError};
 use crate::render::draw_data::StandardDrawCallbacks;
-use crate::{ImGuiError, ImGuiResult, sys};
+use crate::sys;
 
 // All safe context switching, including backend callbacks, serializes through this lock.
 pub(crate) static CTX_MUTEX: ReentrantMutex<()> = ReentrantMutex::new(());
@@ -96,17 +96,18 @@ impl ContextThreadLease {
     ///
     /// # Errors
     ///
-    /// Returns [`ImGuiError::ContextThreadConflict`] if another thread holds a lease, or
-    /// [`ImGuiError::ResourceAllocation`] if the process-wide lease count is exhausted.
-    pub fn acquire() -> ImGuiResult<Self> {
+    /// Returns [`ContextError::ThreadConflict`] if another thread holds a lease, or
+    /// [`ContextError::ThreadLeaseExhausted`] if the process-wide lease count is exhausted.
+    pub fn acquire() -> Result<Self, ContextError> {
         let thread = std::thread::current().id();
         let mut owner = CONTEXT_THREAD_OWNER.lock();
         if owner.thread.is_some_and(|current| current != thread) {
-            return Err(ImGuiError::ContextThreadConflict);
+            return Err(ContextError::ThreadConflict);
         }
-        owner.live_leases = owner.live_leases.checked_add(1).ok_or_else(|| {
-            ImGuiError::resource_allocation("Dear ImGui native owner thread lease count exhausted")
-        })?;
+        owner.live_leases = owner
+            .live_leases
+            .checked_add(1)
+            .ok_or(ContextError::ThreadLeaseExhausted)?;
         owner.thread = Some(thread);
         Ok(Self {
             thread,
@@ -336,18 +337,6 @@ impl Drop for ContextState {
     }
 }
 
-/// Failure to enter a Context through a persistent binding capability.
-#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
-#[non_exhaustive]
-pub enum ContextBindingError {
-    /// Context teardown has started, so ordinary safe access is no longer permitted.
-    #[error("Dear ImGui context teardown is in progress")]
-    Dropping,
-    /// The originating native Context no longer exists.
-    #[error("Dear ImGui context has been destroyed")]
-    NativeDestroyed,
-}
-
 /// Persistent, non-thread-safe capability for calling against one live Context.
 #[derive(Clone)]
 #[must_use]
@@ -476,33 +465,31 @@ impl ContextBinding {
     }
 
     /// Runs a closure while the originating Context is current.
-    pub fn try_with_bound_context<R>(
-        &self,
-        f: impl FnOnce() -> R,
-    ) -> Result<R, ContextBindingError> {
-        let state = self
-            .state
-            .upgrade()
-            .ok_or(ContextBindingError::NativeDestroyed)?;
+    pub fn try_with_bound_context<R>(&self, f: impl FnOnce() -> R) -> Result<R, ContextError> {
+        self.try_bind(f).map_err(ContextError::Binding)
+    }
+
+    pub(super) fn try_bind<R>(&self, f: impl FnOnce() -> R) -> Result<R, BindingKind> {
+        let state = self.state.upgrade().ok_or(BindingKind::NativeDestroyed)?;
         match state.lifecycle() {
             ContextLifecycle::Alive => {}
-            ContextLifecycle::Dropping => return Err(ContextBindingError::Dropping),
+            ContextLifecycle::Dropping => return Err(BindingKind::Dropping),
             ContextLifecycle::NativeDestroyed => {
-                return Err(ContextBindingError::NativeDestroyed);
+                return Err(BindingKind::NativeDestroyed);
             }
         }
 
         let _lock = CTX_MUTEX.lock();
         match state.lifecycle() {
             ContextLifecycle::Alive => {}
-            ContextLifecycle::Dropping => return Err(ContextBindingError::Dropping),
+            ContextLifecycle::Dropping => return Err(BindingKind::Dropping),
             ContextLifecycle::NativeDestroyed => {
-                return Err(ContextBindingError::NativeDestroyed);
+                return Err(BindingKind::NativeDestroyed);
             }
         }
         let raw = state.raw.get();
         if raw.is_null() {
-            return Err(ContextBindingError::NativeDestroyed);
+            return Err(BindingKind::NativeDestroyed);
         }
 
         let _bound = RawBoundContextGuard::bind(raw);
@@ -516,7 +503,7 @@ impl ContextBinding {
     /// Panics if Context teardown has started or the native Context was destroyed. Use
     /// [`ContextBinding::try_with_bound_context`] when teardown is an expected condition.
     pub fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.try_with_bound_context(f)
+        self.try_bind(f)
             .unwrap_or_else(|error| panic!("ContextBinding::with_bound_context(): {error}"))
     }
 }
@@ -654,10 +641,10 @@ pub(crate) fn with_bound_context<R>(ctx: *mut sys::ImGuiContext, f: impl FnOnce(
 
 #[cfg(test)]
 mod thread_lease_tests {
+    use super::{BindingKind, ContextError, ContextThreadLease};
     use crate::{
-        BasicSelection, Context, ContextBindingError, ContextThreadLease, Id, ImGuiError,
-        ImGuiResult, OwnedStateStorage, OwnedTextureData, StateStorage, TextFilter,
-        TextureDataError, TextureFormat,
+        BasicSelection, Context, Id, ImGuiError, OwnedStateStorage, OwnedTextureData, StateStorage,
+        TextFilter, TextureError, TextureFormat,
     };
     use static_assertions::assert_not_impl_any;
 
@@ -667,7 +654,7 @@ mod thread_lease_tests {
     assert_not_impl_any!(TextFilter: Send, Sync);
     assert_not_impl_any!(BasicSelection: Send, Sync);
 
-    fn acquire_on_another_thread() -> ImGuiResult<()> {
+    fn acquire_on_another_thread() -> Result<(), ContextError> {
         std::thread::spawn(|| ContextThreadLease::acquire().map(drop))
             .join()
             .unwrap()
@@ -680,23 +667,23 @@ mod thread_lease_tests {
         std::thread::spawn(|| {
             assert!(matches!(
                 Context::try_create(),
-                Err(ImGuiError::ContextThreadConflict)
+                Err(ContextError::ThreadConflict)
             ));
             assert!(matches!(
                 OwnedTextureData::from_pixels(TextureFormat::Alpha8, 1, 1, &[7]),
-                Err(TextureDataError::ContextThreadConflict)
+                Err(TextureError::ContextThreadConflict)
             ));
             assert!(matches!(
                 OwnedStateStorage::try_new(),
-                Err(ImGuiError::ContextThreadConflict)
+                Err(ImGuiError::Context(ContextError::ThreadConflict))
             ));
             assert!(matches!(
                 TextFilter::try_new("Search"),
-                Err(ImGuiError::ContextThreadConflict)
+                Err(ImGuiError::Context(ContextError::ThreadConflict))
             ));
             assert!(matches!(
                 BasicSelection::try_new(),
-                Err(ImGuiError::ContextThreadConflict)
+                Err(ImGuiError::Context(ContextError::ThreadConflict))
             ));
         })
         .join()
@@ -709,13 +696,13 @@ mod thread_lease_tests {
             let context = Context::create();
             let binding = context.binding();
             drop(context);
-            assert_eq!(
+            assert!(matches!(
                 binding.try_with_bound_context(|| ()),
-                Err(ContextBindingError::NativeDestroyed)
-            );
+                Err(ContextError::Binding(BindingKind::NativeDestroyed))
+            ));
             assert!(matches!(
                 acquire_on_another_thread(),
-                Err(ImGuiError::ContextThreadConflict)
+                Err(ContextError::ThreadConflict)
             ));
             drop(owner);
             acquire_on_another_thread().unwrap();
@@ -742,14 +729,14 @@ mod thread_lease_tests {
         let (raw, lease) = texture.into_raw_parts();
         assert!(matches!(
             acquire_on_another_thread(),
-            Err(ImGuiError::ContextThreadConflict)
+            Err(ContextError::ThreadConflict)
         ));
         // The raw allocation has one owner on this thread throughout both transfers.
         let texture = unsafe { OwnedTextureData::from_raw_owned(raw) };
         drop(lease);
         assert!(matches!(
             acquire_on_another_thread(),
-            Err(ImGuiError::ContextThreadConflict)
+            Err(ContextError::ThreadConflict)
         ));
         let lease = ContextThreadLease::acquire().unwrap();
         let raw = texture.into_raw();

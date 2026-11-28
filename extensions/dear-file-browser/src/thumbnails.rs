@@ -148,6 +148,7 @@ impl ThumbnailFrameIndex {
 ///    [`maintain`](Self::maintain) to use the native decoder,
 /// 4) queue evicted IDs from [`take_pending_destroys`](Self::take_pending_destroys) for
 ///    retirement according to the [`ThumbnailRenderer`] lifetime contract.
+///
 /// Completed entries, including failures, occupy one bounded LRU. The queue and in-flight
 /// requests share a separate limit of 16 per cache. A failure is retried only once evicted
 /// or explicitly invalidated.

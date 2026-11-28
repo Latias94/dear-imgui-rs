@@ -74,7 +74,7 @@
 //!
 //! ```no_run
 //! # use dear_imgui_rs::*;
-//! # fn demo(context: &mut Context) -> Result<(), texture::TextureDataError> {
+//! # fn demo(context: &mut Context) -> Result<(), texture::TextureError> {
 //! // 1) Legacy handle
 //! let tex_id = texture::TextureId::new(0x1234);
 //! // 2) Transfer an owned texture into this Context.
@@ -329,24 +329,20 @@ pub enum Condition {
     Appearing = sys::ImGuiCond_Appearing as i32,
 }
 
-pub use self::clipboard::{ClipboardBackend, DummyClipboardBackend};
 #[cfg(feature = "system-clipboard")]
-pub use self::clipboard::{SystemClipboard, SystemClipboardError};
+pub use self::clipboard::SystemClipboard;
+pub use self::clipboard::{ClipboardBackend, DummyClipboardBackend};
 pub use self::colors::Color;
 pub use self::context::{
-    Context, ContextAliveToken, ContextAttachment, ContextAttachmentDetachError,
-    ContextAttachmentError, ContextAttachmentHandle, ContextAttachmentLease,
-    ContextAttachmentPhase, ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding,
-    ContextBindingError, ContextDestroyed, ContextId, ContextLifecycle, ContextOperationError,
-    ContextPlatformAttachmentRelease, ContextPlatformAttachmentReleaseError,
-    ContextPlatformWindowTeardown, ContextPlatformWindowTeardownError, ContextScopeError,
+    Context, ContextAliveToken, ContextAttachment, ContextAttachmentHandle, ContextAttachmentLease,
+    ContextAttachmentPhase, ContextAttachmentRole, ContextBinding, ContextDestroyed, ContextId,
+    ContextLifecycle, ContextPlatformAttachmentRelease, ContextPlatformWindowTeardown,
     ContextTeardown, ContextThreadLease, FrameLifecycleStamp, FrameLifecycleState,
-    FramePrepareOptions, FrameResult, FrameToken, ImePreedit, ImePreeditError,
-    RendererTextureReset,
+    FramePrepareOptions, FrameResult, FrameToken, ImePreedit, RendererTextureReset,
 };
-pub use self::dock_layout::{DockLayout, DockLayoutApply, DockSplit, DockspaceError};
+pub use self::dock_layout::{DockLayout, DockLayoutApply, DockSplit};
 pub use self::dock_space::{
-    DockNodeFlags, DockspaceBuilder, WindowClass, WindowClassDockNodeFlags, WindowClassError,
+    DockNodeFlags, DockspaceBuilder, WindowClass, WindowClassDockNodeFlags,
     WindowClassParentViewport,
 };
 pub use self::drag_drop::{
@@ -358,16 +354,16 @@ pub use self::draw::{
     DrawFlags, DrawListMut, DrawListTextureToken, DrawNgonSegmentCount, DrawSegmentCount,
     ImColor32, RawDrawCallback,
 };
-pub use self::error::{ImGuiError, ImGuiResult, SafeStringConversion};
+pub use self::error::{
+    ContextError, FontError, FrameError, ImGuiError, ImGuiResult, SafeStringConversion,
+    TextureError,
+};
 pub use self::fonts::{
     BakedFont, CustomRectData, CustomRectId, CustomRectSnapshot, FontAtlas, FontAtlasFlags,
-    FontAtlasLoaderError, FontAtlasModeError, FontAtlasTexture, FontConfig, FontId, FontLoadError,
-    FontLoader, FontLoaderFlags, FontSource, Glyph, LegacyFontAtlas, SharedFontAtlas,
-    StbTrueTypeFontData, StbTrueTypeFontError, StbTrueTypeFontLoadError,
+    FontAtlasTexture, FontConfig, FontId, FontLoader, FontLoaderFlags, FontSource, Glyph,
+    LegacyFontAtlas, SharedFontAtlas, StbTrueTypeFontData,
 };
-pub use self::ini_settings::{
-    IniSessionDate, IniSessionDateError, IniSettingsRetention, IniSettingsRetentionError,
-};
+pub use self::ini_settings::{IniSessionDate, IniSettingsRetention};
 pub use self::input::{
     InputScalarFlags, InputTextFlags, InputTextMultilineFlags, ItemKeyOwnerFlags, Key, KeyChord,
     KeyMods, MouseButton, MouseCursor, MouseSource, NextItemShortcutFlags, NextItemShortcutOptions,
@@ -383,20 +379,16 @@ pub use self::list_clipper::{
     ListClipper, ListClipperIterator, ListClipperToken, UnknownCountListClipper,
     UnknownCountListClipperToken,
 };
-pub use self::numeric_format::{NumericFormat, NumericFormatError};
-pub use self::platform_io::{
-    NativeWindowIdentityExhausted, NativeWindowInstanceId, NativeWindowTarget, PlatformIo, Viewport,
-};
+pub use self::numeric_format::NumericFormat;
+pub use self::platform_io::{NativeWindowInstanceId, NativeWindowTarget, PlatformIo, Viewport};
 pub use self::render::{
     DetachedRendererConsumer, DrawCmd, DrawCmdIterator, DrawCmdParams, DrawCmdSnapshot, DrawData,
     DrawDataSnapshot, DrawIdx, DrawList, DrawListIterator, DrawListSnapshot, DrawRequirements,
     DrawVert, FrameSnapshot, PendingFrame, RawCallbackCommand, ReconciledFrame,
-    RendererConsumerCapability, RendererConsumerError, RendererRenderStateGuard,
-    RendererRenderStateGuardError, RendererResetSignal, SnapshotCommitError,
-    SnapshotCompletionProgress, SnapshotEpoch, SnapshotError, SnapshotTextureId,
-    SynchronousRendererConsumer, TextureBinding, TextureFeedback, TextureFeedbackError, TextureOp,
-    TextureRequest, TextureRequestKind, TextureUploadIdentity, TextureUploadRect,
-    ViewportDrawDataSnapshot,
+    RendererConsumerCapability, RendererRenderStateGuard, RendererResetSignal,
+    SnapshotCompletionProgress, SnapshotEpoch, SnapshotTextureId, SynchronousRendererConsumer,
+    TextureBinding, TextureFeedback, TextureOp, TextureRequest, TextureRequestKind,
+    TextureUploadIdentity, TextureUploadRect, ViewportDrawDataSnapshot,
 };
 pub use self::stacks::{
     ColorStackToken, FocusScopeToken, FontStackToken, IdStackToken, ItemFlagStackToken, ItemFlags,
@@ -413,9 +405,8 @@ pub use self::style::{
 };
 pub use self::text_filter::TextFilter;
 pub use self::texture::{
-    ManagedTextureError, ManagedTextureId, ManagedTextureMut, ManagedTextureMutationError,
-    ManagedTextureRef, OwnedTextureData, RawTextureId, TextureData, TextureDataError,
-    TextureFormat, TextureId, TextureRect, TextureRef, TextureRegion, TextureStatus,
+    ManagedTextureId, ManagedTextureMut, ManagedTextureRef, OwnedTextureData, RawTextureId,
+    TextureData, TextureFormat, TextureId, TextureRect, TextureRef, TextureRegion, TextureStatus,
     TextureSubresource, get_format_bytes_per_pixel, get_format_name, get_status_name,
 };
 pub use self::ui::{NativeWindowScope, Ui};
@@ -447,9 +438,7 @@ pub use self::widget::{
     TableRowIndex, TableSizingPolicy, TableSortSpecs, TableToken, TextCallbackData, TooltipToken,
     TreeNode, TreeNodeFlags, TreeNodeId, TreeNodeToken, VerticalSlider,
 };
-pub use self::window::{
-    ChildFlags, ChildWindow, Window, WindowFlags, WindowKey, WindowKeyError, WindowLabel,
-};
+pub use self::window::{ChildFlags, ChildWindow, Window, WindowFlags, WindowKey, WindowLabel};
 
 /// The everyday types used to create a Context and submit widgets.
 pub mod prelude {
@@ -463,7 +452,7 @@ mod context;
 mod dock_layout;
 mod dock_space;
 pub mod draw;
-mod error;
+pub mod error;
 pub mod ffi;
 pub mod fonts;
 mod ini_settings;

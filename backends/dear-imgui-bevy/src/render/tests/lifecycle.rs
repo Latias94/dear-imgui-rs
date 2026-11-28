@@ -601,9 +601,7 @@ fn extracted_frame_reports_snapshot_commit_contract_errors() {
         errors.as_slice(),
         [(
             actual_context,
-            imgui::render::snapshot::SnapshotCommitError::InvalidFeedback(
-                imgui::render::RendererConsumerError::MissingFeedback { count, .. }
-            )
+            imgui::FrameError::MissingFeedback { count, .. }
         )] if *actual_context == context_id && *count == expected_count
     ));
 

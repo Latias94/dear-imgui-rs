@@ -4,20 +4,20 @@ use crate::sys;
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Plot3DColorElement {
-    TitleText = sys::ImPlot3DCol_TitleText as i32,
-    InlayText = sys::ImPlot3DCol_InlayText as i32,
-    FrameBg = sys::ImPlot3DCol_FrameBg as i32,
-    PlotBg = sys::ImPlot3DCol_PlotBg as i32,
-    PlotBorder = sys::ImPlot3DCol_PlotBorder as i32,
-    LegendBg = sys::ImPlot3DCol_LegendBg as i32,
-    LegendBorder = sys::ImPlot3DCol_LegendBorder as i32,
-    LegendText = sys::ImPlot3DCol_LegendText as i32,
-    AxisText = sys::ImPlot3DCol_AxisText as i32,
-    AxisGrid = sys::ImPlot3DCol_AxisGrid as i32,
-    AxisTick = sys::ImPlot3DCol_AxisTick as i32,
-    AxisBg = sys::ImPlot3DCol_AxisBg as i32,
-    AxisBgHovered = sys::ImPlot3DCol_AxisBgHovered as i32,
-    AxisBgActive = sys::ImPlot3DCol_AxisBgActive as i32,
+    TitleText = sys::ImPlot3DCol_TitleText as _,
+    InlayText = sys::ImPlot3DCol_InlayText as _,
+    FrameBg = sys::ImPlot3DCol_FrameBg as _,
+    PlotBg = sys::ImPlot3DCol_PlotBg as _,
+    PlotBorder = sys::ImPlot3DCol_PlotBorder as _,
+    LegendBg = sys::ImPlot3DCol_LegendBg as _,
+    LegendBorder = sys::ImPlot3DCol_LegendBorder as _,
+    LegendText = sys::ImPlot3DCol_LegendText as _,
+    AxisText = sys::ImPlot3DCol_AxisText as _,
+    AxisGrid = sys::ImPlot3DCol_AxisGrid as _,
+    AxisTick = sys::ImPlot3DCol_AxisTick as _,
+    AxisBg = sys::ImPlot3DCol_AxisBg as _,
+    AxisBgHovered = sys::ImPlot3DCol_AxisBgHovered as _,
+    AxisBgActive = sys::ImPlot3DCol_AxisBgActive as _,
 }
 
 /// A context style variable and its native value type.
@@ -69,22 +69,22 @@ impl Plot3DStyleVar {
 #[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Colormap {
-    Deep = sys::ImPlot3DColormap_Deep as i32,
-    Dark = sys::ImPlot3DColormap_Dark as i32,
-    Pastel = sys::ImPlot3DColormap_Pastel as i32,
-    Paired = sys::ImPlot3DColormap_Paired as i32,
-    Viridis = sys::ImPlot3DColormap_Viridis as i32,
-    Plasma = sys::ImPlot3DColormap_Plasma as i32,
-    Hot = sys::ImPlot3DColormap_Hot as i32,
-    Cool = sys::ImPlot3DColormap_Cool as i32,
-    Pink = sys::ImPlot3DColormap_Pink as i32,
-    Jet = sys::ImPlot3DColormap_Jet as i32,
-    Twilight = sys::ImPlot3DColormap_Twilight as i32,
-    RdBu = sys::ImPlot3DColormap_RdBu as i32,
-    BrBG = sys::ImPlot3DColormap_BrBG as i32,
-    PiYG = sys::ImPlot3DColormap_PiYG as i32,
-    Spectral = sys::ImPlot3DColormap_Spectral as i32,
-    Greys = sys::ImPlot3DColormap_Greys as i32,
+    Deep = sys::ImPlot3DColormap_Deep as _,
+    Dark = sys::ImPlot3DColormap_Dark as _,
+    Pastel = sys::ImPlot3DColormap_Pastel as _,
+    Paired = sys::ImPlot3DColormap_Paired as _,
+    Viridis = sys::ImPlot3DColormap_Viridis as _,
+    Plasma = sys::ImPlot3DColormap_Plasma as _,
+    Hot = sys::ImPlot3DColormap_Hot as _,
+    Cool = sys::ImPlot3DColormap_Cool as _,
+    Pink = sys::ImPlot3DColormap_Pink as _,
+    Jet = sys::ImPlot3DColormap_Jet as _,
+    Twilight = sys::ImPlot3DColormap_Twilight as _,
+    RdBu = sys::ImPlot3DColormap_RdBu as _,
+    BrBG = sys::ImPlot3DColormap_BrBG as _,
+    PiYG = sys::ImPlot3DColormap_PiYG as _,
+    Spectral = sys::ImPlot3DColormap_Spectral as _,
+    Greys = sys::ImPlot3DColormap_Greys as _,
 }
 
 impl Colormap {

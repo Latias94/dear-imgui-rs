@@ -291,10 +291,7 @@ impl AppWindow {
         }
         impl ClipboardBackend for ArboardClipboard {
             fn get(&mut self) -> Option<String> {
-                match self.inner.get_mut().unwrap().get_text() {
-                    Ok(s) => Some(s),
-                    Err(_) => None,
-                }
+                self.inner.get_mut().unwrap().get_text().ok()
             }
             fn set(&mut self, value: &str) {
                 let _ = self.inner.get_mut().unwrap().set_text(value.to_owned());
@@ -488,7 +485,7 @@ impl AppWindow {
                     }
                     let mut clipper = dear_imgui_rs::ListClipper::new(visible.len())
                         .items_height(ui.text_line_height_with_spacing())
-                        .begin(&ui);
+                        .begin(ui);
                     while clipper.step() {
                         for row in clipper.display_range() {
                             let idx = visible[row];
@@ -527,7 +524,7 @@ impl AppWindow {
                 }
             });
 
-        self.imgui.platform.prepare_render(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(ui, &self.window)?;
         let pending_frame = self
             .imgui
             .context

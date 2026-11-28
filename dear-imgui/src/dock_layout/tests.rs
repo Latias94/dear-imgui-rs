@@ -1,5 +1,6 @@
 use super::compile::{NodeIndex, SplitCommand, WindowAssignment, compile_layout};
-use super::{DockLayout, DockSplit, DockspaceConfig, DockspaceError};
+use super::{DockLayout, DockSplit, DockspaceConfig};
+use crate::error::context::ContextError;
 use crate::{DockNodeFlags, Id, WindowKey, sys};
 
 fn key(stable_id: &str) -> WindowKey {
@@ -10,7 +11,7 @@ fn key(stable_id: &str) -> WindowKey {
 fn config_rejects_zero_root_and_unknown_flags() {
     assert!(matches!(
         DockspaceConfig::new(Id::from(0), DockNodeFlags::NONE, None).validate(),
-        Err(DockspaceError::ZeroRootId)
+        Err(ContextError::ZeroRootId)
     ));
 
     let unknown_bits = sys::ImGuiDockNodeFlags_DockSpace;
@@ -22,7 +23,7 @@ fn config_rejects_zero_root_and_unknown_flags() {
             None,
         )
         .validate(),
-        Err(DockspaceError::UnsupportedDockNodeFlags { bits }) if bits == unknown_bits
+        Err(ContextError::UnsupportedDockNodeFlags { bits }) if bits == unknown_bits
     ));
 }
 
@@ -37,7 +38,7 @@ fn split_ratios_must_be_finite_and_strictly_inside_unit_interval() {
         );
         assert!(matches!(
             layout.validate(),
-            Err(DockspaceError::InvalidSplitRatio { ratio: actual })
+            Err(ContextError::InvalidSplitRatio { ratio: actual })
                 if actual.to_bits() == ratio.to_bits()
         ));
     }
@@ -60,14 +61,11 @@ fn window_keys_reject_duplicate_stable_ids_and_real_hash_collisions() {
         DockLayout::tabs([WindowKey::new("shared", "Left").unwrap()]),
         DockLayout::tabs([key("other"), WindowKey::new("shared", "Right").unwrap()]),
     );
-    assert_eq!(
+    assert!(matches!(
         duplicate.validate(),
-        Err(DockspaceError::DuplicateWindowKey {
-            first_key: "shared".to_owned(),
-            second_key: "shared".to_owned(),
-            id: key("shared").native_id(),
-        })
-    );
+        Err(ContextError::DuplicateWindowKey { first_key, second_key, id })
+            if first_key == "shared" && second_key == "shared" && id == key("shared").native_id()
+    ));
 
     // This pair collides under Dear ImGui's current CRC32C hash, including both the
     // portable lookup-table implementation and the optional SSE4.2 implementation.
@@ -76,14 +74,11 @@ fn window_keys_reject_duplicate_stable_ids_and_real_hash_collisions() {
     let collision_id = key(FIRST_COLLISION).native_id();
     assert_ne!(collision_id.raw(), 0);
     assert_eq!(key(SECOND_COLLISION).native_id(), collision_id);
-    assert_eq!(
+    assert!(matches!(
         DockLayout::tabs([key(FIRST_COLLISION), key(SECOND_COLLISION)]).validate(),
-        Err(DockspaceError::DuplicateWindowKey {
-            first_key: FIRST_COLLISION.to_owned(),
-            second_key: SECOND_COLLISION.to_owned(),
-            id: collision_id,
-        })
-    );
+        Err(ContextError::DuplicateWindowKey { first_key, second_key, id })
+            if first_key == FIRST_COLLISION && second_key == SECOND_COLLISION && id == collision_id
+    ));
 }
 
 #[test]

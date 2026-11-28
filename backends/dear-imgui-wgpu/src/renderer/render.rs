@@ -13,6 +13,19 @@ use dear_imgui_rs::{
 };
 use wgpu::RenderPass;
 
+pub(super) struct FramebufferTarget {
+    pub(super) extent: FramebufferExtent,
+    pub(super) main_viewport: bool,
+}
+
+#[cfg(any(feature = "mv-log", feature = "tracing"))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct FramebufferMismatch {
+    expected: FramebufferExtent,
+    actual: FramebufferExtent,
+    main_viewport: bool,
+}
+
 fn with_bound_context<R>(
     binding: &ContextBinding,
     callback: impl FnOnce() -> RendererResult<R>,
@@ -109,12 +122,13 @@ impl WgpuRenderer {
         };
         with_bound_context(&binding, || {
             let platform_io = platform_io_for_current_context()?;
-            self.render_read_only_draw_data_with_fb_size(
+            self.render_draw_data_for_target(
                 frame.draw_data(),
                 render_pass,
-                framebuffer_extent.width(),
-                framebuffer_extent.height(),
-                true,
+                FramebufferTarget {
+                    extent: framebuffer_extent,
+                    main_viewport: true,
+                },
                 platform_io,
                 scope,
                 prepared_dependencies,
@@ -162,21 +176,22 @@ impl WgpuRenderer {
         Ok(frame)
     }
 
-    /// Internal explicit-size variant used by renderer-owned secondary viewports.
-    pub(super) fn render_read_only_draw_data_with_fb_size(
+    /// Records draw data for a main or renderer-owned secondary framebuffer.
+    pub(super) fn render_draw_data_for_target(
         &mut self,
         draw_data: &DrawData,
         render_pass: &mut RenderPass<'_>,
-        fb_width: u32,
-        fb_height: u32,
-        main_viewport: bool,
+        target: FramebufferTarget,
         platform_io: *mut sys::ImGuiPlatformIO,
         scope: WgpuFrameScope,
         prepared_dependencies: &mut crate::WgpuDrawDependencies,
     ) -> RendererResult<WgpuDrawRecording> {
         self.ensure_frame_prepared()?;
-        self.log_framebuffer_mismatch(draw_data, fb_width, fb_height, main_viewport);
-        let extent = FramebufferExtent::new(fb_width, fb_height);
+        let FramebufferTarget {
+            extent,
+            main_viewport,
+        } = target;
+        self.log_framebuffer_mismatch(draw_data, extent, main_viewport);
         if extent.is_empty() {
             return Ok(WgpuDrawRecording::skipped(
                 scope,
@@ -264,8 +279,7 @@ impl WgpuRenderer {
     fn log_framebuffer_mismatch(
         &self,
         draw_data: &DrawData,
-        fb_width: u32,
-        fb_height: u32,
+        extent: FramebufferExtent,
         main_viewport: bool,
     ) {
         let expected_width = (draw_data.display_size()[0] * draw_data.framebuffer_scale()[0])
@@ -274,17 +288,19 @@ impl WgpuRenderer {
         let expected_height = (draw_data.display_size()[1] * draw_data.framebuffer_scale()[1])
             .round()
             .max(0.0) as u32;
-        if expected_width == fb_width && expected_height == fb_height {
+        let expected = FramebufferExtent::new(expected_width, expected_height);
+        if expected == extent {
             return;
         }
-        let key = (
-            [expected_width, expected_height],
-            [fb_width, fb_height],
+        let key = FramebufferMismatch {
+            expected,
+            actual: extent,
             main_viewport,
-        );
+        };
         if self.last_framebuffer_mismatch.replace(Some(key)) == Some(key) {
             return;
         }
+        let (fb_width, fb_height) = (extent.width(), extent.height());
         #[cfg(feature = "tracing")]
         tracing::warn!(
             expected_width,
@@ -313,8 +329,7 @@ impl WgpuRenderer {
     fn log_framebuffer_mismatch(
         &self,
         _draw_data: &DrawData,
-        _fb_width: u32,
-        _fb_height: u32,
+        _extent: FramebufferExtent,
         _main_viewport: bool,
     ) {
     }

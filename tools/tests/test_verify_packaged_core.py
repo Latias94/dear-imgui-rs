@@ -290,7 +290,7 @@ class CteBindingIdentityTests(unittest.TestCase):
 class PrebuiltArchiveSelectionTests(unittest.TestCase):
     def test_selects_each_required_profile_exactly_once(self):
         with TemporaryDirectory() as temporary:
-            package_dir = Path(temporary)
+            package_dir = Path(temporary).resolve()
             expected = {
                 profile: write_prebuilt_archive(package_dir, profile)
                 for profile in PROFILE_FEATURES
@@ -307,7 +307,7 @@ class PrebuiltArchiveSelectionTests(unittest.TestCase):
 
     def test_filters_target_and_crt_before_enforcing_uniqueness(self):
         with TemporaryDirectory() as temporary:
-            package_dir = Path(temporary)
+            package_dir = Path(temporary).resolve()
             expected = {}
             for profile in ("normal", "stack-layout"):
                 expected[profile] = write_prebuilt_archive(
@@ -474,7 +474,7 @@ class ExtensionArchiveSelectionTests(unittest.TestCase):
 
     def test_cte_archives_do_not_enter_core_selection(self):
         with TemporaryDirectory() as temporary:
-            package_dir = Path(temporary)
+            package_dir = Path(temporary).resolve()
             core = write_base_extension_matrix(package_dir)
             selected = PREBUILT.select_core_prebuilt_archives(
                 package_dir, "x86_64-unknown-linux-gnu", "",
@@ -517,7 +517,7 @@ class ExtensionArchiveSelectionTests(unittest.TestCase):
 
     def test_ignores_other_target_profile_and_candidate_routes(self):
         with TemporaryDirectory() as temporary:
-            package_dir = Path(temporary)
+            package_dir = Path(temporary).resolve()
             core = write_base_extension_matrix(package_dir)
             foreign_core = write_prebuilt_archive(
                 package_dir,

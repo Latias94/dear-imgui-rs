@@ -406,7 +406,7 @@ fn registration_with_backend_lifecycle_and_texture_update(
     context: &mut Context,
     renderer_shutdown: Option<Rc<dyn Fn()>>,
     renderer_device_objects_destroy: Option<Rc<dyn Fn()>>,
-    renderer_texture_update: Option<Rc<dyn Fn(&mut TextureData)>>,
+    renderer_texture_update: Option<RendererTextureUpdate>,
     platform_shutdown: Rc<dyn Fn()>,
     platform_graphics: PlatformGraphicsKind,
     native_renderer: NativeRendererKind,
@@ -507,10 +507,12 @@ fn synthetic_claimed_registration_with_renderer(
         platform_count,
         observed_backend_data,
         observed_main_viewport_data,
-        create_window,
-        PlatformGraphicsKind::Other,
-        #[cfg(feature = "multi-viewport")]
-        None,
+        SyntheticGraphics {
+            create_window,
+            kind: PlatformGraphicsKind::Other,
+            #[cfg(feature = "multi-viewport")]
+            create_vk_surface: None,
+        },
     )
 }
 
@@ -549,6 +551,13 @@ type CreateVkSurfaceFn = unsafe extern "C" fn(
     *mut sys::ImU64,
 ) -> std::os::raw::c_int;
 
+struct SyntheticGraphics {
+    create_window: unsafe extern "C" fn(*mut sys::ImGuiViewport),
+    kind: PlatformGraphicsKind,
+    #[cfg(feature = "multi-viewport")]
+    create_vk_surface: Option<CreateVkSurfaceFn>,
+}
+
 fn synthetic_claimed_registration_with_graphics(
     context: &mut Context,
     renderer_shutdown: Option<Rc<dyn Fn()>>,
@@ -556,10 +565,14 @@ fn synthetic_claimed_registration_with_graphics(
     platform_count: Rc<Cell<usize>>,
     observed_backend_data: Rc<Cell<usize>>,
     observed_main_viewport_data: Rc<Cell<usize>>,
-    create_window: unsafe extern "C" fn(*mut sys::ImGuiViewport),
-    platform_graphics: PlatformGraphicsKind,
-    #[cfg(feature = "multi-viewport")] create_vk_surface: Option<CreateVkSurfaceFn>,
+    graphics: SyntheticGraphics,
 ) -> RuntimeRegistration {
+    let SyntheticGraphics {
+        create_window,
+        kind: platform_graphics,
+        #[cfg(feature = "multi-viewport")]
+        create_vk_surface,
+    } = graphics;
     let mut registration = registration_with_backend_lifecycle(
         context,
         renderer_shutdown,
@@ -598,10 +611,10 @@ fn synthetic_claimed_registration_with_graphics(
         let main_viewport = sys::igGetMainViewport();
         (*io).BackendPlatformUserData = OWNED_BACKEND_DATA as *mut _;
         (*io).BackendPlatformName = OWNED_BACKEND_NAME.as_ptr().cast();
-        (*io).BackendFlags |= sys::ImGuiBackendFlags_HasMouseCursors as i32
-            | sys::ImGuiBackendFlags_HasSetMousePos as i32
-            | sys::ImGuiBackendFlags_PlatformHasViewports as i32
-            | sys::ImGuiBackendFlags_HasParentViewport as i32;
+        (*io).BackendFlags |= sys::ImGuiBackendFlags_HasMouseCursors
+            | sys::ImGuiBackendFlags_HasSetMousePos
+            | sys::ImGuiBackendFlags_PlatformHasViewports
+            | sys::ImGuiBackendFlags_HasParentViewport;
         install_synthetic_platform_callback_inventory(platform_io, create_window);
         #[cfg(feature = "multi-viewport")]
         {
@@ -700,11 +713,11 @@ fn synthetic_renderer_registration_with_pointer_callback(
         (*io).BackendPlatformName = OWNED_BACKEND_NAME.as_ptr().cast();
         (*io).BackendRendererUserData = OWNED_BACKEND_DATA as *mut _;
         (*io).BackendRendererName = OWNED_BACKEND_NAME.as_ptr().cast();
-        (*io).BackendFlags |= sys::ImGuiBackendFlags_HasMouseCursors as i32
-            | sys::ImGuiBackendFlags_HasSetMousePos as i32
-            | sys::ImGuiBackendFlags_PlatformHasViewports as i32
-            | sys::ImGuiBackendFlags_HasParentViewport as i32
-            | sys::ImGuiBackendFlags_RendererHasViewports as i32;
+        (*io).BackendFlags |= sys::ImGuiBackendFlags_HasMouseCursors
+            | sys::ImGuiBackendFlags_HasSetMousePos
+            | sys::ImGuiBackendFlags_PlatformHasViewports
+            | sys::ImGuiBackendFlags_HasParentViewport
+            | sys::ImGuiBackendFlags_RendererHasViewports;
         (*platform_io).Platform_CreateWindow = Some(synthetic_create_window);
         (*platform_io).Platform_DestroyWindow = Some(synthetic_destroy_window);
         (*platform_io).Renderer_RenderWindow = Some(synthetic_renderer_render_window);
@@ -783,9 +796,11 @@ fn synthetic_vulkan_registration_with_callback(
         platform_count,
         Rc::new(Cell::new(0)),
         Rc::new(Cell::new(0)),
-        synthetic_create_window,
-        PlatformGraphicsKind::Vulkan,
-        callback,
+        SyntheticGraphics {
+            create_window: synthetic_create_window,
+            kind: PlatformGraphicsKind::Vulkan,
+            create_vk_surface: callback,
+        },
     )
 }
 

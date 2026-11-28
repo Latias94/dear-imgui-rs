@@ -329,9 +329,9 @@ impl RuntimeRegistration {
                     let consumer = consumer
                         .as_ref()
                         .expect("initialized SDL3 renderer lost its renderer consumer");
-                    match context.prepare_renderer_texture_reset(consumer.as_ref()) {
-                        Ok(reset) => Some(reset),
-                        Err(error) => return Err(error.into()),
+                    {
+                        let reset = context.prepare_renderer_texture_reset(consumer.as_ref())?;
+                        Some(reset)
                     }
                 }
                 None => None,

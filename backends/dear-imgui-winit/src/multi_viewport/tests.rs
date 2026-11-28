@@ -5,10 +5,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use dear_imgui_rs::{
-    BackendFlags, Context, ContextAttachment, ContextAttachmentRole,
-    ContextPlatformAttachmentReleaseError,
-};
+use dear_imgui_rs::{BackendFlags, Context, ContextAttachment, ContextAttachmentRole};
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::WindowId;
@@ -1918,7 +1915,7 @@ fn direct_context_platform_teardown_releases_the_runtime_slot_after_postflight_e
         .expect_err("postflight callback drift should be reported after native teardown");
     assert!(matches!(
         error,
-        dear_imgui_rs::ContextPlatformWindowTeardownError::AttachmentPostflight(_)
+        dear_imgui_rs::ContextError::PlatformWindowTeardownPostflight(_)
     ));
     assert_eq!(runtime.control().state(), RuntimeState::Detached);
     assert!(super::registry::runtime_for_context(context.as_raw()).is_none());
@@ -2217,7 +2214,7 @@ fn direct_context_platform_teardown_rejects_renderer_state_before_native_destroy
         .expect_err("renderer callbacks must reject core platform teardown before native destroy");
     assert!(matches!(
         error,
-        dear_imgui_rs::ContextPlatformWindowTeardownError::AttachmentPreflight(_)
+        dear_imgui_rs::ContextError::PlatformWindowTeardownPreflight(_)
     ));
     assert_eq!(runtime.control().state(), RuntimeState::Attached);
     assert!(!runtime.control().teardown_callbacks_active());
@@ -2393,14 +2390,13 @@ fn runtime_shutdown_rejects_an_active_renderer_attachment_before_frame_or_native
 
     assert!(matches!(
         runtime.shutdown(&mut context),
-        Err(WinitPlatformError::PlatformAttachmentRelease(
-            ContextPlatformAttachmentReleaseError::RendererActive
-        ))
+        Err(WinitPlatformError::Context(error))
+                if matches!(error.context_error(), dear_imgui_rs::ContextError::RendererAttachmentActive)
     ));
     assert_eq!(runtime.control().state(), RuntimeState::Attached);
     assert!(runtime.validate_renderer_owner(&context).is_ok());
 
-    assert_eq!(renderer.detach(), Ok(true));
+    assert!(renderer.detach().unwrap());
     runtime.shutdown(&mut context).unwrap();
 }
 

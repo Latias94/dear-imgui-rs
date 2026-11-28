@@ -206,7 +206,7 @@ impl<'ui> NodeEditorSetup<'ui> {
         self.with_style(|style| style.Colors[elem as u32 as usize] = abgr);
     }
 
-    /// Get a style color as RGBA floats [0,1]
+    /// Get a style color as RGBA floats in `0.0..=1.0`.
     pub fn get_color(&self, elem: crate::style::ColorElement) -> [f32; 4] {
         let col = self.with_style(|style| style.Colors[elem as u32 as usize]);
         crate::style::abgr_u32_to_rgba(col)

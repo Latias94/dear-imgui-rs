@@ -180,10 +180,11 @@ pub(super) fn draw_footer(
         if !ui.io().want_text_input() && ui.is_key_pressed(Key::F2) {
             super::ops::open_rename_modal_from_selection(state);
         }
-        if !ui.io().want_text_input() && ui.is_key_pressed(Key::Delete) {
-            if state.core.has_selection() {
-                super::ops::open_delete_modal_from_selection(state);
-            }
+        if !ui.io().want_text_input()
+            && ui.is_key_pressed(Key::Delete)
+            && state.core.has_selection()
+        {
+            super::ops::open_delete_modal_from_selection(state);
         }
     }
 
@@ -477,7 +478,7 @@ fn draw_confirm_overwrite_modal(ui: &Ui, state: &mut FileDialogState) {
     let Some(path_text) = state
         .core
         .pending_overwrite()
-        .and_then(|s| s.paths.get(0))
+        .and_then(|s| s.paths.first())
         .map(|p| p.display().to_string())
     else {
         return;

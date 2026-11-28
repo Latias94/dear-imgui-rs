@@ -1,7 +1,7 @@
 //! Dear ImGui platform-viewport bridge for Bevy-owned windows.
 //!
 //! PlatformIO callbacks installed here only capture intent into an engine-owned queue. Bevy systems
-//! drain that queue and mutate ECS-owned [`Window`] entities outside the C ABI callback boundary.
+//! drain that queue and mutate ECS-owned [`bevy_window::Window`] entities outside the C ABI callback boundary.
 
 mod capability;
 #[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]

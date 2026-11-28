@@ -309,6 +309,10 @@ fn session_defaults_and_member_overrides_reach_nested_containers() {
         list: Vec<Option<[i32; 3]>>,
         ordered: BTreeMap<String, WideTuple>,
         hash: HashMap<String, Option<i32>>,
+        #[allow(
+            clippy::type_complexity,
+            reason = "The derive must see an inline tuple to exercise arities above the 16-element ImGuiValue implementations"
+        )]
         tuple: (
             i32,
             i32,

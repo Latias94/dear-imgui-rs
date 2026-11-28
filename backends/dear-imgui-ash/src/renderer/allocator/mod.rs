@@ -23,7 +23,7 @@ pub enum Memory {
 }
 
 pub enum Allocator {
-    Default(default::Allocator),
+    Default(Box<default::Allocator>),
     #[cfg(feature = "gpu-allocator")]
     Gpu(gpu::Allocator),
     #[cfg(feature = "vk-mem")]
@@ -32,7 +32,7 @@ pub enum Allocator {
 
 impl Allocator {
     pub fn new_default(properties: vk::PhysicalDeviceMemoryProperties) -> Self {
-        Self::Default(default::Allocator::new(properties))
+        Self::Default(Box::new(default::Allocator::new(properties)))
     }
 
     #[cfg(feature = "gpu-allocator")]

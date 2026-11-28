@@ -6,9 +6,8 @@ use std::rc::Rc;
 
 use dear_imgui_rs::render::{DrawData, ReconciledFrame};
 use dear_imgui_rs::{
-    Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
-    ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
-    ContextDestroyed, ContextId, ContextTeardown, FrameToken, Id, TextureFormat,
+    Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole, ContextBinding,
+    ContextDestroyed, ContextError, ContextId, ContextTeardown, FrameToken, Id, TextureFormat,
 };
 use thiserror::Error;
 
@@ -25,12 +24,9 @@ struct GlowRendererAttachmentMarker;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum GlowViewportError {
-    /// The Dear ImGui Context rejected the renderer attachment.
-    #[error(transparent)]
-    Attachment(#[from] ContextAttachmentError),
     /// The originating Context can no longer be entered normally.
     #[error(transparent)]
-    Context(#[from] ContextBindingError),
+    Context(#[from] ContextError),
     /// The underlying renderer operation failed.
     #[error(transparent)]
     Renderer(#[from] RenderError),
@@ -388,6 +384,7 @@ pub(super) struct RuntimeControl {
     transitions: RefCell<Vec<&'static str>>,
 }
 
+#[derive(Default)]
 struct RuntimeFaults {
     pending: VecDeque<GlowViewportError>,
 }
@@ -407,14 +404,6 @@ impl RuntimeFaults {
 
     fn drain(&mut self) -> Vec<GlowViewportError> {
         self.pending.drain(..).collect()
-    }
-}
-
-impl Default for RuntimeFaults {
-    fn default() -> Self {
-        Self {
-            pending: VecDeque::new(),
-        }
     }
 }
 
@@ -760,9 +749,7 @@ impl RuntimeControl {
         callback_result
     }
 
-    fn release_renderer_during_context_teardown(
-        &self,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_renderer_during_context_teardown(&self) -> Result<(), ContextError> {
         let mut renderer = self.renderer.try_borrow_mut().map_err(|_| {
             context_teardown_error(GlowViewportError::CallbackReentered {
                 callback: "Context renderer-resource teardown",
@@ -891,7 +878,7 @@ impl RuntimeControl {
 }
 
 impl ContextAttachment for RuntimeControl {
-    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextAttachmentTeardownError> {
+    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         context.with_bound_context(|| {
             let pending = self.detect_and_take_fault();
             let shutdown = self.shutdown_once(ShutdownAction::Quiesce);
@@ -902,7 +889,7 @@ impl ContextAttachment for RuntimeControl {
     fn release_renderer_resources(
         &self,
         context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         context.with_bound_context(|| {
             self.begin_shutdown();
             let callback_error = release_callbacks(self).err().map(context_teardown_error);
@@ -1312,8 +1299,8 @@ where
     faults
 }
 
-fn context_teardown_error(error: GlowViewportError) -> ContextAttachmentTeardownError {
-    ContextAttachmentTeardownError::new(format!("Glow viewport teardown failed: {error}"))
+fn context_teardown_error(error: GlowViewportError) -> ContextError {
+    ContextError::attachment_teardown(format!("Glow viewport teardown failed: {error}"))
 }
 
 #[cfg(test)]

@@ -2,10 +2,7 @@ use std::error::Error;
 use std::ffi::CStr;
 use std::fmt;
 
-use dear_imgui_rs::{
-    ContextAttachmentDetachError, ContextAttachmentError, ContextBindingError, ContextId,
-    ImGuiError,
-};
+use dear_imgui_rs::{ContextError, ContextId};
 use dear_imgui_test_engine_sys as sys;
 
 use crate::{AttachmentState, RunState};
@@ -46,7 +43,7 @@ impl TestEngineStatus {
 #[non_exhaustive]
 pub enum TestEngineError {
     /// Creating a native engine could not reserve the Dear ImGui owner thread.
-    ThreadLease(ImGuiError),
+    ThreadLease(ContextError),
     /// The native ABI rejected an operation. `diagnostic` is copied before another ABI call.
     Ffi {
         operation: &'static str,
@@ -103,17 +100,17 @@ pub enum TestEngineError {
     /// The attached Context no longer accepts ordinary bindings.
     ContextBinding {
         operation: &'static str,
-        source: ContextBindingError,
+        source: ContextError,
     },
     /// The Context refused the unique Test Engine attachment.
     Attachment {
         operation: &'static str,
-        source: ContextAttachmentError,
+        source: ContextError,
     },
     /// The Context rejected an explicit Test Engine attachment detach.
     AttachmentDetach {
         operation: &'static str,
-        source: ContextAttachmentDetachError,
+        source: ContextError,
     },
     /// A core attachment lease contradicted the synchronized Test Engine state.
     AttachmentInvariant {

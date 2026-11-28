@@ -265,14 +265,24 @@ pub enum FrameDriverError<PrepareError, RenderError, PresentError> {
     /// Surface presentation failed. The post-swap hook was not called.
     Present {
         source: PresentError,
-        abort_error: Option<TestEngineError>,
+        abort_error: Option<Box<TestEngineError>>,
     },
     /// The native post-swap hook failed after successful presentation.
     PostSwap {
         source: TestEngineError,
-        abort_error: Option<TestEngineError>,
+        abort_error: Option<Box<TestEngineError>>,
     },
 }
+
+/// Result of driving one frame, with the driver's errors retained for each backend phase.
+pub type FrameDriveResult<Driver> = Result<
+    FrameDriveOutcome,
+    FrameDriverError<
+        <Driver as TestFrameDriver>::PrepareError,
+        <Driver as TestFrameDriver>::RenderError,
+        <Driver as TestFrameDriver>::PresentError,
+    >,
+>;
 
 impl<PrepareError, RenderError, PresentError>
     FrameDriverError<PrepareError, RenderError, PresentError>
@@ -294,9 +304,14 @@ impl<PrepareError, RenderError, PresentError>
     #[must_use]
     pub const fn abort_error(&self) -> Option<&TestEngineError> {
         match self {
-            Self::Present { abort_error, .. } | Self::PostSwap { abort_error, .. } => {
-                abort_error.as_ref()
+            Self::Present {
+                abort_error: Some(error),
+                ..
             }
+            | Self::PostSwap {
+                abort_error: Some(error),
+                ..
+            } => Some(error),
             _ => None,
         }
     }

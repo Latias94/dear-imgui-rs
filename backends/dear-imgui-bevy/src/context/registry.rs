@@ -1,9 +1,10 @@
+use dear_imgui_rs::error::context::Operation;
 use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroU64;
 
 use bevy_ecs::message::Message;
-use dear_imgui_rs::{Context, ContextId, ContextOperationError, FrameLifecycleState};
+use dear_imgui_rs::{Context, ContextId, FrameLifecycleState};
 
 use super::lifecycle::ImguiAppLifecycle;
 use super::{
@@ -188,19 +189,19 @@ pub enum ImguiContextError {
     /// The legacy/headless font-atlas capability could not be acquired before opening a frame.
     FontAtlasMode {
         context_id: ContextId,
-        source: dear_imgui_rs::FontAtlasModeError,
+        source: dear_imgui_rs::FontError,
     },
     /// Managed renderer admission failed before backend fields were mutated.
     #[cfg(feature = "render")]
     RendererAdmission {
         context_id: ContextId,
-        source: dear_imgui_rs::render::RendererConsumerError,
+        source: dear_imgui_rs::FrameError,
     },
     /// Device recovery could not reset this Context's renderer generation.
     #[cfg(feature = "render")]
     RendererRecovery {
         context_id: ContextId,
-        source: dear_imgui_rs::render::RendererConsumerError,
+        source: dear_imgui_rs::FrameError,
     },
     /// Renderer fields changed after this backend acquired them.
     #[cfg(feature = "render")]
@@ -212,19 +213,19 @@ pub enum ImguiContextError {
     #[cfg(feature = "render")]
     RendererCompletion {
         context_id: ContextId,
-        source: dear_imgui_rs::render::RendererConsumerError,
+        source: dear_imgui_rs::FrameError,
     },
     /// Render-world delivery of a detached snapshot outcome failed for this Context.
     #[cfg(feature = "render")]
     SnapshotCommit {
         context_id: ContextId,
-        source: dear_imgui_rs::render::snapshot::SnapshotCommitError,
+        source: dear_imgui_rs::FrameError,
     },
     /// The completed Dear ImGui frame could not be captured for the render world.
     #[cfg(feature = "render")]
     SnapshotCapture {
         context_id: ContextId,
-        source: dear_imgui_rs::render::snapshot::SnapshotError,
+        source: dear_imgui_rs::FrameError,
     },
     /// Native viewport callbacks or their deferred command bridge failed for this Context.
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -243,7 +244,7 @@ pub enum ImguiContextError {
     /// Native multi-viewport was requested, but this build cannot provide native windows.
     NativeMultiViewportUnavailable { context_id: ContextId },
     /// Core Context construction failed.
-    ContextCreation(dear_imgui_rs::ImGuiError),
+    ContextCreation(dear_imgui_rs::ContextError),
     /// The registry exhausted its monotonic slot generations.
     ContextGenerationExhausted,
     /// Managed removal was requested before the plugin installed its retirement queue.
@@ -258,7 +259,7 @@ pub enum ImguiContextError {
 impl ImguiContextError {
     pub(crate) fn from_context_operation<E>(
         context_id: ContextId,
-        error: ContextOperationError<E>,
+        error: Operation<E>,
         map_closure: impl FnOnce(E) -> Self,
     ) -> Self {
         match error.into_closure_error() {
@@ -1091,7 +1092,7 @@ impl ImguiContexts {
     pub(crate) fn record_renderer_completion_error(
         &mut self,
         context_id: ContextId,
-        source: dear_imgui_rs::render::RendererConsumerError,
+        source: dear_imgui_rs::FrameError,
     ) {
         let slot = self
             .slots
@@ -1126,7 +1127,7 @@ impl ImguiContexts {
     pub(crate) fn record_snapshot_commit_error(
         &mut self,
         context_id: ContextId,
-        source: dear_imgui_rs::render::snapshot::SnapshotCommitError,
+        source: dear_imgui_rs::FrameError,
     ) {
         let Some(slot) = self.slots.get_mut(&context_id) else {
             return;

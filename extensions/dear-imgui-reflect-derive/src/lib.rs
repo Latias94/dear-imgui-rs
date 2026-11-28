@@ -14,14 +14,14 @@ mod struct_codegen;
 #[cfg(test)]
 mod tests;
 
-/// Derive macro for [`dear_imgui_reflect::ImGuiReflect`].
+/// Derive macro for [`dear_imgui_reflect::ImGuiReflect`](https://docs.rs/dear-imgui-reflect/latest/dear_imgui_reflect/trait.ImGuiReflect.html).
 ///
 /// Currently supports:
 ///
 /// - Structs with named fields, tuple fields, and unit structs. Each field must implement
-///   [`dear_imgui_reflect::ImGuiValue`], either directly or via a blanket
+///   `dear_imgui_reflect::ImGuiValue`, either directly or via a blanket
 ///   implementation (for example, another type that implements
-///   [`dear_imgui_reflect::ImGuiReflect`]).
+///   `dear_imgui_reflect::ImGuiReflect`).
 /// - Enums with unit, tuple, or named payload variants. Variants are edited via a combo box
 ///   (default) or radio buttons via `#[imgui(enum_style = "radio")]`.
 ///   Switching to a payload variant constructs its payload using `Default`, so payload field types

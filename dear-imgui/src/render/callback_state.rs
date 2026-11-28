@@ -2,22 +2,7 @@
 
 use std::{ffi::c_void, marker::PhantomData, ptr::NonNull};
 
-use crate::sys;
-
-/// Failure while publishing or validating a renderer callback state slot.
-///
-/// This is backend support rather than an application-level callback API. Backends map these
-/// cases into their public error types, which retain API-specific context.
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RendererRenderStateGuardError {
-    /// Dear ImGui did not provide a Platform IO record for the active Context.
-    MissingPlatformIo,
-    /// A renderer has already published transient callback state for this draw scope.
-    AlreadyOccupied,
-    /// A raw callback replaced the state published by the renderer.
-    Drift,
-}
+use crate::{FrameError, sys};
 
 /// RAII publication for one backend-owned, callback-scoped renderer state value.
 ///
@@ -38,15 +23,12 @@ impl<'state, State> RendererRenderStateGuard<'state, State> {
     ///
     /// `platform_io` must point to a live `ImGuiPlatformIO` for the current Context. It must
     /// remain valid for the later guard installation and validation.
-    pub unsafe fn preflight(
-        platform_io: *mut sys::ImGuiPlatformIO,
-    ) -> Result<(), RendererRenderStateGuardError> {
-        let platform_io =
-            NonNull::new(platform_io).ok_or(RendererRenderStateGuardError::MissingPlatformIo)?;
+    pub unsafe fn preflight(platform_io: *mut sys::ImGuiPlatformIO) -> Result<(), FrameError> {
+        let platform_io = NonNull::new(platform_io).ok_or(FrameError::MissingPlatformIo)?;
         if unsafe { platform_io.as_ref().Renderer_RenderState }.is_null() {
             Ok(())
         } else {
-            Err(RendererRenderStateGuardError::AlreadyOccupied)
+            Err(FrameError::AlreadyOccupied)
         }
     }
 
@@ -60,9 +42,8 @@ impl<'state, State> RendererRenderStateGuard<'state, State> {
     pub unsafe fn install(
         platform_io: *mut sys::ImGuiPlatformIO,
         state: &'state mut State,
-    ) -> Result<Self, RendererRenderStateGuardError> {
-        let platform_io =
-            NonNull::new(platform_io).ok_or(RendererRenderStateGuardError::MissingPlatformIo)?;
+    ) -> Result<Self, FrameError> {
+        let platform_io = NonNull::new(platform_io).ok_or(FrameError::MissingPlatformIo)?;
         unsafe { Self::preflight(platform_io.as_ptr()) }?;
         let expected = NonNull::from(state);
         unsafe {
@@ -76,13 +57,13 @@ impl<'state, State> RendererRenderStateGuard<'state, State> {
     }
 
     /// Confirms that no callback replaced the state owned by this renderer.
-    pub fn validate(&self) -> Result<(), RendererRenderStateGuardError> {
+    pub fn validate(&self) -> Result<(), FrameError> {
         if unsafe { self.platform_io.as_ref().Renderer_RenderState }
             == self.expected.cast::<c_void>().as_ptr()
         {
             Ok(())
         } else {
-            Err(RendererRenderStateGuardError::Drift)
+            Err(FrameError::Drift)
         }
     }
 
@@ -96,7 +77,7 @@ impl<'state, State> RendererRenderStateGuard<'state, State> {
     }
 
     /// Clears the state slot after validating its ownership.
-    pub fn finish(self) -> Result<(), RendererRenderStateGuardError> {
+    pub fn finish(self) -> Result<(), FrameError> {
         let result = self.validate();
         if result.is_ok() {
             unsafe {
@@ -121,7 +102,7 @@ impl<State> Drop for RendererRenderStateGuard<'_, State> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RendererRenderStateGuard, RendererRenderStateGuardError};
+    use super::{FrameError, RendererRenderStateGuard};
     use crate::sys;
 
     #[test]
@@ -149,7 +130,7 @@ mod tests {
 
             assert!(matches!(
                 RendererRenderStateGuard::install(platform_io, &mut state),
-                Err(RendererRenderStateGuardError::AlreadyOccupied)
+                Err(FrameError::AlreadyOccupied)
             ));
             assert_eq!(
                 (*platform_io).Renderer_RenderState,
@@ -168,7 +149,7 @@ mod tests {
             let guard = RendererRenderStateGuard::install(platform_io, &mut state).unwrap();
             (*platform_io).Renderer_RenderState = std::ptr::from_mut(&mut foreign).cast();
 
-            assert_eq!(guard.finish(), Err(RendererRenderStateGuardError::Drift));
+            assert_eq!(guard.finish(), Err(FrameError::Drift));
             assert_eq!(
                 (*platform_io).Renderer_RenderState,
                 std::ptr::from_mut(&mut foreign).cast()

@@ -514,7 +514,7 @@ fn extracted_library_dir(root: &Path, lib_name: &str) -> Option<PathBuf> {
     let lib_dir = root.join("lib");
     if fs::symlink_metadata(&lib_dir).is_ok_and(|metadata| metadata.is_dir())
         && is_plain_file(&lib_dir.join(lib_name))
-        && match fs::symlink_metadata(&lib_dir.join("manifest.txt")) {
+        && match fs::symlink_metadata(lib_dir.join("manifest.txt")) {
             Ok(metadata) => metadata.is_file(),
             Err(error) => error.kind() == std::io::ErrorKind::NotFound,
         }
@@ -1553,7 +1553,7 @@ mod tests {
             extract_archive_to_dir(&extract_dir, "libcore.a", &bytes, "fingerprint").unwrap()
         };
         let (first_lib_dir, second_lib_dir) = std::thread::scope(|scope| {
-            let worker = scope.spawn(&extract);
+            let worker = scope.spawn(extract);
             let library_dir = extract();
             (worker.join().unwrap(), library_dir)
         });

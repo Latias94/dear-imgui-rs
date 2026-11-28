@@ -76,7 +76,7 @@ impl super::gpu::GpuState {
 
         // Create depth stencil state if needed (matches imgui_impl_wgpu.cpp depth-stencil setup)
         let depth_stencil = backend_data.depth_stencil_format.map(|format| {
-            let state = DepthStencilState {
+            DepthStencilState {
                 format,
                 depth_write_enabled: Some(false), // matches WGPUOptionalBool_False in C++
                 depth_compare: Some(CompareFunction::Always), // matches WGPUCompareFunction_Always
@@ -97,8 +97,7 @@ impl super::gpu::GpuState {
                     write_mask: 0xff, // default value
                 },
                 bias: DepthBiasState::default(),
-            };
-            state
+            }
         });
 
         // Create render pipeline

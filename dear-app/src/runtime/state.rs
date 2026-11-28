@@ -832,10 +832,10 @@ impl WgpuRuntimeFactory {
                 }
             }
         } else {
-            super::renderer::AppRenderer::Single(renderer)
+            super::renderer::AppRenderer::Single(Box::new(renderer))
         };
         #[cfg(not(feature = "multi-viewport"))]
-        let renderer = super::renderer::AppRenderer::Single(renderer);
+        let renderer = super::renderer::AppRenderer::Single(Box::new(renderer));
 
         Ok(RuntimeGeneration {
             id: generation,

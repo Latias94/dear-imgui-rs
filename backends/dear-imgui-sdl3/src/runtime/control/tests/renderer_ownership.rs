@@ -291,8 +291,7 @@ fn native_renderer_shutdown_preserves_foreign_callback_and_backend_replacements(
                 observed.set(
                     callback_is_owned
                         && (*io).BackendRendererUserData as usize == OWNED_BACKEND_DATA
-                        && (*io).BackendFlags & sys::ImGuiBackendFlags_RendererHasViewports as i32
-                            != 0,
+                        && (*io).BackendFlags & sys::ImGuiBackendFlags_RendererHasViewports != 0,
                 );
                 sys::ImGuiPlatformIO_ClearRendererHandlers(platform_io);
                 (*io).BackendRendererUserData = std::ptr::null_mut();
@@ -302,10 +301,12 @@ fn native_renderer_shutdown_preserves_foreign_callback_and_backend_replacements(
         Rc::new(|| unsafe {
             let io = sys::igGetIO_Nil();
             let platform_io = sys::igGetPlatformIO_Nil();
-            let mut viewport = sys::ImGuiViewport::default();
-            viewport.PlatformUserData = OWNED_VIEWPORT_DATA as *mut _;
-            viewport.PlatformHandle = OWNED_VIEWPORT_HANDLE as *mut _;
-            viewport.RendererUserData = FOREIGN_BACKEND_DATA as *mut _;
+            let mut viewport = sys::ImGuiViewport {
+                PlatformUserData: OWNED_VIEWPORT_DATA as *mut _,
+                PlatformHandle: OWNED_VIEWPORT_HANDLE as *mut _,
+                RendererUserData: FOREIGN_BACKEND_DATA as *mut _,
+                ..Default::default()
+            };
             let _ = with_current_runtime(|control| {
                 control.remember_owned_viewport(
                     &mut viewport,
@@ -318,7 +319,7 @@ fn native_renderer_shutdown_preserves_foreign_callback_and_backend_replacements(
                 .Renderer_DestroyWindow
                 .expect("renderer destroy wrapper must remain installed")(&mut viewport);
             sys::ImGuiPlatformIO_ClearPlatformHandlers(platform_io);
-            (*io).BackendFlags &= !(sys::ImGuiBackendFlags_HasMouseCursors as i32);
+            (*io).BackendFlags &= !sys::ImGuiBackendFlags_HasMouseCursors;
         }),
         PlatformGraphicsKind::Other,
         native_renderer,
@@ -336,8 +337,8 @@ fn native_renderer_shutdown_preserves_foreign_callback_and_backend_replacements(
         (*io).BackendPlatformName = OWNED_BACKEND_NAME.as_ptr().cast();
         (*io).BackendRendererUserData = OWNED_BACKEND_DATA as *mut _;
         (*io).BackendRendererName = OWNED_BACKEND_NAME.as_ptr().cast();
-        (*io).BackendFlags |= sys::ImGuiBackendFlags_RendererHasViewports as i32
-            | sys::ImGuiBackendFlags_HasMouseCursors as i32;
+        (*io).BackendFlags |=
+            sys::ImGuiBackendFlags_RendererHasViewports | sys::ImGuiBackendFlags_HasMouseCursors;
     });
 
     let baseline = registration.baseline.take().unwrap();
@@ -363,10 +364,15 @@ fn native_renderer_shutdown_preserves_foreign_callback_and_backend_replacements(
     registration.control.platform_initialized.set(true);
     registration.control.renderer_initialized.set(true);
 
-    let mut owned_viewport = sys::ImGuiViewport::default();
-    owned_viewport.PlatformUserData = OWNED_VIEWPORT_DATA as *mut _;
-    owned_viewport.PlatformHandle = OWNED_VIEWPORT_HANDLE as *mut _;
-    owned_viewport.RendererUserData = OWNED_BACKEND_DATA as *mut _;
+    let mut owned_viewport = sys::ImGuiViewport {
+        PlatformUserData: OWNED_VIEWPORT_DATA as *mut _,
+
+        PlatformHandle: OWNED_VIEWPORT_HANDLE as *mut _,
+
+        RendererUserData: OWNED_BACKEND_DATA as *mut _,
+
+        ..Default::default()
+    };
     registration
         .control
         .remember_owned_viewport(&mut owned_viewport, unsafe {
@@ -400,11 +406,11 @@ fn native_renderer_shutdown_preserves_foreign_callback_and_backend_replacements(
     context.binding().with_bound_context(|| unsafe {
         let flags = (*sys::igGetIO_Nil()).BackendFlags;
         assert_ne!(
-            flags & sys::ImGuiBackendFlags_RendererHasViewports as i32,
+            flags & sys::ImGuiBackendFlags_RendererHasViewports,
             0,
             "foreign renderer takeover must retain its published capability"
         );
-        assert_ne!(flags & sys::ImGuiBackendFlags_HasMouseCursors as i32, 0);
+        assert_ne!(flags & sys::ImGuiBackendFlags_HasMouseCursors, 0);
     });
 
     assert!(matches!(
@@ -445,12 +451,12 @@ fn native_renderer_shutdown_preserves_foreign_callback_and_backend_replacements(
             FOREIGN_BACKEND_NAME.as_ptr().cast()
         );
         assert_eq!(
-            (*io).BackendFlags & sys::ImGuiBackendFlags_HasMouseCursors as i32,
+            (*io).BackendFlags & sys::ImGuiBackendFlags_HasMouseCursors,
             0,
             "renderer shutdown must not resurrect a platform bit cleared by native shutdown"
         );
         assert_ne!(
-            (*io).BackendFlags & sys::ImGuiBackendFlags_RendererHasViewports as i32,
+            (*io).BackendFlags & sys::ImGuiBackendFlags_RendererHasViewports,
             0,
             "renderer shutdown must restore a foreign renderer capability snapshot"
         );

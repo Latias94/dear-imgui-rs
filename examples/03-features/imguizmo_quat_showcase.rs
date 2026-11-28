@@ -355,11 +355,11 @@ const UPSTREAM_WGSL_RAW: &str = r#"
 
 fn sanitize_cpp_wrapped_wgsl(src: &str) -> String {
     // Take contents between first occurrence of R"( and the trailing )"
-    if let Some(start) = src.find("R\"(") {
-        if let Some(end) = src.rfind(")\"") {
-            let inner = &src[start + 3..end];
-            return inner.to_string();
-        }
+    if let Some(start) = src.find("R\"(")
+        && let Some(end) = src.rfind(")\"")
+    {
+        let inner = &src[start + 3..end];
+        return inner.to_string();
     }
     src.to_string()
 }
@@ -566,7 +566,12 @@ struct AppWindow {
     // Offscreen WGPU scene
     rtt: OffscreenRtt,
     scene: ScenePipeline,
-    // Gizmo state
+    gizmo: GizmoState,
+    gizmo_controls: GizmoControls,
+}
+
+#[derive(Clone, Copy)]
+struct GizmoState {
     rot: glam::Quat,
     light_dir: glam::Vec3,
     pan_dolly: glam::Vec3,
@@ -582,6 +587,9 @@ struct AppWindow {
     pan_scale: f32,
     dolly_scale: f32,
     dolly_wheel_scale: f32,
+}
+
+struct GizmoControls {
     pan_mod: Modifiers,
     dolly_mod: Modifiers,
     // Geometry
@@ -692,26 +700,30 @@ impl AppWindow {
             imgui,
             rtt,
             scene,
-            rot: glam::Quat::IDENTITY,
-            light_dir: glam::Vec3::new(1.0, 0.0, 0.0),
-            pan_dolly: glam::Vec3::ZERO,
-            size: 220.0,
-            use_pan_dolly: false,
-            mode: Mode::MODE_DUAL | Mode::CUBE_AT_ORIGIN,
-            dir_color: [0.9, 0.2, 0.2, 1.0],
-            plane_color: [0.9, 0.9, 0.9, 0.75],
-            sphere_a: [0.2, 0.6, 1.0, 1.0],
-            sphere_b: [0.8, 0.8, 0.2, 1.0],
-            feeling_rot: 1.0,
-            pan_scale: 1.0,
-            dolly_scale: 1.0,
-            dolly_wheel_scale: 1.0,
-            pan_mod: Modifiers::CONTROL,
-            dolly_mod: Modifiers::SHIFT,
-            axes_len: 1.0,
-            axes_thickness: 1.0,
-            cone_thickness: 1.0,
-            solid_size: 1.0,
+            gizmo: GizmoState {
+                rot: glam::Quat::IDENTITY,
+                light_dir: glam::Vec3::new(1.0, 0.0, 0.0),
+                pan_dolly: glam::Vec3::ZERO,
+                size: 220.0,
+                use_pan_dolly: false,
+                mode: Mode::MODE_DUAL | Mode::CUBE_AT_ORIGIN,
+                dir_color: [0.9, 0.2, 0.2, 1.0],
+                plane_color: [0.9, 0.9, 0.9, 0.75],
+                sphere_a: [0.2, 0.6, 1.0, 1.0],
+                sphere_b: [0.8, 0.8, 0.2, 1.0],
+                feeling_rot: 1.0,
+                pan_scale: 1.0,
+                dolly_scale: 1.0,
+                dolly_wheel_scale: 1.0,
+            },
+            gizmo_controls: GizmoControls {
+                pan_mod: Modifiers::CONTROL,
+                dolly_mod: Modifiers::SHIFT,
+                axes_len: 1.0,
+                axes_thickness: 1.0,
+                cone_thickness: 1.0,
+                solid_size: 1.0,
+            },
         })
     }
 
@@ -760,49 +772,13 @@ impl AppWindow {
         self.imgui
             .platform
             .prepare_frame(&mut self.imgui.context, &self.window)?;
-        // Work on local copies during the UI frame to avoid borrowing self while Ui is alive
-        let mut rot = self.rot;
-        let mut light_dir = self.light_dir;
-        let mut pan_dolly = self.pan_dolly;
-        let mut size = self.size;
-        let mut use_pan_dolly = self.use_pan_dolly;
-        let mut mode = self.mode;
-        let mut dir_color = self.dir_color;
-        let mut plane_color = self.plane_color;
-        let mut sphere_a = self.sphere_a;
-        let mut sphere_b = self.sphere_b;
-        let mut feeling_rot = self.feeling_rot;
-        let mut pan_scale = self.pan_scale;
-        let mut dolly_scale = self.dolly_scale;
-        let mut dolly_wheel_scale = self.dolly_wheel_scale;
+        let mut gizmo = self.gizmo;
         let ui = self.imgui.context.frame();
         // Create a DockSpace over main viewport so windows can be docked properly
         let dockspace_id = ui.dockspace().build()?;
         // Prefer to dock the main controls window on first use
         ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
-        show_quat_gizmo_window(
-            &ui,
-            &mut rot,
-            &mut light_dir,
-            &mut pan_dolly,
-            &mut size,
-            &mut use_pan_dolly,
-            &mut mode,
-            &mut dir_color,
-            &mut plane_color,
-            &mut sphere_a,
-            &mut sphere_b,
-            &mut feeling_rot,
-            &mut pan_scale,
-            &mut dolly_scale,
-            &mut dolly_wheel_scale,
-            &mut self.pan_mod,
-            &mut self.dolly_mod,
-            &mut self.axes_len,
-            &mut self.axes_thickness,
-            &mut self.cone_thickness,
-            &mut self.solid_size,
-        );
+        show_quat_gizmo_window(ui, &mut gizmo, &mut self.gizmo_controls);
 
         // Show the offscreen texture inside an ImGui window (resizable)
         ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
@@ -825,27 +801,12 @@ impl AppWindow {
                 label: Some("Render Encoder"),
             });
 
-        self.imgui.platform.prepare_render(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(ui, &self.window)?;
         let pending_frame = self
             .imgui
             .context
             .render(self.imgui.renderer.renderer_consumer()?);
-        // Persist state after the UI frame ends
-        self.rot = rot;
-        self.light_dir = light_dir;
-        self.pan_dolly = pan_dolly;
-        self.size = size;
-        self.use_pan_dolly = use_pan_dolly;
-        self.mode = mode;
-        self.dir_color = dir_color;
-        self.plane_color = plane_color;
-        self.sphere_a = sphere_a;
-        self.sphere_b = sphere_b;
-        self.feeling_rot = feeling_rot;
-        self.pan_scale = pan_scale;
-        self.dolly_scale = dolly_scale;
-        self.dolly_wheel_scale = dolly_wheel_scale;
-        // geometry already persisted via &mut self.* in call
+        self.gizmo = gizmo;
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -884,35 +845,37 @@ impl AppWindow {
         }
 
         // Update offscreen scene after presenting (applies next frame)
-        self.render_scene_to_offscreen(&rot, &light_dir, &pan_dolly);
+        self.render_scene_to_offscreen();
 
         Ok(())
     }
 }
 
-fn show_quat_gizmo_window(
-    ui: &Ui,
-    rot: &mut glam::Quat,
-    light_dir: &mut glam::Vec3,
-    pan_dolly: &mut glam::Vec3,
-    size: &mut f32,
-    use_pan_dolly: &mut bool,
-    mode: &mut Mode,
-    dir_color: &mut [f32; 4],
-    plane_color: &mut [f32; 4],
-    sphere_a: &mut [f32; 4],
-    sphere_b: &mut [f32; 4],
-    feeling_rot: &mut f32,
-    pan_scale: &mut f32,
-    dolly_scale: &mut f32,
-    dolly_wheel_scale: &mut f32,
-    pan_mod: &mut Modifiers,
-    dolly_mod: &mut Modifiers,
-    axes_len: &mut f32,
-    axes_thickness: &mut f32,
-    cone_thickness: &mut f32,
-    solid_size: &mut f32,
-) {
+fn show_quat_gizmo_window(ui: &Ui, state: &mut GizmoState, controls: &mut GizmoControls) {
+    let GizmoState {
+        rot,
+        light_dir,
+        pan_dolly,
+        size,
+        use_pan_dolly,
+        mode,
+        dir_color,
+        plane_color,
+        sphere_a,
+        sphere_b,
+        feeling_rot,
+        pan_scale,
+        dolly_scale,
+        dolly_wheel_scale,
+    } = state;
+    let GizmoControls {
+        pan_mod,
+        dolly_mod,
+        axes_len,
+        axes_thickness,
+        cone_thickness,
+        solid_size,
+    } = controls;
     ui.window("ImGuIZMO.quat Showcase##imguizmo_quat_showcase")
         .size([430.0, 500.0], Condition::FirstUseEver)
         .build(|| {
@@ -926,14 +889,14 @@ fn show_quat_gizmo_window(
             let mut mp = mode.contains(Mode::MODE_DIR_PLANE);
             let mut mdul = mode.contains(Mode::MODE_DUAL);
             let mut mpd = mode.contains(Mode::MODE_PAN_DOLLY);
-            if ui.checkbox("3 Axes", &mut m3) {}
+            ui.checkbox("3 Axes", &mut m3);
             ui.same_line();
-            if ui.checkbox("Direction", &mut md) {}
+            ui.checkbox("Direction", &mut md);
             ui.same_line();
-            if ui.checkbox("Dir Plane", &mut mp) {}
+            ui.checkbox("Dir Plane", &mut mp);
             ui.same_line();
-            if ui.checkbox("Dual", &mut mdul) {}
-            if ui.checkbox("Pan+Dolly", &mut mpd) {}
+            ui.checkbox("Dual", &mut mdul);
+            ui.checkbox("Pan+Dolly", &mut mpd);
             id_modes.pop();
 
             let id_solids = ui.push_id("solids");
@@ -941,13 +904,13 @@ fn show_quat_gizmo_window(
             let mut sphere = mode.contains(Mode::SPHERE_AT_ORIGIN);
             let mut no_solid = mode.contains(Mode::NO_SOLID_AT_ORIGIN);
             let mut full_axes = mode.contains(Mode::MODE_FULL_AXES);
-            if ui.checkbox("Cube", &mut cube) {}
+            ui.checkbox("Cube", &mut cube);
             ui.same_line();
-            if ui.checkbox("Sphere", &mut sphere) {}
+            ui.checkbox("Sphere", &mut sphere);
             ui.same_line();
-            if ui.checkbox("No Solid", &mut no_solid) {}
+            ui.checkbox("No Solid", &mut no_solid);
             ui.same_line();
-            if ui.checkbox("Full Axes", &mut full_axes) {}
+            ui.checkbox("Full Axes", &mut full_axes);
             id_solids.pop();
 
             *mode = Mode::empty();
@@ -1217,12 +1180,13 @@ fn show_quat_gizmo_window(
 
 // Separate impl block for extra AppWindow methods
 impl AppWindow {
-    fn render_scene_to_offscreen(
-        &mut self,
-        rot: &glam::Quat,
-        light_dir: &glam::Vec3,
-        pan_dolly: &glam::Vec3,
-    ) {
+    fn render_scene_to_offscreen(&mut self) {
+        let GizmoState {
+            rot,
+            light_dir,
+            pan_dolly,
+            ..
+        } = self.gizmo;
         // Camera/view parameters (mirrors upstream example)
         let eye = glam::Vec3::new(12.0, 6.0, 4.0);
         let target = glam::Vec3::ZERO;
@@ -1235,8 +1199,8 @@ impl AppWindow {
             glam::camera::rh::proj::directx::perspective(fov, 1.0 / aspect_ratio_hw, 0.1, 100.0);
 
         // Model matrices
-        let model_rot = glam::Mat4::from_quat(*rot);
-        let model_trans = glam::Mat4::from_translation(*pan_dolly);
+        let model_rot = glam::Mat4::from_quat(rot);
+        let model_trans = glam::Mat4::from_translation(pan_dolly);
         let model = model_trans * model_rot;
 
         // Compensate view rotation (remove rotation part from view for pan/dolly screen-space feel)
@@ -1244,7 +1208,7 @@ impl AppWindow {
         let comp = glam::Mat4::from_quat(qv.inverse());
 
         // Upstream mapping: derive a quaternion from the light vector, then rotate -X axis
-        let light_quat = quat_from_vec3_upstream(*light_dir);
+        let light_quat = quat_from_vec3_upstream(light_dir);
         let light_dir_from_quat = light_quat * glam::Vec3::new(-1.0, 0.0, 0.0);
         let light_distance = 3.5f32;
         let light_world =

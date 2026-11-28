@@ -5,23 +5,17 @@ pub(super) struct PlatformAttachment {
 }
 
 impl ContextAttachment for PlatformAttachment {
-    fn quiesce(
-        &self,
-        _context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn quiesce(&self, _context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         self.control.begin_shutdown();
         Ok(())
     }
 
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         self.control.begin_shutdown();
         context
             .with_bound_context(|| self.control.shutdown_bound_for_attachment())
             .map_err(|error| {
-                ContextAttachmentTeardownError::new(format!(
+                ContextError::attachment_teardown(format!(
                     "SDL3 Context teardown could not safely release native resources: {error}"
                 ))
             })
@@ -40,11 +34,11 @@ impl ContextAttachment for RendererAttachment {
     fn release_renderer_resources(
         &self,
         context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         self.control.begin_shutdown();
         let Some(consumer) = self.control.take_renderer_consumer() else {
             if self.control.lifecycle.renderer_texture_update.is_some() {
-                return Err(ContextAttachmentTeardownError::new(
+                return Err(ContextError::attachment_teardown(
                     "SDL3 renderer-resource teardown lost its renderer consumer",
                 ));
             }
@@ -58,7 +52,7 @@ impl ContextAttachment for RendererAttachment {
                 self.control
                     .release_renderer_device_objects_bound()
                     .map_err(|error| {
-                        ContextAttachmentTeardownError::new(format!(
+                        ContextError::attachment_teardown(format!(
                             "SDL3 Context teardown could not release renderer device objects: {error}"
                         ))
                     })

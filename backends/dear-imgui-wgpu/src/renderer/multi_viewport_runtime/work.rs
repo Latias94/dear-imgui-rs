@@ -280,6 +280,23 @@ impl WgpuPendingPresentations {
     }
 }
 
+impl fmt::Debug for WgpuRecordedViewportWork {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WgpuRecordedViewportWork")
+            .field("target_count", &self.targets.len())
+            .field("report", &self.report)
+            .finish_non_exhaustive()
+    }
+}
+impl fmt::Debug for WgpuPendingPresentations {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WgpuPendingPresentations")
+            .field("target_count", &self.targets.len())
+            .field("report", &self.report)
+            .finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -884,22 +901,5 @@ mod tests {
         release_acquired_parts(&mut frame, &mut surface, &mut window);
         release_acquired_parts(&mut frame, &mut surface, &mut window);
         assert_eq!(order.borrow().as_slice(), ["frame", "surface", "window"]);
-    }
-}
-
-impl fmt::Debug for WgpuRecordedViewportWork {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WgpuRecordedViewportWork")
-            .field("target_count", &self.targets.len())
-            .field("report", &self.report)
-            .finish_non_exhaustive()
-    }
-}
-impl fmt::Debug for WgpuPendingPresentations {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WgpuPendingPresentations")
-            .field("target_count", &self.targets.len())
-            .field("report", &self.report)
-            .finish_non_exhaustive()
     }
 }

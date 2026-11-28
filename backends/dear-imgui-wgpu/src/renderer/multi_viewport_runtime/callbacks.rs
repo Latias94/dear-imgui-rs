@@ -7,6 +7,7 @@ use dear_imgui_rs::internal::RawCast;
 use dear_imgui_rs::platform_io::{PlatformIo, Viewport};
 use dear_imgui_rs::{BackendFlags, Context};
 
+use super::super::render::FramebufferTarget;
 use super::registry::{
     ViewportDataDestroy, ViewportDataLookup, ViewportIdentity, current_context,
     destroy_registered_viewport_data, destroy_viewport_data, preflight_viewport_data_ownership,
@@ -19,7 +20,7 @@ use super::surface::{
     surface_action,
 };
 use super::work::{AcquiredTarget, RecordedTarget};
-use crate::{WgpuFrameScope, WgpuFrameSkipReason};
+use crate::{FramebufferExtent, WgpuFrameScope, WgpuFrameSkipReason};
 use std::rc::Rc;
 
 pub(super) fn unary_callback_matches(
@@ -494,10 +495,10 @@ pub(super) unsafe fn renderer_set_window_size(
             return;
         }
     };
-    if data.size != pixels {
-        if let Err(error) = reconfigure_surface(data, &globals, pixels) {
-            control.record_fault(error);
-        }
+    if data.size != pixels
+        && let Err(error) = reconfigure_surface(data, &globals, pixels)
+    {
+        control.record_fault(error);
     }
 }
 
@@ -725,12 +726,16 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
                 let recording_result = guard_native_callback(
                     None,
                     || {
-                        Some(renderer.render_read_only_draw_data_with_fb_size(
+                        Some(renderer.render_draw_data_for_target(
                             draw_data,
                             &mut render_pass,
-                            targets.config.width,
-                            targets.config.height,
-                            false,
+                            FramebufferTarget {
+                                extent: FramebufferExtent::new(
+                                    targets.config.width,
+                                    targets.config.height,
+                                ),
+                                main_viewport: false,
+                            },
                             unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() },
                             control.observation_scope().unwrap_or(WgpuFrameScope {
                                 context_id: control.binding().id(),

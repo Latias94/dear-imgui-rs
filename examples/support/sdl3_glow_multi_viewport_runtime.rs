@@ -698,7 +698,7 @@ fn rollback_unattached_runtime<S: ViewportScenario>(
         ));
     }
 
-    if let Some(renderer) = renderer.as_deref_mut() {
+    if let Some(renderer) = renderer {
         if main_context_current {
             match renderer.shutdown(imgui) {
                 Ok(()) => {
@@ -728,7 +728,7 @@ fn rollback_unattached_runtime<S: ViewportScenario>(
             false
         }
     };
-    if let Some(texture) = external_texture.as_deref_mut() {
+    if let Some(texture) = external_texture {
         if main_context_current {
             texture.delete(gl);
         } else if texture.handle.is_some() {

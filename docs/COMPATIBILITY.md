@@ -6,6 +6,9 @@ This document tracks compatibility across the workspace crates, upstream Dear Im
 
 All workspace crates, including Bevy, require Rust 1.97.1. Development uses Rust 1.100.0.
 Canonical binding generation uses the separate Rust 1.95.0 formatter and LLVM 14.
+The release catalog contains 30 crates. `dear-imgui-backend-support` ships alongside the core and
+renderer crates. WGPU integrations use WGPU 30. Ash and WGPU accept both native multi-viewport
+platform features in one build and select a route for each Context.
 See the [0.24 migration guide](MIGRATING_0_24.md) for source changes.
 
 ## 0.23 Release Train

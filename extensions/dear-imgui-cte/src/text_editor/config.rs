@@ -116,16 +116,6 @@ impl TextEditor {
         })
     }
 
-    #[deprecated(note = "use set_left_margin, which also applies when line numbers are hidden")]
-    pub fn set_line_number_left_margin(&mut self, value: usize) {
-        self.set_left_margin(value);
-    }
-
-    #[deprecated(note = "use left_margin, which also applies when line numbers are hidden")]
-    pub fn line_number_left_margin(&self) -> usize {
-        self.left_margin()
-    }
-
     pub fn set_decoration_left_margin(&mut self, value: usize) {
         self.with_context("TextEditor::set_decoration_left_margin", |raw| unsafe {
             sys::TextEditor_SetDecorationLeftMargin(raw, value)

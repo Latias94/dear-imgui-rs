@@ -1,3 +1,5 @@
+use crate::FrameError;
+
 use std::cell::OnceCell;
 use std::ops::Deref;
 use std::ptr::NonNull;
@@ -5,10 +7,7 @@ use std::ptr::NonNull;
 use crate::Context;
 use crate::render::{DrawData, DrawRequirements};
 
-use super::snapshot::{
-    RendererConsumerError, SnapshotCompletionProgress, SnapshotEpoch, TextureFeedback,
-    TextureRequest,
-};
+use super::snapshot::{SnapshotCompletionProgress, SnapshotEpoch, TextureFeedback, TextureRequest};
 
 /// Context-borrowed synchronous frame awaiting managed-texture reconciliation.
 ///
@@ -113,7 +112,7 @@ impl<'ctx> PendingFrame<'ctx> {
     pub fn reconcile_texture_feedback(
         mut self,
         feedback: impl IntoIterator<Item = TextureFeedback>,
-    ) -> Result<ReconciledFrame<'ctx>, RendererConsumerError> {
+    ) -> Result<ReconciledFrame<'ctx>, FrameError> {
         let feedback = feedback.into_iter().collect::<Vec<_>>();
         let epoch = self.epoch;
         let progress = self

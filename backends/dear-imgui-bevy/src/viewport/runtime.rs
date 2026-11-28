@@ -208,13 +208,13 @@ impl imgui::ContextAttachment for ImguiViewportBridgeTeardownAttachment {
     fn begin_platform_window_teardown(
         &self,
         context: &imgui::ContextPlatformWindowTeardown<'_>,
-    ) -> Result<(), imgui::ContextAttachmentTeardownError> {
+    ) -> Result<(), imgui::ContextError> {
         self.keepalive.core_teardown_owns_native_guard.set(false);
         context.with_bound_context(|| {
             let context_raw = unsafe { sys::igGetCurrentContext() };
             let main_viewport = unsafe { sys::igGetMainViewport() };
             platform_callback_ownership_raw(context_raw, main_viewport, &self.keepalive)
-                .map_err(|error| imgui::ContextAttachmentTeardownError::new(error.to_string()))?;
+                .map_err(|error| imgui::ContextError::attachment_teardown(error.to_string()))?;
             if !self.keepalive.native_teardown_in_progress.replace(true) {
                 self.keepalive.core_teardown_owns_native_guard.set(true);
             }
@@ -225,7 +225,7 @@ impl imgui::ContextAttachment for ImguiViewportBridgeTeardownAttachment {
     fn end_platform_window_teardown(
         &self,
         context: &imgui::ContextPlatformWindowTeardown<'_>,
-    ) -> Result<(), imgui::ContextAttachmentTeardownError> {
+    ) -> Result<(), imgui::ContextError> {
         if !self
             .keepalive
             .core_teardown_owns_native_guard
@@ -234,7 +234,7 @@ impl imgui::ContextAttachment for ImguiViewportBridgeTeardownAttachment {
             return Ok(());
         }
         if !self.keepalive.native_teardown_in_progress.get() {
-            return Err(imgui::ContextAttachmentTeardownError::new(
+            return Err(imgui::ContextError::attachment_teardown(
                 "Bevy viewport bridge lost its native teardown guard",
             ));
         }

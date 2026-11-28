@@ -236,13 +236,13 @@ pub(crate) fn validate_finite_pair(name: &str, value: [f32; 2]) {
     );
 }
 
-/// Convert RGBA floats [0,1] to ImGui-packed ABGR (u32)
+/// Convert RGBA floats in `0.0..=1.0` to ImGui-packed ABGR (`u32`).
 pub fn rgba_to_abgr_u32(rgba: [f32; 4]) -> u32 {
     let [r, g, b, a] = rgba.map(|component| (component.clamp(0.0, 1.0) * 255.0 + 0.5) as u32);
     r | (g << 8) | (b << 16) | (a << 24)
 }
 
-/// Convert ImGui-packed ABGR (u32) to RGBA floats [0,1]
+/// Convert ImGui-packed ABGR (`u32`) to RGBA floats in `0.0..=1.0`.
 pub fn abgr_u32_to_rgba(col: u32) -> [f32; 4] {
     const SCALE: f32 = 1.0 / 255.0;
     [

@@ -2,12 +2,13 @@ use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::ops::Range;
 use std::str::FromStr;
-use thiserror::Error;
+
+use crate::error::context::{ContextError, NumericFormatKind};
 
 use crate::internal::{DataType, DataTypeKind};
 
 const MAX_FORMAT_BYTES: usize = 4096;
-const MAX_DIRECTIVE_BYTES: usize = 30;
+pub(crate) const MAX_DIRECTIVE_BYTES: usize = 30;
 const MAX_FIELD_WIDTH: u32 = 31;
 const MAX_PRECISION: u32 = 99;
 
@@ -61,9 +62,9 @@ where
     /// let percent = NumericFormat::<f32>::new("%.1f%%")?;
     /// assert_eq!(percent.as_str(), "%.1f%%");
     /// assert!(NumericFormat::<f32>::new("%s").is_err());
-    /// # Ok::<(), dear_imgui_rs::NumericFormatError>(())
+    /// # Ok::<(), dear_imgui_rs::ContextError>(())
     /// ```
-    pub fn new(storage: impl Into<Cow<'a, str>>) -> Result<Self, NumericFormatError> {
+    pub fn new(storage: impl Into<Cow<'a, str>>) -> Result<Self, ContextError> {
         let storage = storage.into();
         validate_format_length(&storage)?;
         let storage = normalize_wide_integer_length::<T>(storage);
@@ -132,7 +133,7 @@ impl<'a, T> TryFrom<&'a str> for NumericFormat<'a, T>
 where
     T: DataTypeKind,
 {
-    type Error = NumericFormatError;
+    type Error = ContextError;
 
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -143,7 +144,7 @@ impl<T> TryFrom<String> for NumericFormat<'static, T>
 where
     T: DataTypeKind,
 {
-    type Error = NumericFormatError;
+    type Error = ContextError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Self::new(value)
@@ -154,125 +155,23 @@ impl<T> FromStr for NumericFormat<'static, T>
 where
     T: DataTypeKind,
 {
-    type Err = NumericFormatError;
+    type Err = ContextError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Self::new(value.to_owned())
     }
 }
 
-/// Describes why a C-style numeric format was rejected.
-#[derive(Clone, Debug, Eq, Error, PartialEq)]
-#[non_exhaustive]
-pub enum NumericFormatError {
-    /// The complete UTF-8 format exceeds the bounded native parsing contract.
-    #[error("numeric format is {length} UTF-8 bytes; at most {maximum} bytes are supported")]
-    FormatTooLong {
-        byte_offset: usize,
-        length: usize,
-        maximum: usize,
-    },
-    /// The string contains a NUL byte and cannot be passed as one C string.
-    #[error("numeric format contains a NUL byte at byte {byte_offset}")]
-    InteriorNul { byte_offset: usize },
-    /// A `%` directive is incomplete.
-    #[error("numeric format has an incomplete directive at byte {byte_offset}")]
-    UnterminatedDirective { byte_offset: usize },
-    /// More than one directive would consume a value argument.
-    #[error(
-        "numeric format requests more than Dear ImGui's one value argument at byte {byte_offset}"
-    )]
-    MultipleConversions { byte_offset: usize },
-    /// `*` requests another variadic width or precision argument.
-    #[error("numeric format requests a dynamic variadic argument at byte {byte_offset}")]
-    DynamicArgument { byte_offset: usize },
-    /// A positional argument such as `%1$d` was requested.
-    #[error("numeric format uses an unsupported positional argument at byte {byte_offset}")]
-    PositionalArgument { byte_offset: usize },
-    /// The directive uses a non-portable or unsupported flag.
-    #[error("numeric format uses unsupported flag `{flag}` at byte {byte_offset}")]
-    UnsupportedFlag { byte_offset: usize, flag: char },
-    /// The flag is defined for printf but not for this numeric conversion.
-    #[error(
-        "numeric format flag `{flag}` is incompatible with `%{conversion}` at byte {byte_offset}"
-    )]
-    IncompatibleFlag {
-        byte_offset: usize,
-        flag: char,
-        conversion: char,
-    },
-    /// The requested field width exceeds the bounded native parsing contract.
-    #[error(
-        "numeric format width {width} at byte {byte_offset} exceeds the supported maximum {maximum}"
-    )]
-    WidthTooLarge {
-        byte_offset: usize,
-        width: u32,
-        maximum: u32,
-    },
-    /// The requested precision exceeds the bounded native parsing contract.
-    #[error(
-        "numeric format precision {precision} at byte {byte_offset} exceeds the supported maximum {maximum}"
-    )]
-    PrecisionTooLarge {
-        byte_offset: usize,
-        precision: u32,
-        maximum: u32,
-    },
-    /// The directive uses a length modifier that does not match the C carrier type.
-    #[error(
-        "numeric format uses a length modifier that does not match its value type at byte {byte_offset}"
-    )]
-    UnsupportedLength { byte_offset: usize },
-    /// The directive is not a supported numeric conversion.
-    #[error("numeric format uses unsupported conversion `%{conversion}` at byte {byte_offset}")]
-    UnsupportedConversion {
-        byte_offset: usize,
-        conversion: char,
-    },
-    /// The conversion is numeric but does not match the signedness or category of `T`.
-    #[error("numeric format conversion does not match its value type at byte {byte_offset}")]
-    TypeMismatch { byte_offset: usize },
-    /// Dear ImGui copies directives into a fixed 32-byte stack buffer.
-    #[error(
-        "numeric format directive at byte {byte_offset} requires {length} bytes on a supported target; Dear ImGui supports at most {maximum}",
-        maximum = MAX_DIRECTIVE_BYTES
-    )]
-    DirectiveTooLong { byte_offset: usize, length: usize },
-}
-
-impl NumericFormatError {
-    /// Returns the byte offset where validation failed.
-    pub fn byte_offset(&self) -> usize {
-        match *self {
-            Self::FormatTooLong { byte_offset, .. }
-            | Self::InteriorNul { byte_offset }
-            | Self::UnterminatedDirective { byte_offset }
-            | Self::MultipleConversions { byte_offset }
-            | Self::DynamicArgument { byte_offset }
-            | Self::PositionalArgument { byte_offset }
-            | Self::UnsupportedFlag { byte_offset, .. }
-            | Self::IncompatibleFlag { byte_offset, .. }
-            | Self::WidthTooLarge { byte_offset, .. }
-            | Self::PrecisionTooLarge { byte_offset, .. }
-            | Self::UnsupportedLength { byte_offset }
-            | Self::UnsupportedConversion { byte_offset, .. }
-            | Self::TypeMismatch { byte_offset }
-            | Self::DirectiveTooLong { byte_offset, .. } => byte_offset,
-        }
-    }
-}
-
-fn validate_numeric_format<T>(format: &str) -> Result<(), NumericFormatError>
+fn validate_numeric_format<T>(format: &str) -> Result<(), NumericFormatKind>
 where
     T: DataTypeKind,
 {
     validate_numeric_format_for_data_type(format, T::KIND)
 }
 
-fn validate_format_length(format: &str) -> Result<(), NumericFormatError> {
+fn validate_format_length(format: &str) -> Result<(), NumericFormatKind> {
     if format.len() > MAX_FORMAT_BYTES {
-        Err(NumericFormatError::FormatTooLong {
+        Err(NumericFormatKind::FormatTooLong {
             byte_offset: MAX_FORMAT_BYTES,
             length: format.len(),
             maximum: MAX_FORMAT_BYTES,
@@ -469,14 +368,14 @@ impl DecimalComponent {
         }
     }
 
-    fn too_large(self, byte_offset: usize, value: u32) -> NumericFormatError {
+    fn too_large(self, byte_offset: usize, value: u32) -> NumericFormatKind {
         match self {
-            Self::Width => NumericFormatError::WidthTooLarge {
+            Self::Width => NumericFormatKind::WidthTooLarge {
                 byte_offset,
                 width: value,
                 maximum: self.maximum(),
             },
-            Self::Precision => NumericFormatError::PrecisionTooLarge {
+            Self::Precision => NumericFormatKind::PrecisionTooLarge {
                 byte_offset,
                 precision: value,
                 maximum: self.maximum(),
@@ -488,11 +387,11 @@ impl DecimalComponent {
 fn validate_numeric_format_for_data_type(
     format: &str,
     data_type: DataType,
-) -> Result<(), NumericFormatError> {
+) -> Result<(), NumericFormatKind> {
     validate_format_length(format)?;
     let bytes = format.as_bytes();
     if let Some(byte_offset) = bytes.iter().position(|byte| *byte == 0) {
-        return Err(NumericFormatError::InteriorNul { byte_offset });
+        return Err(NumericFormatKind::InteriorNul { byte_offset });
     }
 
     let argument_kind = ArgumentKind::from_data_type(data_type);
@@ -508,7 +407,7 @@ fn validate_numeric_format_for_data_type(
         let conversion_start = byte_offset;
         byte_offset += 1;
         if byte_offset == bytes.len() {
-            return Err(NumericFormatError::UnterminatedDirective {
+            return Err(NumericFormatKind::UnterminatedDirective {
                 byte_offset: conversion_start,
             });
         }
@@ -519,7 +418,7 @@ fn validate_numeric_format_for_data_type(
 
         value_conversions += 1;
         if value_conversions > 1 {
-            return Err(NumericFormatError::MultipleConversions {
+            return Err(NumericFormatKind::MultipleConversions {
                 byte_offset: conversion_start,
             });
         }
@@ -534,7 +433,7 @@ fn validate_numeric_format_for_data_type(
         reject_unsupported_flag(bytes, byte_offset)?;
 
         if byte_offset < bytes.len() && bytes[byte_offset] == b'*' {
-            return Err(NumericFormatError::DynamicArgument { byte_offset });
+            return Err(NumericFormatKind::DynamicArgument { byte_offset });
         }
         parse_bounded_decimal(bytes, &mut byte_offset, DecimalComponent::Width)?;
         reject_positional_argument(bytes, byte_offset)?;
@@ -542,7 +441,7 @@ fn validate_numeric_format_for_data_type(
         if byte_offset < bytes.len() && bytes[byte_offset] == b'.' {
             byte_offset += 1;
             if byte_offset < bytes.len() && bytes[byte_offset] == b'*' {
-                return Err(NumericFormatError::DynamicArgument { byte_offset });
+                return Err(NumericFormatKind::DynamicArgument { byte_offset });
             }
             parse_bounded_decimal(bytes, &mut byte_offset, DecimalComponent::Precision)?;
             reject_positional_argument(bytes, byte_offset)?;
@@ -552,14 +451,14 @@ fn validate_numeric_format_for_data_type(
         let (length, next_offset) = parse_length_modifier(bytes, byte_offset);
         byte_offset = next_offset;
         if byte_offset == bytes.len() {
-            return Err(NumericFormatError::UnterminatedDirective {
+            return Err(NumericFormatKind::UnterminatedDirective {
                 byte_offset: conversion_start,
             });
         }
         if length == LengthModifier::LongLong {
             let portable_format_length = format.len().saturating_add(1);
             if portable_format_length > MAX_FORMAT_BYTES {
-                return Err(NumericFormatError::FormatTooLong {
+                return Err(NumericFormatKind::FormatTooLong {
                     byte_offset: MAX_FORMAT_BYTES,
                     length: portable_format_length,
                     maximum: MAX_FORMAT_BYTES,
@@ -576,29 +475,29 @@ fn validate_numeric_format_for_data_type(
             directive_length
         };
         if portable_directive_length > MAX_DIRECTIVE_BYTES {
-            return Err(NumericFormatError::DirectiveTooLong {
+            return Err(NumericFormatKind::DirectiveTooLong {
                 byte_offset: conversion_start,
                 length: portable_directive_length,
             });
         }
         if !is_supported_numeric_conversion(conversion) {
-            return Err(NumericFormatError::UnsupportedConversion {
+            return Err(NumericFormatKind::UnsupportedConversion {
                 byte_offset: conversion_start,
                 conversion: char::from(conversion),
             });
         }
         if !argument_kind.accepts_conversion(conversion) {
-            return Err(NumericFormatError::TypeMismatch {
+            return Err(NumericFormatKind::TypeMismatch {
                 byte_offset: conversion_start,
             });
         }
         if !argument_kind.accepts_length(length) {
-            return Err(NumericFormatError::UnsupportedLength {
+            return Err(NumericFormatKind::UnsupportedLength {
                 byte_offset: length_offset,
             });
         }
         if let Some((flag_offset, flag)) = flags.first_incompatible(conversion) {
-            return Err(NumericFormatError::IncompatibleFlag {
+            return Err(NumericFormatKind::IncompatibleFlag {
                 byte_offset: flag_offset,
                 flag: char::from(flag),
                 conversion: char::from(conversion),
@@ -613,7 +512,7 @@ fn parse_bounded_decimal(
     bytes: &[u8],
     byte_offset: &mut usize,
     component: DecimalComponent,
-) -> Result<(), NumericFormatError> {
+) -> Result<(), NumericFormatKind> {
     let start = *byte_offset;
     let mut value = 0_u32;
 
@@ -632,9 +531,9 @@ fn parse_bounded_decimal(
     Ok(())
 }
 
-fn reject_unsupported_flag(bytes: &[u8], byte_offset: usize) -> Result<(), NumericFormatError> {
+fn reject_unsupported_flag(bytes: &[u8], byte_offset: usize) -> Result<(), NumericFormatKind> {
     if byte_offset < bytes.len() && matches!(bytes[byte_offset], b'\'' | b'_') {
-        Err(NumericFormatError::UnsupportedFlag {
+        Err(NumericFormatKind::UnsupportedFlag {
             byte_offset,
             flag: char::from(bytes[byte_offset]),
         })
@@ -643,9 +542,9 @@ fn reject_unsupported_flag(bytes: &[u8], byte_offset: usize) -> Result<(), Numer
     }
 }
 
-fn reject_positional_argument(bytes: &[u8], byte_offset: usize) -> Result<(), NumericFormatError> {
+fn reject_positional_argument(bytes: &[u8], byte_offset: usize) -> Result<(), NumericFormatKind> {
     if byte_offset < bytes.len() && bytes[byte_offset] == b'$' {
-        Err(NumericFormatError::PositionalArgument { byte_offset })
+        Err(NumericFormatKind::PositionalArgument { byte_offset })
     } else {
         Ok(())
     }
@@ -771,7 +670,7 @@ mod tests {
         assert_eq!(rejected.len(), 31);
         assert!(matches!(
             validate_numeric_format::<f64>(&rejected),
-            Err(NumericFormatError::DirectiveTooLong { length: 31, .. })
+            Err(NumericFormatKind::DirectiveTooLong { length: 31, .. })
         ));
     }
 
@@ -786,7 +685,7 @@ mod tests {
 
         assert!(matches!(
             validate_numeric_format::<i32>("%32d"),
-            Err(NumericFormatError::WidthTooLarge {
+            Err(NumericFormatKind::WidthTooLarge {
                 width: 32,
                 maximum: 31,
                 ..
@@ -794,7 +693,7 @@ mod tests {
         ));
         assert!(matches!(
             validate_numeric_format::<f64>("%.100f"),
-            Err(NumericFormatError::PrecisionTooLarge {
+            Err(NumericFormatKind::PrecisionTooLarge {
                 precision: 100,
                 maximum: 99,
                 ..
@@ -802,7 +701,7 @@ mod tests {
         ));
         assert!(matches!(
             validate_numeric_format::<i32>("%999999999999999999999999999999d"),
-            Err(NumericFormatError::WidthTooLarge { .. })
+            Err(NumericFormatKind::WidthTooLarge { .. })
         ));
     }
 
@@ -811,14 +710,14 @@ mod tests {
         for format in ["%#d", "%#i"] {
             assert!(matches!(
                 validate_numeric_format::<i32>(format),
-                Err(NumericFormatError::IncompatibleFlag { flag: '#', .. })
+                Err(NumericFormatKind::IncompatibleFlag { flag: '#', .. })
             ));
         }
         for format in ["%#u", "%+u", "% u", "%+o", "% x", "%+X"] {
             assert!(
                 matches!(
                     validate_numeric_format::<u32>(format),
-                    Err(NumericFormatError::IncompatibleFlag { .. })
+                    Err(NumericFormatKind::IncompatibleFlag { .. })
                 ),
                 "{format}"
             );
@@ -834,7 +733,7 @@ mod tests {
         let rejected = format!("{accepted}x");
         assert!(matches!(
             validate_numeric_format::<f64>(&rejected),
-            Err(NumericFormatError::FormatTooLong {
+            Err(NumericFormatKind::FormatTooLong {
                 byte_offset: MAX_FORMAT_BYTES,
                 length: 4097,
                 maximum: MAX_FORMAT_BYTES,
@@ -849,11 +748,13 @@ mod tests {
         assert_eq!(target_expansion.len(), MAX_FORMAT_BYTES);
         assert!(matches!(
             NumericFormat::<i64>::new(target_expansion),
-            Err(NumericFormatError::FormatTooLong {
-                length: 4097,
-                maximum: MAX_FORMAT_BYTES,
-                ..
-            })
+            Err(ContextError::NumericFormat(
+                NumericFormatKind::FormatTooLong {
+                    length: 4097,
+                    maximum: MAX_FORMAT_BYTES,
+                    ..
+                }
+            ))
         ));
     }
 
@@ -863,11 +764,11 @@ mod tests {
         assert_eq!(error.byte_offset(), 15);
         assert!(matches!(
             error,
-            NumericFormatError::MultipleConversions { .. }
+            NumericFormatKind::MultipleConversions { .. }
         ));
 
         let error = validate_numeric_format::<f64>("\0%f").unwrap_err();
         assert_eq!(error.byte_offset(), 0);
-        assert!(matches!(error, NumericFormatError::InteriorNul { .. }));
+        assert!(matches!(error, NumericFormatKind::InteriorNul { .. }));
     }
 }

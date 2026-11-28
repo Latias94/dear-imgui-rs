@@ -1,6 +1,6 @@
 use dear_imgui_rs::Context;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-use dear_imgui_rs::{ContextAttachmentTeardownError, ContextTeardown};
+use dear_imgui_rs::{ContextError, ContextTeardown};
 
 use super::{
     WgpuRenderer,
@@ -210,10 +210,10 @@ impl WgpuRenderer {
     pub(super) fn shutdown_during_context_teardown(
         &mut self,
         context: &ContextTeardown<'_>,
-        release_viewports: impl FnOnce() -> Result<(), ContextAttachmentTeardownError>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+        release_viewports: impl FnOnce() -> Result<(), ContextError>,
+    ) -> Result<(), ContextError> {
         let consumer = self.renderer_consumer.take().ok_or_else(|| {
-            ContextAttachmentTeardownError::new(
+            ContextError::attachment_teardown(
                 "WGPU viewport renderer lost its renderer consumer before Context teardown",
             )
         })?;
@@ -388,7 +388,7 @@ mod tests {
         assert_eq!(consumer.context_id(), context.id());
         assert!(matches!(
             context.create_detached_renderer_consumer(),
-            Err(dear_imgui_rs::render::RendererConsumerError::ConsumerAlreadyActive)
+            Err(dear_imgui_rs::FrameError::ConsumerAlreadyActive)
         ));
 
         renderer.shutdown(&mut context).unwrap();

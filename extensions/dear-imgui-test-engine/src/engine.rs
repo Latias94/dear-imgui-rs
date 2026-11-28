@@ -19,9 +19,10 @@ use crate::error::ffi_status;
 use crate::results::RunCompletion;
 use crate::{
     AttachmentState, BuiltInTestSuite, CaptureOutput, EngineId, FrameDriveOutcome,
-    FrameDriverError, MainRenderOutcome, RegisteredTestSuite, ResultSummary, RunFlags, RunId,
-    RunOutcome, RunReport, RunSpeed, RunState, RunTestResult, RunTestStatus, Script, ScriptTest,
-    TestEngineError, TestEngineResult, TestFrameDriver, TestGroup, VerboseLevel,
+    FrameDriveResult, FrameDriverError, MainRenderOutcome, RegisteredTestSuite, ResultSummary,
+    RunFlags, RunId, RunOutcome, RunReport, RunSpeed, RunState, RunTestResult, RunTestStatus,
+    Script, ScriptTest, TestEngineError, TestEngineResult, TestFrameDriver, TestGroup,
+    VerboseLevel,
 };
 
 /// Dear ImGui Test Engine context with one transactional process-wide attachment.
@@ -112,7 +113,7 @@ impl<'engine> ActivePresentation<'engine> {
         Ok(())
     }
 
-    fn abort(mut self) -> Option<TestEngineError> {
+    fn abort(mut self) -> Option<Box<TestEngineError>> {
         match self.abort_once() {
             Ok(()) => None,
             Err(_) => match self.abort_once() {
@@ -122,13 +123,13 @@ impl<'engine> ActivePresentation<'engine> {
                         self.active = false;
                         None
                     }
-                    Err(source) => Some(source),
+                    Err(source) => Some(Box::new(source)),
                 },
             },
         }
     }
 
-    fn complete(mut self) -> Result<(), (TestEngineError, Option<TestEngineError>)> {
+    fn complete(mut self) -> Result<(), (TestEngineError, Option<Box<TestEngineError>>)> {
         match self.engine.post_swap_hook_internal() {
             Ok(()) => {
                 self.active = false;
@@ -373,10 +374,7 @@ impl TestEngine {
         frame: FrameToken<'_>,
         frame_index: u64,
         driver: &mut Driver,
-    ) -> Result<
-        FrameDriveOutcome,
-        FrameDriverError<Driver::PrepareError, Driver::RenderError, Driver::PresentError>,
-    >
+    ) -> FrameDriveResult<Driver>
     where
         Driver: TestFrameDriver,
     {
@@ -960,7 +958,7 @@ impl TestEngine {
     /// Selects whether a successful capture is saved or discarded.
     ///
     /// This does not install a framebuffer provider. Use
-    /// [`crate::TestRunner::run_graphical_with_capture`] when capture support is required.
+    /// `TestRunner::run_graphical_with_capture` when capture support is required.
     pub fn set_capture_output(&mut self, output: CaptureOutput) -> TestEngineResult<()> {
         self.require_ready("TestEngine::set_capture_output")?;
         let enabled = matches!(output, CaptureOutput::Save);

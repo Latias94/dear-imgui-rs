@@ -13,13 +13,7 @@ impl<'ui> GraphEditor<'ui> {
             graph: None,
             view: None,
             style: GraphStyle::default(),
-            allowed_link_cb: None,
-            on_select_cb: None,
-            on_move_cb: None,
-            on_add_link_cb: None,
-            on_del_link_cb: None,
-            custom_draw_cb: None,
-            on_right_click_cb: None,
+            hooks: Hooks::default(),
         }
     }
     pub fn graph(mut self, graph: &'ui mut Graph) -> Self {
@@ -165,66 +159,52 @@ impl<'ui> GraphEditor<'ui> {
 
     // Hooks (delegate-style)
     pub fn allowed_link_fn(mut self, f: impl FnMut(&Graph, PinId, PinId) -> bool + 'ui) -> Self {
-        self.allowed_link_cb = Some(Box::new(f));
+        self.hooks.allowed_link_cb = Some(Box::new(f));
         self
     }
     pub fn on_select_node(mut self, f: impl FnMut(NodeId, bool) + 'ui) -> Self {
-        self.on_select_cb = Some(Box::new(f));
+        self.hooks.on_select_cb = Some(Box::new(f));
         self
     }
     pub fn on_move_selected_nodes(
         mut self,
         f: impl FnMut([f32; 2], &HashSet<NodeId>) + 'ui,
     ) -> Self {
-        self.on_move_cb = Some(Box::new(f));
+        self.hooks.on_move_cb = Some(Box::new(f));
         self
     }
     pub fn on_add_link(mut self, f: impl FnMut(LinkId, PinId, PinId) + 'ui) -> Self {
-        self.on_add_link_cb = Some(Box::new(f));
+        self.hooks.on_add_link_cb = Some(Box::new(f));
         self
     }
     pub fn on_del_link(mut self, f: impl FnMut(LinkId) + 'ui) -> Self {
-        self.on_del_link_cb = Some(Box::new(f));
+        self.hooks.on_del_link_cb = Some(Box::new(f));
         self
     }
     pub fn custom_draw(
         mut self,
         f: impl for<'a> FnMut(&DrawListMut<'a>, [f32; 4], NodeId) + 'ui,
     ) -> Self {
-        self.custom_draw_cb = Some(Box::new(f));
+        self.hooks.custom_draw_cb = Some(Box::new(f));
         self
     }
     pub fn on_right_click(mut self, f: impl FnMut(RightClickEvent) + 'ui) -> Self {
-        self.on_right_click_cb = Some(Box::new(f));
+        self.hooks.on_right_click_cb = Some(Box::new(f));
         self
     }
 
     pub fn build(mut self) -> GraphEditorResponse {
-        let mut graph_ref = match self.graph {
-            Some(g) => g,
-            None => return GraphEditorResponse::default(),
-        };
-        let mut view_ref = match self.view {
-            Some(v) => v,
-            None => return GraphEditorResponse::default(),
-        };
-        let mut hooks = Hooks {
-            allowed_link_cb: self.allowed_link_cb.take(),
-            on_select_cb: self.on_select_cb.take(),
-            on_move_cb: self.on_move_cb.take(),
-            on_add_link_cb: self.on_add_link_cb.take(),
-            on_del_link_cb: self.on_del_link_cb.take(),
-            custom_draw_cb: self.custom_draw_cb.take(),
-            on_right_click_cb: self.on_right_click_cb.take(),
+        let (Some(graph), Some(view)) = (self.graph, self.view) else {
+            return GraphEditorResponse::default();
         };
         self.ui.with_window_draw_list(|draw_list| {
             draw_core(
                 self.ui,
                 draw_list,
-                &mut graph_ref,
-                &mut view_ref,
+                graph,
+                view,
                 &self.style,
-                Some(&mut hooks),
+                &mut self.hooks,
             )
         })
     }

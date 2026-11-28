@@ -375,9 +375,7 @@ impl<S: AshValidationScenario> RuntimeScenario for ValidationScenarioAdapter<S> 
 }
 
 pub fn run_validation<S: AshValidationScenario>(scenario: S) -> ExampleResult {
-    dear_imgui_examples::init_tracing_with_filter(
-        "dear_imgui=debug,ash_vulkan_validation_smoke=info",
-    );
+    crate::init_tracing_with_filter("dear_imgui=debug,ash_vulkan_validation_smoke=info");
     info!("Starting private Ash Vulkan validation contract");
     run_runtime(ValidationScenarioAdapter(scenario))
 }

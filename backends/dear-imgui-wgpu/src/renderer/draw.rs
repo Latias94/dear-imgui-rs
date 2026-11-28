@@ -586,15 +586,19 @@ mod tests {
         list.VtxBuffer.Capacity = 3;
         list.VtxBuffer.Data = vertices.as_mut_ptr();
         let mut lists = [&mut list as *mut sys::ImDrawList];
-        let mut raw = sys::ImDrawData::default();
-        raw.Valid = true;
-        raw.TotalIdxCount = 3;
-        raw.TotalVtxCount = 3;
-        raw.CmdLists.Size = 1;
-        raw.CmdLists.Capacity = 1;
-        raw.CmdLists.Data = lists.as_mut_ptr();
-        raw.DisplaySize = sys::ImVec2 { x: 64.0, y: 64.0 };
-        raw.FramebufferScale = sys::ImVec2 { x: 1.0, y: 1.0 };
+        let raw = sys::ImDrawData {
+            Valid: true,
+            TotalIdxCount: 3,
+            TotalVtxCount: 3,
+            CmdLists: sys::ImVector_ImDrawListPtr {
+                Size: 1,
+                Capacity: 1,
+                Data: lists.as_mut_ptr(),
+            },
+            DisplaySize: sys::ImVec2 { x: 64.0, y: 64.0 },
+            FramebufferScale: sys::ImVec2 { x: 1.0, y: 1.0 },
+            ..Default::default()
+        };
         // SAFETY: every native vector borrows live, initialized arrays for the closure duration.
         // DrawData has the same layout as ImDrawData, and no native destructor owns these arrays.
         callback(unsafe { DrawData::from_raw(&raw) })

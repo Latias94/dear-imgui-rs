@@ -4,19 +4,15 @@
 //! evidence. Native Winit, Vulkan, swapchain, renderer, and teardown order remain in the shared
 //! Ash lifecycle used by the interactive example.
 
-#[path = "../support/ash_multi_viewport.rs"]
-mod ash_multi_viewport;
-
 use ash::vk::{self, Handle as _};
-use ash_multi_viewport::validation::{
+use dear_imgui_ash::AshRenderState;
+use dear_imgui_examples::ash_multi_viewport::validation::{
     AshCompletionRequest, AshFrameOutcome, AshFrameUi, AshSecondarySubmissions,
     AshValidationScenario, TeardownEvidence, ValidationConfig, ValidationState, run_validation,
 };
-use ash_multi_viewport::{ExampleResult, VulkanAdapterInfo};
-use dear_imgui_ash::AshRenderState;
+use dear_imgui_examples::ash_multi_viewport::{ExampleResult, VulkanAdapterInfo};
 use dear_imgui_rs::{
-    Condition, Context, Id, ManagedTextureId, OwnedTextureData, TextureDataError, TextureFormat,
-    sys,
+    Condition, Context, Id, ManagedTextureId, OwnedTextureData, TextureError, TextureFormat, sys,
 };
 use std::{
     env,
@@ -59,7 +55,7 @@ fn smoke_texture_pixels(revision: u8) -> Vec<u8> {
     pixels
 }
 
-fn smoke_texture_data(revision: u8) -> Result<OwnedTextureData, TextureDataError> {
+fn smoke_texture_data(revision: u8) -> Result<OwnedTextureData, TextureError> {
     OwnedTextureData::from_pixels(TextureFormat::RGBA32, 8, 8, &smoke_texture_pixels(revision))
 }
 

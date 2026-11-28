@@ -1,7 +1,5 @@
-use dear_imgui_rs::{TextureBinding, TextureRect};
+use dear_imgui_rs::{FrameError, TextureBinding, TextureRect};
 use thiserror::Error;
-
-use crate::callback::ScopedRenderStateError;
 
 /// Common renderer failures. Backends can also wrap these in their API-specific errors.
 #[derive(Debug, Error)]
@@ -34,6 +32,9 @@ pub enum BackendError {
     /// The supplied frame violates a renderer precondition.
     #[error("invalid frame: {0}")]
     FrameContract(String),
+    /// A core renderer or frame operation failed.
+    #[error("invalid frame: {0}")]
+    Frame(#[source] FrameError),
     /// Projecting a draw command produced a non-finite clip edge.
     #[error("draw command clip rectangle {0:?} projects to a non-finite framebuffer coordinate")]
     NonFiniteClipRect([f32; 4]),
@@ -58,12 +59,13 @@ pub enum BackendError {
     },
 }
 
-impl From<ScopedRenderStateError> for BackendError {
-    fn from(error: ScopedRenderStateError) -> Self {
+impl From<FrameError> for BackendError {
+    fn from(error: FrameError) -> Self {
         let reason = match error {
-            ScopedRenderStateError::MissingPlatformIo => "the Context has no Platform IO",
-            ScopedRenderStateError::AlreadyOccupied => "a renderer already published state",
-            ScopedRenderStateError::Drift => "a callback replaced the published state",
+            FrameError::MissingPlatformIo => "the Context has no Platform IO",
+            FrameError::AlreadyOccupied => "a renderer already published state",
+            FrameError::Drift => "a callback replaced the published state",
+            error => return Self::Frame(error),
         };
         Self::CallbackConflict {
             slot: "Renderer_RenderState",

@@ -1,3 +1,5 @@
+use crate::FrameError;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -6,18 +8,16 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::render::snapshot::{
-    CapturedTextureOperation, PendingTextureRequest, RendererConsumerError,
-    ResolvedSnapshotTexture, SnapshotError, SnapshotTextureId, TextureFeedback,
-    TextureFeedbackResult, TextureOp, TextureRequestKind,
+    CapturedTextureOperation, PendingTextureRequest, ResolvedSnapshotTexture, SnapshotTextureId,
+    TextureFeedback, TextureFeedbackResult, TextureOp, TextureRequestKind,
 };
 use crate::sys;
 use crate::texture::{
-    ManagedTextureError, ManagedTextureId, ManagedTextureMut, ManagedTextureMutationError,
-    ManagedTextureRef, OwnedTextureData, TextureData, TextureDataError, TextureStatus,
+    ManagedTextureId, ManagedTextureMut, ManagedTextureRef, OwnedTextureData, TextureData,
+    TextureError, TextureRect, TextureStatus,
 };
 
 use super::binding::{CTX_MUTEX, RawBoundContextGuard};
-use super::texture_sync::{TextureSyncQueue, cumulative_update_rect, update_pending_create};
 use super::{Context, ContextId};
 
 pub(crate) type SharedTextureRegistry = Rc<RefCell<ManagedTextureRegistry>>;
@@ -170,52 +170,50 @@ impl ManagedTextureRegistry {
         }))
     }
 
-    fn validate_context(&self, id: ManagedTextureId) -> Result<(), ManagedTextureError> {
+    fn validate_context(&self, id: ManagedTextureId) -> Result<(), TextureError> {
         if id.context_id() == self.context {
             Ok(())
         } else {
-            Err(ManagedTextureError::ForeignContext {
+            Err(TextureError::ForeignContext {
                 expected: self.context,
                 actual: id.context_id(),
             })
         }
     }
 
-    fn slot(&self, id: ManagedTextureId) -> Result<&TextureSlot, ManagedTextureError> {
+    fn slot(&self, id: ManagedTextureId) -> Result<&TextureSlot, TextureError> {
         self.validate_context(id)?;
         let slot = self
             .slots
             .get(id.slot() as usize)
-            .ok_or(ManagedTextureError::UnknownSlot(id))?;
+            .ok_or(TextureError::UnknownSlot(id))?;
         let generation = match slot {
             TextureSlot::Active(entry)
             | TextureSlot::Retiring(entry)
             | TextureSlot::NativeExposed { entry, .. } => entry.generation,
             TextureSlot::Retired { generation } => *generation,
-            TextureSlot::Exhausted => return Err(ManagedTextureError::AlreadyRemoved(id)),
+            TextureSlot::Exhausted => return Err(TextureError::AlreadyRemoved(id)),
         };
         if generation != id.generation() {
-            return Err(ManagedTextureError::StaleGeneration(id));
+            return Err(TextureError::StaleGeneration(id));
         }
         Ok(slot)
     }
 
-    fn active_entry(&self, id: ManagedTextureId) -> Result<&TextureEntry, ManagedTextureError> {
+    fn active_entry(&self, id: ManagedTextureId) -> Result<&TextureEntry, TextureError> {
         match self.slot(id)? {
             TextureSlot::Active(entry) if !entry.retire_after_frame => Ok(entry),
-            TextureSlot::Active(_) | TextureSlot::Retiring(_) => {
-                Err(ManagedTextureError::Retiring(id))
-            }
+            TextureSlot::Active(_) | TextureSlot::Retiring(_) => Err(TextureError::Retiring(id)),
             TextureSlot::NativeExposed { .. }
             | TextureSlot::Retired { .. }
-            | TextureSlot::Exhausted => Err(ManagedTextureError::AlreadyRemoved(id)),
+            | TextureSlot::Exhausted => Err(TextureError::AlreadyRemoved(id)),
         }
     }
 
     fn active_entry_mut(
         &mut self,
         id: ManagedTextureId,
-    ) -> Result<&mut TextureEntry, ManagedTextureError> {
+    ) -> Result<&mut TextureEntry, TextureError> {
         self.active_entry(id)?;
         let TextureSlot::Active(entry) = &mut self.slots[id.slot() as usize] else {
             unreachable!("validated active texture slot changed without a mutable alias")
@@ -275,10 +273,7 @@ impl ManagedTextureRegistry {
         id
     }
 
-    pub(crate) fn resolve(
-        &self,
-        id: ManagedTextureId,
-    ) -> Result<sys::ImTextureRef, ManagedTextureError> {
+    pub(crate) fn resolve(&self, id: ManagedTextureId) -> Result<sys::ImTextureRef, TextureError> {
         let entry = self.active_entry(id)?;
         Ok(sys::ImTextureRef {
             _TexData: entry.texture.as_raw() as *mut sys::ImTextureData,
@@ -297,14 +292,14 @@ impl ManagedTextureRegistry {
         &self,
         native: *const sys::ImTextureData,
         atlas: &FontAtlasSnapshotTarget,
-    ) -> Result<ResolvedSnapshotTexture, SnapshotError> {
+    ) -> Result<ResolvedSnapshotTexture, FrameError> {
         if let Some(id) = self.id_for_native(native) {
             match self.slot(id)? {
                 TextureSlot::Active(_) | TextureSlot::Retiring(_) => {}
                 TextureSlot::NativeExposed { .. }
                 | TextureSlot::Retired { .. }
                 | TextureSlot::Exhausted => {
-                    return Err(ManagedTextureError::AlreadyRemoved(id).into());
+                    return Err(TextureError::AlreadyRemoved(id).into());
                 }
             }
             return Ok(ResolvedSnapshotTexture {
@@ -314,21 +309,21 @@ impl ManagedTextureRegistry {
         if let Some(resolved) = atlas.resolve(native) {
             return Ok(resolved);
         }
-        Err(SnapshotError::UnknownManagedTexture)
+        Err(FrameError::UnknownManagedTexture)
     }
 
     pub(crate) fn record_snapshot_references(
         &mut self,
         ids: &std::collections::HashSet<ManagedTextureId>,
         epoch: u64,
-    ) -> Result<(), ManagedTextureError> {
+    ) -> Result<(), TextureError> {
         for id in ids {
             match self.slot(*id)? {
                 TextureSlot::Active(_) | TextureSlot::Retiring(_) => {}
                 TextureSlot::NativeExposed { .. }
                 | TextureSlot::Retired { .. }
                 | TextureSlot::Exhausted => {
-                    return Err(ManagedTextureError::AlreadyRemoved(*id));
+                    return Err(TextureError::AlreadyRemoved(*id));
                 }
             }
         }
@@ -349,7 +344,7 @@ impl ManagedTextureRegistry {
         &self,
         id: ManagedTextureId,
         f: impl for<'texture> FnOnce(ManagedTextureRef<'texture>) -> R,
-    ) -> Result<R, ManagedTextureError> {
+    ) -> Result<R, TextureError> {
         let entry = self.active_entry(id)?;
         Ok(f(ManagedTextureRef::new(&entry.texture)))
     }
@@ -358,7 +353,7 @@ impl ManagedTextureRegistry {
         &mut self,
         id: ManagedTextureId,
         f: impl for<'texture> FnOnce(ManagedTextureMut<'texture>) -> R,
-    ) -> Result<R, ManagedTextureError> {
+    ) -> Result<R, TextureError> {
         let entry = self.active_entry_mut(id)?;
         Ok(f(ManagedTextureMut::new(&mut entry.texture)))
     }
@@ -367,7 +362,7 @@ impl ManagedTextureRegistry {
         &mut self,
         requests: &[CapturedTextureOperation],
         atlas: &FontAtlasSnapshotTarget,
-    ) -> Result<Vec<PendingTextureRequest>, SnapshotError> {
+    ) -> Result<Vec<PendingTextureRequest>, FrameError> {
         // Capture validated bytes first. Native OK means the persistent queue owns them,
         // not that the renderer has uploaded them.
         let mut staged = Vec::with_capacity(requests.len());
@@ -377,11 +372,11 @@ impl ManagedTextureRegistry {
                     TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => {
                         entry.texture.as_raw()
                     }
-                    _ => return Err(ManagedTextureError::AlreadyRemoved(id).into()),
+                    _ => return Err(TextureError::AlreadyRemoved(id).into()),
                 },
                 SnapshotTextureId::FontAtlas { .. } => atlas
                     .find(request.texture)
-                    .ok_or(SnapshotError::UnknownManagedTexture)?
+                    .ok_or(FrameError::UnknownManagedTexture)?
                     .texture
                     .cast_const(),
             };
@@ -410,18 +405,16 @@ impl ManagedTextureRegistry {
                 }
                 let previous = previous_update.unwrap_or(operation.as_ref());
                 let rect = cumulative_update_rect(previous, operation.as_ref()).ok_or(
-                    SnapshotError::TextureFullUpdateOutOfRange {
+                    FrameError::TextureFullUpdateOutOfRange {
                         id: request.texture,
                         width: *width,
                         height: *height,
                     },
                 )?;
-                let pixels = texture
-                    .pixels()
-                    .ok_or(SnapshotError::TexturePixelsMissing {
-                        id: request.texture,
-                        status: texture.status(),
-                    })?;
+                let pixels = texture.pixels().ok_or(FrameError::TexturePixelsMissing {
+                    id: request.texture,
+                    status: texture.status(),
+                })?;
                 let upload = crate::render::snapshot::copy_upload_rect(
                     pixels,
                     *width,
@@ -429,7 +422,7 @@ impl ManagedTextureRegistry {
                     texture.raw_bytes_per_pixel_i32() as usize,
                     rect,
                 )
-                .ok_or(SnapshotError::TextureInvalidLayout {
+                .ok_or(FrameError::TextureInvalidLayout {
                     id: request.texture,
                     width: texture.raw_width_i32(),
                     height: texture.raw_height_i32(),
@@ -466,10 +459,10 @@ impl ManagedTextureRegistry {
         id: ManagedTextureId,
         watermark: u64,
         retain_frame: bool,
-    ) -> Result<(), ManagedTextureError> {
+    ) -> Result<(), TextureError> {
         self.reap_destroyed(watermark);
         let entry = self.active_entry_mut(id).map_err(|error| match error {
-            ManagedTextureError::Retiring(_) => ManagedTextureError::AlreadyRetiring(id),
+            TextureError::Retiring(_) => TextureError::AlreadyRetiring(id),
             other => other,
         })?;
         if retain_frame {
@@ -512,7 +505,7 @@ impl ManagedTextureRegistry {
         feedback: &[TextureFeedback],
         atlas: &FontAtlasSnapshotTarget,
         epoch: u64,
-    ) -> Result<usize, RendererConsumerError> {
+    ) -> Result<usize, FrameError> {
         let mut applied = 0;
         for item in feedback {
             let key = item.key();
@@ -526,7 +519,7 @@ impl ManagedTextureRegistry {
                 SnapshotTextureId::User(id) => match self.slot(id)? {
                     TextureSlot::Active(_) => {
                         if item.result() == TextureFeedbackResult::Destroyed {
-                            return Err(RendererConsumerError::InvalidFeedbackTransition {
+                            return Err(FrameError::InvalidFeedbackTransition {
                                 texture: key.texture,
                             });
                         }
@@ -535,12 +528,12 @@ impl ManagedTextureRegistry {
                     TextureSlot::NativeExposed { .. }
                     | TextureSlot::Retired { .. }
                     | TextureSlot::Exhausted => {
-                        return Err(ManagedTextureError::AlreadyRemoved(id).into());
+                        return Err(TextureError::AlreadyRemoved(id).into());
                     }
                 },
                 SnapshotTextureId::FontAtlas { .. } => {
                     if !atlas.identity_is_known(key.texture) {
-                        return Err(RendererConsumerError::StaleFontAtlas);
+                        return Err(FrameError::StaleFontAtlas);
                     }
                 }
             }
@@ -551,7 +544,7 @@ impl ManagedTextureRegistry {
                 ) if !texture_id.is_null() => {}
                 (TextureRequestKind::Destroy, TextureFeedbackResult::Destroyed) => {}
                 _ => {
-                    return Err(RendererConsumerError::InvalidFeedbackTransition {
+                    return Err(FrameError::InvalidFeedbackTransition {
                         texture: key.texture,
                     });
                 }
@@ -799,7 +792,7 @@ impl Context {
         &self,
         id: ManagedTextureId,
         f: impl for<'texture> FnOnce(ManagedTextureRef<'texture>) -> R,
-    ) -> Result<R, ManagedTextureError> {
+    ) -> Result<R, TextureError> {
         let _guard = CTX_MUTEX.lock();
         let _bound = RawBoundContextGuard::bind(self.raw);
         self.texture_registry.borrow().with_texture(id, f)
@@ -822,7 +815,7 @@ impl Context {
         &mut self,
         id: ManagedTextureId,
         f: impl for<'texture> FnOnce(ManagedTextureMut<'texture>) -> R,
-    ) -> Result<R, ManagedTextureError> {
+    ) -> Result<R, TextureError> {
         let _guard = CTX_MUTEX.lock();
         let _bound = RawBoundContextGuard::bind(self.raw);
         self.texture_registry.borrow_mut().with_texture_mut(id, f)
@@ -832,15 +825,13 @@ impl Context {
     ///
     /// # Errors
     ///
-    /// Returns [`ManagedTextureMutationError::Access`] when `id` is foreign, stale, unknown, or
-    /// retiring. Returns [`ManagedTextureMutationError::Data`] when the closure returns a pixel
-    /// validation error. Each [`ManagedTextureMut`] operation is transactional, but the closure is
-    /// not: successful operations performed before a later error remain applied and immediately
-    /// invalidate older renderer feedback.
+    /// Returns a [`TextureError`] if the handle is unavailable or the closure rejects its pixel
+    /// data. Successful [`ManagedTextureMut`] operations before a later error remain applied
+    /// and immediately invalidate older renderer feedback.
     ///
     /// ```
     /// use dear_imgui_rs::{
-    ///     Context, ManagedTextureMutationError, OwnedTextureData, TextureDataError, TextureFormat,
+    ///     Context, TextureError, OwnedTextureData, TextureFormat,
     /// };
     ///
     /// let mut context = Context::create();
@@ -851,28 +842,23 @@ impl Context {
     ///     .unwrap_err();
     /// assert!(matches!(
     ///     error,
-    ///     ManagedTextureMutationError::Data(TextureDataError::ByteLengthMismatch {
-    ///         expected: 4,
-    ///         actual: 3,
-    ///     })
+    ///     TextureError::ByteLengthMismatch { expected: 4, actual: 3 }
     /// ));
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn try_with_texture_mut<R>(
         &mut self,
         id: ManagedTextureId,
-        f: impl for<'texture> FnOnce(ManagedTextureMut<'texture>) -> Result<R, TextureDataError>,
-    ) -> Result<R, ManagedTextureMutationError> {
-        self.with_texture_mut(id, f)
-            .map_err(ManagedTextureMutationError::Access)?
-            .map_err(ManagedTextureMutationError::Data)
+        f: impl for<'texture> FnOnce(ManagedTextureMut<'texture>) -> Result<R, TextureError>,
+    ) -> Result<R, TextureError> {
+        self.with_texture_mut(id, f)?
     }
 
     /// Stop accepting new draw references and retire a managed texture.
     ///
     /// An open or rendered frame retains its texture data and binding so already submitted
     /// commands can still be rendered or captured. Retirement starts when that frame expires.
-    pub fn remove_texture(&mut self, id: ManagedTextureId) -> Result<(), ManagedTextureError> {
+    pub fn remove_texture(&mut self, id: ManagedTextureId) -> Result<(), TextureError> {
         let _guard = CTX_MUTEX.lock();
         let _bound = RawBoundContextGuard::bind(self.raw);
         let watermark = self.snapshot_hub.completion_watermark();
@@ -887,6 +873,139 @@ impl Context {
         let watermark = self.snapshot_hub.completion_watermark();
         self.texture_registry.borrow_mut().reap_destroyed(watermark);
     }
+}
+
+#[derive(Default)]
+struct TextureSyncQueue {
+    entries: HashMap<SnapshotTextureId, PendingTexture>,
+    next_revision: u64,
+}
+
+struct PendingTexture {
+    revision: u64,
+    operation: Option<Arc<TextureOp>>,
+}
+
+impl TextureSyncQueue {
+    fn operation(&self, id: SnapshotTextureId) -> Option<&TextureOp> {
+        self.entries.get(&id)?.operation.as_deref()
+    }
+
+    fn stage(&mut self, id: SnapshotTextureId, operation: Arc<TextureOp>) {
+        if matches!(operation.as_ref(), TextureOp::Destroy)
+            && matches!(self.operation(id), Some(TextureOp::Destroy))
+        {
+            return;
+        }
+        self.next_revision = self
+            .next_revision
+            .checked_add(1)
+            .expect("texture revision exhausted");
+        self.entries.insert(
+            id,
+            PendingTexture {
+                revision: self.next_revision,
+                operation: Some(operation),
+            },
+        );
+    }
+
+    fn requests(&self) -> Vec<PendingTextureRequest> {
+        self.entries
+            .iter()
+            .filter_map(|(&texture, pending)| {
+                Some(PendingTextureRequest {
+                    texture,
+                    revision: pending.revision,
+                    op: Arc::clone(pending.operation.as_ref()?),
+                })
+            })
+            .collect()
+    }
+
+    fn acknowledge(&mut self, id: SnapshotTextureId, revision: u64) -> bool {
+        let Some(entry) = self.entries.get_mut(&id) else {
+            return false;
+        };
+        if entry.revision != revision {
+            return false;
+        }
+        // A later epoch can confirm the same upload with a newer backend binding.
+        // Keep only its receipt identity; the potentially large payload is released.
+        entry.operation = None;
+        true
+    }
+
+    fn forget(&mut self, id: SnapshotTextureId) {
+        self.entries.remove(&id);
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+fn cumulative_update_rect(previous: &TextureOp, incoming: &TextureOp) -> Option<TextureRect> {
+    let TextureOp::Update { rects: old, .. } = previous else {
+        return None;
+    };
+    let TextureOp::Update { rects: new, .. } = incoming else {
+        return None;
+    };
+    let mut rects = old.iter().chain(new).map(|upload| upload.rect);
+    let first = rects.next()?;
+    let (mut x, mut y, mut right, mut bottom) = (
+        first.x,
+        first.y,
+        u32::from(first.x) + u32::from(first.w),
+        u32::from(first.y) + u32::from(first.h),
+    );
+    for rect in rects {
+        x = x.min(rect.x);
+        y = y.min(rect.y);
+        right = right.max(u32::from(rect.x) + u32::from(rect.w));
+        bottom = bottom.max(u32::from(rect.y) + u32::from(rect.h));
+    }
+    Some(TextureRect {
+        x,
+        y,
+        w: u16::try_from(right - u32::from(x)).ok()?,
+        h: u16::try_from(bottom - u32::from(y)).ok()?,
+    })
+}
+
+fn update_pending_create(previous: &TextureOp, incoming: &TextureOp) -> Option<TextureOp> {
+    let TextureOp::Create {
+        format,
+        width,
+        height,
+        row_pitch,
+        pixels,
+    } = previous
+    else {
+        return None;
+    };
+    let TextureOp::Update { rects, .. } = incoming else {
+        return None;
+    };
+    let mut pixels = pixels.clone();
+    let bpp = crate::texture::get_format_bytes_per_pixel(*format);
+    for upload in rects {
+        for row in 0..usize::from(upload.rect.h) {
+            let target =
+                (usize::from(upload.rect.y) + row) * row_pitch + usize::from(upload.rect.x) * bpp;
+            let source = row * upload.row_pitch;
+            pixels[target..target + upload.row_pitch]
+                .copy_from_slice(&upload.data[source..source + upload.row_pitch]);
+        }
+    }
+    Some(TextureOp::Create {
+        format: *format,
+        width: *width,
+        height: *height,
+        row_pitch: *row_pitch,
+        pixels,
+    })
 }
 
 #[cfg(test)]
@@ -921,15 +1040,13 @@ mod tests {
         let mut context_b = Context::create();
         assert!(matches!(
             context_b.with_texture(first_id, |_| ()),
-            Err(ManagedTextureError::ForeignContext { .. })
+            Err(TextureError::ForeignContext { .. })
         ));
         assert!(matches!(
             context_b.try_with_texture_mut(first_id, |mut texture| {
                 texture.replace_pixels(&[4, 3, 2, 1])
             }),
-            Err(ManagedTextureMutationError::Access(
-                ManagedTextureError::ForeignContext { .. }
-            ))
+            Err(TextureError::ForeignContext { .. })
         ));
         drop(context_b);
         let mut context_a = suspended_a;
@@ -938,9 +1055,7 @@ mod tests {
             context_a.try_with_texture_mut(first_id, |mut texture| {
                 texture.replace_pixels(&[4, 3, 2, 1])
             }),
-            Err(ManagedTextureMutationError::Access(
-                ManagedTextureError::AlreadyRemoved(first_id)
-            ))
+            Err(TextureError::AlreadyRemoved(first_id))
         );
         let before_refresh_id = context_a.register_texture(texture());
         assert_ne!(
@@ -957,7 +1072,7 @@ mod tests {
         assert_ne!(replacement_id.generation(), first_id.generation());
         assert_eq!(
             context_a.with_texture(first_id, |_| ()),
-            Err(ManagedTextureError::StaleGeneration(first_id))
+            Err(TextureError::StaleGeneration(first_id))
         );
     }
 
@@ -1063,7 +1178,7 @@ mod tests {
         context.remove_texture(id).expect("begin retirement");
         assert_eq!(
             context.remove_texture(id),
-            Err(ManagedTextureError::AlreadyRetiring(id))
+            Err(TextureError::AlreadyRetiring(id))
         );
         assert_eq!(
             context.texture_registry.borrow().id_for_native(native),
@@ -1133,5 +1248,99 @@ mod tests {
             &context.texture_registry.borrow().slots[id.slot() as usize],
             TextureSlot::Retired { generation } if *generation == id.generation()
         ));
+    }
+}
+
+#[cfg(test)]
+mod sync_tests {
+    use super::{TextureSyncQueue, cumulative_update_rect, update_pending_create};
+    use crate::ContextId;
+    use crate::render::snapshot::{SnapshotTextureId, TextureOp, TextureUploadRect};
+    use crate::texture::{TextureFormat, TextureRect};
+    use std::sync::Arc;
+
+    fn id() -> SnapshotTextureId {
+        SnapshotTextureId::FontAtlas {
+            context: ContextId::allocate().unwrap(),
+            stamp: 1,
+            generation: 1,
+        }
+    }
+
+    fn create() -> TextureOp {
+        TextureOp::Create {
+            format: TextureFormat::Alpha8,
+            width: 4,
+            height: 1,
+            row_pitch: 4,
+            pixels: vec![0; 4],
+        }
+    }
+
+    fn update(x: u16, value: u8) -> TextureOp {
+        TextureOp::Update {
+            format: TextureFormat::Alpha8,
+            width: 4,
+            height: 1,
+            rects: vec![TextureUploadRect {
+                rect: TextureRect {
+                    x,
+                    y: 0,
+                    w: 1,
+                    h: 1,
+                },
+                row_pitch: 1,
+                data: vec![value],
+            }],
+        }
+    }
+
+    #[test]
+    fn retries_share_payload_and_stale_feedback_cannot_consume_newer_work() {
+        let mut queue = TextureSyncQueue::default();
+        let id = id();
+        queue.stage(id, Arc::new(create()));
+        let first = queue.requests().pop().unwrap();
+        let retry = queue.requests().pop().unwrap();
+        assert!(Arc::ptr_eq(&first.op, &retry.op));
+        let merged = update_pending_create(queue.operation(id).unwrap(), &update(2, 7)).unwrap();
+        queue.stage(id, Arc::new(merged));
+        assert!(!queue.acknowledge(id, first.revision));
+        let latest = queue.requests().pop().unwrap();
+        assert!(
+            matches!(latest.op.as_ref(), TextureOp::Create { pixels, .. } if pixels == &[0, 0, 7, 0])
+        );
+        assert!(queue.acknowledge(id, latest.revision));
+        assert!(queue.requests().is_empty());
+        assert!(queue.entries[&id].operation.is_none());
+    }
+
+    #[test]
+    fn reset_never_reuses_an_upload_identity_and_destroy_is_stable() {
+        let mut queue = TextureSyncQueue::default();
+        let id = id();
+        queue.stage(id, Arc::new(create()));
+        let first = queue.requests().pop().unwrap();
+        queue.clear();
+        queue.stage(id, Arc::new(create()));
+        assert_ne!(first.revision, queue.requests()[0].revision);
+        queue.stage(id, Arc::new(TextureOp::Destroy));
+        let destroy = queue.requests().pop().unwrap();
+        queue.stage(id, Arc::new(TextureOp::Destroy));
+        assert_eq!(destroy.revision, queue.requests()[0].revision);
+        assert!(!queue.acknowledge(id, first.revision));
+    }
+
+    #[test]
+    fn dirty_update_union_is_bounded_by_one_rectangle() {
+        assert_eq!(
+            cumulative_update_rect(&update(0, 1), &update(3, 2)),
+            Some(TextureRect {
+                x: 0,
+                y: 0,
+                w: 4,
+                h: 1
+            })
+        );
     }
 }

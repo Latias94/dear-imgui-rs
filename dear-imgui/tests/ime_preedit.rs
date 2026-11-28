@@ -1,4 +1,4 @@
-use dear_imgui_rs::{Context, ImePreeditError, sys};
+use dear_imgui_rs::{Context, ContextError, sys};
 
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -76,10 +76,10 @@ fn preedit_validates_utf8_ranges_atomically_and_clears_on_focus_loss() {
     input_frame(&mut context, &mut text, false);
     context.set_ime_preedit("中文", Some((3, 3))).unwrap();
     for cursor in [Some((1, 3)), Some((0, 7))] {
-        assert_eq!(
+        assert!(matches!(
             context.set_ime_preedit("中文", cursor),
-            Err(ImePreeditError::InvalidCursorRange)
-        );
+            Err(ContextError::InvalidImeCursorRange)
+        ));
         assert_eq!(context.ime_preedit().unwrap().cursor_range(), Some((3, 3)));
     }
     context.set_ime_preedit("中文", None).unwrap();

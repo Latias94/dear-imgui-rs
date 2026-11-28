@@ -5,9 +5,8 @@ use std::rc::Rc;
 
 use dear_imgui_rs::render::ReconciledFrame;
 use dear_imgui_rs::{
-    Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
-    ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
-    ContextDestroyed, ContextId, ContextLifecycle, ContextTeardown, FrameToken,
+    Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole, ContextBinding,
+    ContextDestroyed, ContextError, ContextId, ContextLifecycle, ContextTeardown, FrameToken,
 };
 use thiserror::Error;
 
@@ -34,12 +33,9 @@ struct WgpuRendererAttachmentMarker;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum WgpuViewportError {
-    /// The Dear ImGui Context rejected the renderer attachment.
-    #[error(transparent)]
-    Attachment(#[from] ContextAttachmentError),
     /// The originating Context can no longer be entered normally.
     #[error(transparent)]
-    Context(#[from] ContextBindingError),
+    Context(#[from] ContextError),
     /// The underlying WGPU renderer operation failed.
     #[error(transparent)]
     Renderer(#[from] RendererError),
@@ -883,7 +879,7 @@ impl RuntimeControl {
     fn release_renderer_during_context_teardown(
         &self,
         context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         if self.state.get() == RuntimeState::ResourceDropped {
             return Ok(());
         }
@@ -894,7 +890,7 @@ impl RuntimeControl {
         preflight_renderer_viewport_resources(self).map_err(|error| {
             let message = error.to_string();
             self.record_fault(error);
-            ContextAttachmentTeardownError::new(message)
+            ContextError::attachment_teardown(message)
         })?;
 
         if self.renderer.borrow().is_none() {
@@ -905,12 +901,12 @@ impl RuntimeControl {
         }
 
         let mut renderer_slot = self.renderer.try_borrow_mut().map_err(|_| {
-            ContextAttachmentTeardownError::new(
+            ContextError::attachment_teardown(
                 "WGPU renderer was reentered during Context renderer-resource teardown",
             )
         })?;
         let renderer = renderer_slot.as_deref_mut().ok_or_else(|| {
-            ContextAttachmentTeardownError::new(
+            ContextError::attachment_teardown(
                 "WGPU renderer disappeared during Context renderer-resource teardown",
             )
         })?;
@@ -920,12 +916,12 @@ impl RuntimeControl {
             destroy_renderer_viewport_resources(self).map_err(|error| {
                 let message = error.to_string();
                 self.record_fault(error);
-                ContextAttachmentTeardownError::new(message)
+                ContextError::attachment_teardown(message)
             })?;
             release_callbacks(self).map_err(|error| {
                 let message = error.to_string();
                 self.record_fault(error);
-                ContextAttachmentTeardownError::new(message)
+                ContextError::attachment_teardown(message)
             })?;
             self.mark_detached();
             Ok(())
@@ -1101,13 +1097,13 @@ impl RuntimeControl {
 }
 
 impl ContextAttachment for RuntimeControl {
-    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextAttachmentTeardownError> {
+    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         context.with_bound_context(|| {
             self.shutdown_once(ShutdownAction::Quiesce)
                 .map_err(|error| {
                     let message = error.to_string();
                     self.record_fault(error);
-                    ContextAttachmentTeardownError::new(message)
+                    ContextError::attachment_teardown(message)
                 })
         })
     }
@@ -1115,7 +1111,7 @@ impl ContextAttachment for RuntimeControl {
     fn release_renderer_resources(
         &self,
         context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         context.with_bound_context(|| self.release_renderer_during_context_teardown(context))
     }
 

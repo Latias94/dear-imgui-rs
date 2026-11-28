@@ -5,8 +5,6 @@ use dear_imgui_rs::{DrawCmd, DrawCmdSnapshot};
 /// The guard holds an exclusive borrow of the published state. Finish the guard to validate
 /// the slot after drawing, and use `state_mut()` between raw callback invocations.
 pub use dear_imgui_rs::RendererRenderStateGuard as ScopedRenderState;
-/// Failure to publish or validate the transient renderer state slot.
-pub use dear_imgui_rs::RendererRenderStateGuardError as ScopedRenderStateError;
 
 /// A standard draw callback already recognized by Dear ImGui's draw command iterator.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -1,4 +1,4 @@
-use dear_imgui_rs::{ContextBindingError, ContextId};
+use dear_imgui_rs::{ContextError, ContextId};
 use std::{ffi::NulError, str::Utf8Error};
 
 /// Errors reported by the safe cimCTE layer.
@@ -7,7 +7,7 @@ use std::{ffi::NulError, str::Utf8Error};
 pub enum CteError {
     /// The native allocator could not be reserved for this thread.
     #[error(transparent)]
-    ThreadLease(#[from] dear_imgui_rs::ImGuiError),
+    ThreadLease(#[from] ContextError),
     /// A native owner could not be allocated.
     #[error("{object} creation returned a null pointer")]
     CreationFailed { object: &'static str },
@@ -17,7 +17,7 @@ pub enum CteError {
     ContextBinding {
         operation: &'static str,
         #[source]
-        source: ContextBindingError,
+        source: ContextError,
     },
 
     /// A [`dear_imgui_rs::Ui`] belongs to another Dear ImGui context.

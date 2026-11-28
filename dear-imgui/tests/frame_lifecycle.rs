@@ -249,9 +249,7 @@ fn an_engine_owned_frame_can_retry_synchronous_render_with_its_own_consumer() {
     let stamp = ctx.frame_lifecycle_stamp();
     assert!(matches!(
         ctx.try_render(&foreign),
-        Err(imgui::render::SnapshotError::Consumer(
-            imgui::render::RendererConsumerError::ForeignContext { .. }
-        ))
+        Err(imgui::FrameError::ForeignContext { .. })
     ));
     assert_eq!(ctx.frame_lifecycle_stamp(), stamp);
     assert!(reconcile_test_frame(ctx.try_render(&consumer).unwrap(), &[]).valid());
@@ -273,12 +271,7 @@ fn a_frame_token_can_retry_synchronous_render_after_a_consumer_rejection() {
     let (frame, error) = frame
         .try_render(&foreign)
         .expect_err("consumer belongs to another context");
-    assert!(matches!(
-        error,
-        imgui::render::SnapshotError::Consumer(
-            imgui::render::RendererConsumerError::ForeignContext { .. }
-        )
-    ));
+    assert!(matches!(error, imgui::FrameError::ForeignContext { .. }));
     assert_eq!(frame.lifecycle_state(), imgui::FrameLifecycleState::InFrame);
     frame.ui().text("After preflight");
     assert!(reconcile_test_frame(frame.render(&consumer), &[]).valid());
@@ -311,7 +304,7 @@ fn a_frame_token_can_only_retry_synchronous_capture_after_native_render() {
         let (frame, error) = result.expect_err("invalid texture layout should prevent capture");
         assert!(matches!(
             error,
-            imgui::render::SnapshotError::TextureInvalidLayout { .. }
+            imgui::FrameError::TextureInvalidLayout { .. }
         ));
         assert_eq!(
             frame.lifecycle_state(),
@@ -321,7 +314,7 @@ fn a_frame_token_can_only_retry_synchronous_capture_after_native_render() {
         if try_detached {
             assert!(matches!(
                 frame.render_snapshot(&detached),
-                Err(imgui::render::SnapshotError::FrameAlreadyRendered)
+                Err(imgui::FrameError::FrameAlreadyRendered)
             ));
         } else {
             let frame = frame
@@ -863,7 +856,7 @@ fn invalid_synchronous_feedback_abandons_without_wedging_the_consumer() {
 
     assert!(matches!(
         pending.reconcile_texture_feedback(invalid),
-        Err(imgui::render::RendererConsumerError::DuplicateFeedback { .. })
+        Err(imgui::FrameError::DuplicateFeedback { .. })
     ));
     ctx.with_texture(texture_id, |texture| {
         assert_eq!(texture.status(), imgui::TextureStatus::OK);
@@ -918,7 +911,7 @@ fn synchronous_destroy_retry_does_not_acknowledge_retirement_or_block_drawing() 
     drop(frame);
     assert_eq!(
         ctx.with_texture(texture_id, |_| ()),
-        Err(imgui::ManagedTextureError::Retiring(texture_id))
+        Err(imgui::TextureError::Retiring(texture_id))
     );
 
     let retry = ctx.begin_frame().render(&consumer);
@@ -929,7 +922,7 @@ fn synchronous_destroy_retry_does_not_acknowledge_retirement_or_block_drawing() 
     drop(reconcile_test_frame(retry, &[]));
     assert_eq!(
         ctx.with_texture(texture_id, |_| ()),
-        Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))
+        Err(imgui::TextureError::AlreadyRemoved(texture_id))
     );
 }
 
@@ -965,7 +958,7 @@ fn renderer_consumer_kind_is_selected_at_creation() {
     let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
     assert!(matches!(
         ctx.create_detached_renderer_consumer(),
-        Err(imgui::render::RendererConsumerError::ConsumerAlreadyActive)
+        Err(imgui::FrameError::ConsumerAlreadyActive)
     ));
 
     let pending = ctx.begin_frame().render(&consumer);
@@ -1195,7 +1188,7 @@ fn renderer_reset_acknowledges_retiring_textures_after_the_last_epoch() {
     drop(ctx.begin_frame());
     assert_eq!(
         ctx.with_texture(texture_id, |_| ()),
-        Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))
+        Err(imgui::TextureError::AlreadyRemoved(texture_id))
     );
 }
 
@@ -1267,7 +1260,7 @@ fn renderer_reset_handles_atlas_active_and_retiring_bindings_as_one_transaction(
     drop(pending);
     assert_eq!(
         ctx.with_texture(retiring, |_| ()),
-        Err(imgui::ManagedTextureError::AlreadyRemoved(retiring))
+        Err(imgui::TextureError::AlreadyRemoved(retiring))
     );
 }
 

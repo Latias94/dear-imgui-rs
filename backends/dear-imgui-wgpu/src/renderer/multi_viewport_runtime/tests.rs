@@ -7,7 +7,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextBinding, ContextTeardown, sys,
+    ContextBinding, ContextError, ContextTeardown, sys,
 };
 use static_assertions::assert_not_impl_any;
 
@@ -58,10 +58,7 @@ struct TestPlatformMarker;
 struct TestPlatformAttachment;
 
 impl ContextAttachment for TestPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         context.with_bound_context(clear_test_main_handle_raw);
         Ok(())
     }
@@ -89,10 +86,7 @@ struct OrderingPlatformAttachment {
 }
 
 impl ContextAttachment for OrderingPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         self.platform_phase_count
             .set(self.platform_phase_count.get() + 1);
         self.renderer_released_first.set(
@@ -115,10 +109,7 @@ struct RegistryOrderingPlatformAttachment {
 }
 
 impl ContextAttachment for RegistryOrderingPlatformAttachment {
-    fn release_platform_windows(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         self.released_before_platform
             .set(self.drops.get() == 1 && viewport_data_count(self.binding.id()) == 0);
         context.with_bound_context(clear_test_main_handle_raw);
@@ -754,7 +745,7 @@ fn attach_requires_a_registered_platform_role_and_returns_renderer() {
         OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()).unwrap_err();
     assert!(matches!(
         failure.error(),
-        WgpuViewportError::Attachment(dear_imgui_rs::ContextAttachmentError::MissingPlatform)
+        WgpuViewportError::Context(dear_imgui_rs::ContextError::MissingPlatformAttachment)
     ));
     assert!(context.platform_io().renderer_callbacks_are_empty());
     let mut renderer = failure.into_renderer();
@@ -886,7 +877,7 @@ fn renderer_role_rollback_returns_renderer_without_claiming_callbacks() {
         OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()).unwrap_err();
     assert!(matches!(
         failure.error(),
-        WgpuViewportError::Attachment(dear_imgui_rs::ContextAttachmentError::RoleOccupied(
+        WgpuViewportError::Context(dear_imgui_rs::ContextError::AttachmentRoleOccupied(
             ContextAttachmentRole::Renderer
         ))
     ));

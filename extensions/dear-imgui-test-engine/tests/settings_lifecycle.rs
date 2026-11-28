@@ -5,8 +5,8 @@ use std::fs;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use dear_imgui_rs::{
-    Condition, Context, ContextLifecycle, ContextThreadLease, FrameToken, ImGuiError,
-    TableColumnIndex, TableFlags, render::ReconciledFrame,
+    Condition, Context, ContextLifecycle, ContextThreadLease, FrameToken, TableColumnIndex,
+    TableFlags, render::ReconciledFrame,
 };
 use dear_imgui_test_engine::{
     AttachmentState, BuiltInTestSuite, CaptureOutput, FrameDriverError, MainRenderOutcome,
@@ -319,12 +319,12 @@ fn detached_engine_holds_its_thread_until_native_shutdown_succeeds() {
         assert!(matches!(
             TestEngine::create(),
             Err(TestEngineError::ThreadLease(
-                ImGuiError::ContextThreadConflict
+                dear_imgui_rs::ContextError::ThreadConflict
             ))
         ));
         assert!(matches!(
             Context::try_create(),
-            Err(ImGuiError::ContextThreadConflict)
+            Err(dear_imgui_rs::ContextError::ThreadConflict)
         ));
     })
     .join()
@@ -340,7 +340,7 @@ fn detached_engine_holds_its_thread_until_native_shutdown_succeeds() {
     std::thread::spawn(|| {
         assert!(matches!(
             ContextThreadLease::acquire(),
-            Err(ImGuiError::ContextThreadConflict)
+            Err(dear_imgui_rs::ContextError::ThreadConflict)
         ));
     })
     .join()
@@ -370,17 +370,12 @@ fn failed_native_engine_creation_releases_the_thread() {
 
 #[test]
 fn dropping_the_engine_during_context_teardown_releases_the_last_native_owner() {
-    use dear_imgui_rs::{
-        ContextAttachment, ContextAttachmentRole, ContextAttachmentTeardownError, ContextTeardown,
-    };
+    use dear_imgui_rs::{ContextAttachment, ContextAttachmentRole, ContextError, ContextTeardown};
     use std::{cell::RefCell, rc::Rc};
 
     struct EngineHolder(RefCell<Option<TestEngine>>);
     impl ContextAttachment for EngineHolder {
-        fn release_renderer_resources(
-            &self,
-            _: &ContextTeardown<'_>,
-        ) -> Result<(), ContextAttachmentTeardownError> {
+        fn release_renderer_resources(&self, _: &ContextTeardown<'_>) -> Result<(), ContextError> {
             // All attachments have been quiesced, and the Context still owns the engine's hooks.
             drop(self.0.borrow_mut().take());
             Ok(())
@@ -437,7 +432,7 @@ fn engine_first_and_context_first_shutdown_destroy_exactly_once() {
     std::thread::spawn(|| {
         assert!(matches!(
             ContextThreadLease::acquire(),
-            Err(ImGuiError::ContextThreadConflict)
+            Err(dear_imgui_rs::ContextError::ThreadConflict)
         ));
     })
     .join()

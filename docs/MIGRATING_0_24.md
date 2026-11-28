@@ -12,7 +12,7 @@ Bevy backend, extensions, and build helpers.
 | `internal::update_hovered_window_and_capture_flags(pos)` | Call `context.update_hovered_window_and_capture_flags(pos)` on the context that owns the window. Both coordinates must be finite. |
 | `SuspendedContext`, `Context::suspend`, and `activate` | Store `Context` directly. Multiple contexts can live on the same OS thread. Each context's safe APIs bind to the correct native owner. |
 | `SuspendedContext::try_with_active` | Use `Context::try_with_current` for a checked operation that must finish its frame. For raw calls without a mutable Context borrow, use `context.binding().with_bound_context(...)`. |
-| `FrameToken::try_render` returns only an error | Handle `Err((frame, error))`. A rejected consumer leaves the frame open. If native rendering already finished, retry with `frame.try_render(...)` or drop the frame. Do not issue more UI commands or switch renderer paths. Snapshot methods report `SnapshotError::FrameAlreadyRendered` in this state. To propagate the error and discard the frame, use `.map_err(\|(_frame, error)\| error)?`. |
+| `FrameToken::try_render` returns only an error | Handle `Err((frame, error))`. A rejected consumer leaves the frame open. If native rendering already finished, retry with `frame.try_render(...)` or drop the frame. Do not issue more UI commands or switch renderer paths. Snapshot methods report `FrameError::FrameAlreadyRendered` in this state. To propagate the error and discard the frame, use `.map_err(\|(_frame, error)\| error)?`. |
 | Rebinding an inactive Context separately for each UI call | Top-level `Context::frame` and `Context::begin_frame` leave their Context current. To bind once across a scoped submission step, use `frame.with_ui(\|ui\| ...)`. `Context::frame_with_result` and window builders also bind their callbacks and restore the preceding Context. |
 | `ChildWindow::new(name).build(ui, f)` or `ui.child_window(name).build(ui, f)` | Use `ui.child_window(name).build(f)`. The builder already owns the borrow of its `Ui`. |
 | `ui.get_window_draw_list()` | Use `ui.with_window_draw_list(\|draw_list\| ...)` inside the window. Draw-list builders and tokens must finish inside that callback. Background and foreground draw lists remain frame-scoped. |
@@ -41,6 +41,34 @@ Bevy backend, extensions, and build helpers.
 
 Window and image builders accept sizes that convert to `[f32; 2]`. Color arguments in image
 builders and `Ui::text_colored` accept `Color`, RGBA arrays, and compatible vector types.
+
+## Core errors
+
+Import `ContextError`, `FrameError`, `TextureError`, and `FontError` from `dear_imgui_rs`. Use
+`ImGuiError` when one integration function handles several of these domains. The aggregate
+supports `?` from all four families. `Error::source()` retains the underlying error.
+
+| In 0.23 | In 0.24 |
+| --- | --- |
+| `ImGuiError::ContextCreation`, `ContextThreadConflict`, `SharedFontAtlasManaged`, `SharedFontAtlasRendererReleasePending` | `ContextError::Creation`, `ThreadConflict`, `SharedFontAtlasManaged`, and `SharedFontAtlasRendererReleasePending`. Match directly on errors returned by Context and lease creation. In an `ImGuiError`, match inside `ImGuiError::Context`. |
+| `ContextBindingError`, `ContextScopeError`, `ContextOperationError<E>` | `ContextError::Binding(BindingKind)` and `ContextError::Scope(ScopeKind)`. A scoped closure returning its own error uses `error::context::Operation<E>`. |
+| `ContextAttachmentError`, `ContextAttachmentDetachError`, `ContextPlatformAttachmentReleaseError` | Use `ContextError` directly. For example, `MissingPlatform` becomes `MissingPlatformAttachment`, and `RendererActive` becomes `RendererAttachmentActive`. |
+| `ContextAttachmentTeardownError`, `ContextPlatformWindowTeardownError`, `NativeWindowIdentityExhausted` | Use `ContextError`. For attachment hook diagnostics, use `ContextError::attachment_teardown`. Explicit teardown exposes `PlatformWindowTeardownPreflight` or `PlatformWindowTeardownPostflight` when an attachment reports a failure. |
+| `SystemClipboardError`, `ImePreeditError`, `WindowKeyError` | Use the clipboard, IME, and window identity variants of `ContextError`. |
+| `DockspaceError`, `WindowClassError` | Dockspace failures are direct `ContextError` variants. Window class validation returns `ContextError::WindowClass(WindowClassKind)`. A dockspace can report the same kind as `InvalidWindowClass`. |
+| `IniSessionDateError`, `IniSettingsRetentionError`, `NumericFormatError` | Use `ContextError`. Match the calendar error through `IniSessionDate(IniDateKind)` and the format error through `NumericFormat(NumericFormatKind)`. `NumericFormatKind::byte_offset()` identifies where the format failed. |
+| `SnapshotError`, `SnapshotCommitError`, `RendererConsumerError`, `RendererRenderStateGuardError` | Match `FrameError` directly. For example, `SnapshotError::Consumer(RendererConsumerError::ConsumerDraining)` becomes `FrameError::ConsumerDraining`. |
+| `TextureDataError`, `ManagedTextureError`, `ManagedTextureMutationError`, `TextureFeedbackError` | Match `TextureError` directly. The old `Data` and `Access` wrappers are removed. Frame operations that fail on a texture return `FrameError::Texture(TextureError)`. |
+| `FontAtlasModeError`, `FontAtlasLoaderError`, `FontLoadError`, `StbTrueTypeFontError`, `StbTrueTypeFontLoadError` | Match `FontError` directly. A file read reports `FontError::Io { path, source }`. Validation returns the specific font error without a `StbTrueType` or `Validation` wrapper. |
+
+## Custom renderers
+
+The new `dear-imgui-backend-support` crate provides shared clip-rectangle, texture update,
+color, callback, and error handling for renderer integrations. A renderer that can release its
+resources without a Context borrow can retain `consumer.reset_signal()`, mark it after completing
+resource cleanup, and drop the consumer. The Context applies the texture reset when the preceding
+generation drains. Keep the explicit reset permit for synchronous shutdown that can report
+preparation errors. See the [custom backend guide](CUSTOM_BACKENDS.md#renderer-backend-reference).
 
 ## WGPU renderer
 
@@ -89,7 +117,7 @@ builders and `Ui::text_colored` accept `Color`, RGBA arrays, and compatible vect
 
 ## Fonts
 
-Use `atlas.try_add_font(&[FontSource::ttf_bytes(bytes).font_index(index)])` for checked loading. The atlas copies the input and reports unsupported or malformed data as a `FontLoadError`. A native atlas using FreeType accepts supported outline TTF, OTF, and TTC faces. An atlas using stb keeps the existing bounded-read checks. OpenType SVG and embedded bitmap formats are not accepted through this checked entry point.
+Use `atlas.try_add_font(&[FontSource::ttf_bytes(bytes).font_index(index)])` for checked loading. The atlas copies the input and reports unsupported or malformed data as a `FontError`. A native atlas using FreeType accepts supported outline TTF, OTF, and TTC faces. `ttf-parser` handles common SFNT parsing. The stb route retains separate bounded-read and recursion checks for the pinned native loader. OpenType SVG and embedded bitmap formats are outside this checked entry point.
 
 ## Text input
 
@@ -111,6 +139,7 @@ Use `atlas.try_add_font(&[FontSource::ttf_bytes(bytes).font_index(index)])` for 
 | ImPlot `set_next_axis_links` and unsafe axis link pointers | In `with_plot_setup`, call `setup.setup_axis_links` with optional `&Cell<f64>` values declared outside the setup closure. The wrapper copies the limits in and writes back the final range when the plot ends. Use the copied limits APIs when writeback is unnecessary. |
 | `GuizmoContext::new().begin_frame(ui)` | Import `dear_imguizmo::GuizmoExt` and call `ui.guizmo()`. |
 | `GizmoUi::draw_axes` and `draw_cubes` accept a slice of any `Mat4Like` | Pass a contiguous `&[[f32; 16]]` of column-major transforms. This allows the renderer to borrow the matrices without allocating or repacking them. |
+| CTE `TextEditor::set_line_number_left_margin` and `line_number_left_margin` | Use `set_left_margin` and `left_margin`. The margin also applies when line numbers are hidden. |
 
 ## File browser
 

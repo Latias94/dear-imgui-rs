@@ -1,3 +1,4 @@
+use crate::error::context::ContextError;
 use crate::{Context, Id, sys};
 
 /// Transient IME text owned by the active text widget, separate from its buffer.
@@ -18,14 +19,6 @@ impl ImePreedit {
     pub fn cursor_range(&self) -> Option<(usize, usize)> {
         self.cursor_range
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum ImePreeditError {
-    #[error("IME cursor offsets must be UTF-8 boundaries within the preedit text")]
-    InvalidCursorRange,
-    #[error("IME preedit text must not contain NUL")]
-    InteriorNul,
 }
 
 #[derive(Debug, Default)]
@@ -187,14 +180,14 @@ impl Context {
         &mut self,
         text: &str,
         cursor_range: Option<(usize, usize)>,
-    ) -> Result<(), ImePreeditError> {
+    ) -> Result<(), ContextError> {
         if let Some((start, end)) = cursor_range
             && (!text.is_char_boundary(start) || !text.is_char_boundary(end))
         {
-            return Err(ImePreeditError::InvalidCursorRange);
+            return Err(ContextError::InvalidImeCursorRange);
         }
         if text.contains('\0') {
-            return Err(ImePreeditError::InteriorNul);
+            return Err(ContextError::ImePreeditContainsNul);
         }
         let raw = unsafe { &*self.as_raw() };
         let owner = ImeOwner::current(raw);

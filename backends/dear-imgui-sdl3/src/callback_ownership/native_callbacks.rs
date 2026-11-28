@@ -98,16 +98,15 @@ pub(super) unsafe extern "C" fn sdl3_create_window(viewport: *mut sys::ImGuiView
                 }
                 // Allocation happened, but it was never published. Release the exact sidecar
                 // once now; a later core destroy pass sees empty fields and cannot destroy it again.
-                if !state.user_data.is_null() {
-                    if let (Some(expected), Some(destroy)) = (
+                if !state.user_data.is_null()
+                    && let (Some(expected), Some(destroy)) = (
                         control.take_owned_viewport(viewport),
                         callbacks.destroy_window(),
-                    ) {
-                        if control.capture_viewport_platform_state(viewport) == Some(expected) {
-                            ffi::dear_imgui_sdl3_invoke_viewport(destroy, viewport);
-                            control.clear_viewport_platform_state(viewport);
-                        }
-                    }
+                    )
+                    && control.capture_viewport_platform_state(viewport) == Some(expected)
+                {
+                    ffi::dear_imgui_sdl3_invoke_viewport(destroy, viewport);
+                    control.clear_viewport_platform_state(viewport);
                 }
                 control.mark_viewport_failed(viewport);
                 return;

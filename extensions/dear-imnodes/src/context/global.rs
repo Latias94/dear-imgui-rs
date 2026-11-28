@@ -117,9 +117,10 @@ impl ImNodesContext {
             unsafe { sys::imnodes_CreateContext() }
         });
         if raw.is_null() {
-            return Err(dear_imgui_rs::ImGuiError::context_creation(
-                "imnodes_CreateContext returned null",
-            ));
+            return Err(dear_imgui_rs::ContextError::Creation {
+                reason: "imnodes_CreateContext returned null".into(),
+            }
+            .into());
         }
         Ok(Self {
             raw,
@@ -164,9 +165,10 @@ impl ImNodesContext {
             unsafe { sys::imnodes_EditorContextCreate() }
         });
         if raw.is_null() {
-            return Err(dear_imgui_rs::ImGuiError::context_creation(
-                "imnodes_EditorContextCreate returned null",
-            ));
+            return Err(dear_imgui_rs::ContextError::Creation {
+                reason: "imnodes_EditorContextCreate returned null".into(),
+            }
+            .into());
         }
         Ok(EditorContext {
             inner: Rc::new(EditorContextInner {

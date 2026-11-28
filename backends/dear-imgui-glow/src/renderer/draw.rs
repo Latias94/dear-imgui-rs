@@ -503,10 +503,8 @@ impl GlowRenderer {
             &vertex_array,
             framebuffer_srgb.as_ref(),
         )?;
-        let texture_registry = &self.texture_registry;
         self.render_draw_lists(
             gl,
-            texture_registry,
             draw_data,
             extent,
             &vertex_array,
@@ -652,7 +650,6 @@ impl GlowRenderer {
     fn render_draw_lists(
         &self,
         gl: &Context,
-        texture_registry: &TextureRegistry,
         draw_data: &DrawData,
         extent: FramebufferExtent,
         vertex_array: &VertexArrayGuard<'_>,
@@ -669,7 +666,7 @@ impl GlowRenderer {
 
             let scope = DrawListRenderScope {
                 gl,
-                texture_registry,
+                texture_registry: &self.texture_registry,
                 display_pos: draw_data.display_pos(),
                 framebuffer_scale: draw_data.framebuffer_scale(),
                 extent,

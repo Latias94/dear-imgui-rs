@@ -96,7 +96,7 @@ pub struct GraphStyle {
     pub snap: f32,
     // Minimap
     pub minimap_enabled: bool,
-    /// [xmin, ymin, xmax, ymax] in [0,1] window space
+    /// `[xmin, ymin, xmax, ymax]` in normalized window coordinates.
     pub minimap_rect: [f32; 4],
     pub minimap_bg_color: [f32; 4],
     pub minimap_view_fill: [f32; 4],

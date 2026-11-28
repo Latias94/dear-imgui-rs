@@ -64,14 +64,10 @@ impl Default for BrowserState {
 
 impl BrowserState {
     fn is_supported(path: &Path) -> bool {
-        match path
-            .extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_lowercase())
-        {
-            Some(ext) if matches!(ext.as_str(), "png" | "jpg" | "jpeg") => true,
-            _ => false,
-        }
+        matches!(
+            path.extension().and_then(|s| s.to_str()).map(str::to_lowercase),
+            Some(ext) if matches!(ext.as_str(), "png" | "jpg" | "jpeg")
+        )
     }
 
     fn scan_and_load(&mut self, root: &Path, renderer: &mut GlowRenderer) {
@@ -439,10 +435,10 @@ impl AppWindow {
                             if ui.selectable_config(name).selected(is_sel).build() {
                                 self.browser.selected = Some(i);
                             }
-                            if let Some(_popup) = ui.begin_popup_context_item() {
-                                if ui.menu_item("Reveal in log") {
-                                    self.browser.status = format!("{}", it.path.display());
-                                }
+                            if let Some(_popup) = ui.begin_popup_context_item()
+                                && ui.menu_item("Reveal in log")
+                            {
+                                self.browser.status = format!("{}", it.path.display());
                             }
                         });
 
@@ -459,7 +455,7 @@ impl AppWindow {
                 .scan_and_load(&self.root, &mut self.imgui.renderer);
         }
 
-        self.imgui.platform.prepare_render(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(ui, &self.window)?;
         let pending_frame = self
             .imgui
             .context

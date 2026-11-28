@@ -1,5 +1,5 @@
-use super::validation::{require_exact_payload, validate_new_texture_layout};
-use super::{TextureData, TextureDataError, TextureFormat};
+use super::{TextureData, TextureError, TextureFormat};
+use super::{require_exact_payload, validate_new_texture_layout};
 use crate::{ContextThreadLease, ImGuiError, ImGuiResult, sys};
 use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
@@ -45,13 +45,13 @@ impl OwnedTextureData {
         Self::try_empty().expect("failed to create empty Dear ImGui texture")
     }
 
-    fn try_empty() -> Result<Self, TextureDataError> {
+    fn try_empty() -> Result<Self, TextureError> {
         let thread_lease = ContextThreadLease::acquire().map_err(|error| match error {
-            ImGuiError::ContextThreadConflict => TextureDataError::ContextThreadConflict,
-            _ => TextureDataError::AllocationFailed,
+            crate::ContextError::ThreadConflict => TextureError::ContextThreadConflict,
+            _ => TextureError::AllocationFailed,
         })?;
         let raw = unsafe { sys::ImTextureData_ImTextureData() };
-        let raw = NonNull::new(raw).ok_or(TextureDataError::AllocationFailed)?;
+        let raw = NonNull::new(raw).ok_or(TextureError::AllocationFailed)?;
         Ok(Self { raw, thread_lease })
     }
 
@@ -62,14 +62,14 @@ impl OwnedTextureData {
     ///
     /// # Errors
     ///
-    /// Returns [`TextureDataError`] for an invalid layout or payload, a thread ownership
+    /// Returns [`TextureError`] for an invalid layout or payload, a thread ownership
     /// conflict, or a failed native allocation.
     pub fn from_pixels(
         format: TextureFormat,
         width: u32,
         height: u32,
         pixels: &[u8],
-    ) -> Result<Self, TextureDataError> {
+    ) -> Result<Self, TextureError> {
         let layout = validate_new_texture_layout(format, width, height)?;
         require_exact_payload(layout.byte_len, pixels.len())?;
 

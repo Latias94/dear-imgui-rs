@@ -732,12 +732,7 @@ impl ImguiExtractedRenderFrame {
         }
     }
 
-    pub(super) fn commit_all(
-        &mut self,
-    ) -> Vec<(
-        imgui::ContextId,
-        imgui::render::snapshot::SnapshotCommitError,
-    )> {
+    pub(super) fn commit_all(&mut self) -> Vec<(imgui::ContextId, imgui::FrameError)> {
         let mut errors = Vec::new();
         for (context_id, frame) in &mut self.frames {
             let feedback = std::mem::take(&mut frame.texture_feedback);

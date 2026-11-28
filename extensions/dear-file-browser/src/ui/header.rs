@@ -27,11 +27,13 @@ fn toolbar_button(
     text: &str,
     icon: Option<&str>,
     mode: ToolbarIconMode,
-    show_tooltips: bool,
-    tooltip: &str,
+    tooltip: Option<&str>,
 ) -> bool {
     let clicked = ui.button(toolbar_label(id, text, icon, mode));
-    if show_tooltips && !tooltip.is_empty() && ui.is_item_hovered() {
+    if let Some(tooltip) = tooltip
+        && !tooltip.is_empty()
+        && ui.is_item_hovered()
+    {
         ui.tooltip_text(tooltip);
     }
     clicked
@@ -43,12 +45,11 @@ fn toolbar_toggle_button(
     text: &str,
     icon: Option<&str>,
     mode: ToolbarIconMode,
-    show_tooltips: bool,
-    tooltip: &str,
+    tooltip: Option<&str>,
     active: bool,
 ) -> bool {
     if !active {
-        return toolbar_button(ui, id, text, icon, mode, show_tooltips, tooltip);
+        return toolbar_button(ui, id, text, icon, mode, tooltip);
     }
 
     let style = ui.clone_style();
@@ -61,7 +62,7 @@ fn toolbar_toggle_button(
         StyleColor::ButtonActive,
         style.color(StyleColor::HeaderActive),
     );
-    toolbar_button(ui, id, text, icon, mode, show_tooltips, tooltip)
+    toolbar_button(ui, id, text, icon, mode, tooltip)
 }
 
 pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_backend: bool) {
@@ -99,8 +100,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
             "Places",
             state.ui.config.toolbar.icons.places.as_deref(),
             icon_mode,
-            show_tooltips,
-            "Places",
+            show_tooltips.then_some("Places"),
             places_active,
         ) {
             match state.ui.config.layout {
@@ -147,8 +147,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
             "Refresh",
             state.ui.config.toolbar.icons.refresh.as_deref(),
             icon_mode,
-            show_tooltips,
-            "Refresh (F5)",
+            show_tooltips.then_some("Refresh (F5)"),
         ) {
             let _ = state.core.handle_event(CoreEvent::Refresh);
         }
@@ -160,8 +159,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
                 "New Folder",
                 state.ui.config.toolbar.icons.new_folder.as_deref(),
                 icon_mode,
-                show_tooltips,
-                "New folder",
+                show_tooltips.then_some("New folder"),
             ) {
                 match state.ui.config.layout {
                     LayoutStyle::Standard => {
@@ -207,10 +205,8 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
                     state.ui.operations.new_folder.name.clear();
                 }
 
-                if ok || submitted {
-                    if super::popups::try_create_new_folder_in_cwd(state) {
-                        state.ui.operations.new_folder.inline_active = false;
-                    }
+                if (ok || submitted) && super::popups::try_create_new_folder_in_cwd(state) {
+                    state.ui.operations.new_folder.inline_active = false;
                 }
 
                 if let Some(err) = &state.ui.operations.new_folder.error {
@@ -237,8 +233,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
                 "List",
                 None,
                 ToolbarIconMode::Text,
-                show_tooltips,
-                "List view",
+                show_tooltips.then_some("List view"),
                 list_active,
             ) {
                 apply_file_list_view_from_ui(state, FileListViewMode::List, has_thumbnail_backend);
@@ -252,8 +247,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
                     "Thumbs",
                     None,
                     ToolbarIconMode::Text,
-                    show_tooltips,
-                    "Thumbnails list view",
+                    show_tooltips.then_some("Thumbnails list view"),
                     thumbs_active,
                 ) {
                     apply_file_list_view_from_ui(
@@ -272,8 +266,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
                     "Grid",
                     None,
                     ToolbarIconMode::Text,
-                    show_tooltips,
-                    "Thumbnails grid view",
+                    show_tooltips.then_some("Thumbnails grid view"),
                     grid_active,
                 ) {
                     apply_file_list_view_from_ui(
@@ -411,8 +404,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
                 "Columns",
                 state.ui.config.toolbar.icons.columns.as_deref(),
                 icon_mode,
-                show_tooltips,
-                "Columns",
+                show_tooltips.then_some("Columns"),
             ) {
                 ui.open_popup("##fb_columns_popup");
             }
@@ -424,8 +416,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
             "Options",
             state.ui.config.toolbar.icons.options.as_deref(),
             icon_mode,
-            show_tooltips,
-            "Options",
+            show_tooltips.then_some("Options"),
         ) {
             ui.open_popup("##fb_options");
         }
@@ -445,8 +436,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
             "Places",
             state.ui.config.toolbar.icons.places.as_deref(),
             icon_mode,
-            show_tooltips,
-            "Places",
+            show_tooltips.then_some("Places"),
             places_active,
         ) {
             match state.ui.config.layout {
@@ -467,8 +457,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
                 "New Folder",
                 state.ui.config.toolbar.icons.new_folder.as_deref(),
                 icon_mode,
-                show_tooltips,
-                "New folder",
+                show_tooltips.then_some("New folder"),
             ) {
                 match state.ui.config.layout {
                     LayoutStyle::Standard => {
@@ -514,10 +503,8 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
                     state.ui.operations.new_folder.name.clear();
                 }
 
-                if ok || submitted {
-                    if super::popups::try_create_new_folder_in_cwd(state) {
-                        state.ui.operations.new_folder.inline_active = false;
-                    }
+                if (ok || submitted) && super::popups::try_create_new_folder_in_cwd(state) {
+                    state.ui.operations.new_folder.inline_active = false;
                 }
 
                 if let Some(err) = &state.ui.operations.new_folder.error {
@@ -715,10 +702,10 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
             .is_some_and(|p| *p != state.core.cwd);
         {
             let _disabled = ui.begin_disabled_with_cond(!can_reset);
-            if ui.button(reset_label) {
-                if let Some(p) = state.ui.runtime.opened_cwd.clone() {
-                    let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
-                }
+            if ui.button(reset_label)
+                && let Some(p) = state.ui.runtime.opened_cwd.clone()
+            {
+                let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
             }
         }
         if ui.is_item_hovered() {
@@ -873,8 +860,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
             view_list_label,
             None,
             ToolbarIconMode::Text,
-            show_tooltips,
-            "File List",
+            show_tooltips.then_some("File List"),
             list_active,
         ) {
             apply_file_list_view_from_ui(state, FileListViewMode::List, has_thumbnail_backend);
@@ -888,8 +874,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
                 view_thumbs_label,
                 None,
                 ToolbarIconMode::Text,
-                show_tooltips,
-                "Thumbnails List",
+                show_tooltips.then_some("Thumbnails List"),
                 thumbs_active,
             ) {
                 apply_file_list_view_from_ui(
@@ -908,8 +893,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
                 view_grid_label,
                 None,
                 ToolbarIconMode::Text,
-                show_tooltips,
-                "Thumbnails Grid",
+                show_tooltips.then_some("Thumbnails Grid"),
                 grid_active,
             ) {
                 apply_file_list_view_from_ui(state, FileListViewMode::Grid, has_thumbnail_backend);
@@ -954,16 +938,16 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
     ui.set_next_item_width(ui.content_region_avail_width().max(80.0));
     let _search_changed = ui.input_text("##search", &mut state.core.search).build();
 
-    if !breadcrumbs_mode {
-        if let Some(p) = path_bar::draw_breadcrumbs(
+    if !breadcrumbs_mode
+        && let Some(p) = path_bar::draw_breadcrumbs(
             ui,
             state,
             state.ui.config.breadcrumbs_max_segments,
             true,
             false,
-        ) {
-            let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
-        }
+        )
+    {
+        let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
     }
 
     ui.separator();

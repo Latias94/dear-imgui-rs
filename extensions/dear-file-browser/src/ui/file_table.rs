@@ -3,7 +3,9 @@ use std::borrow::Cow;
 #[cfg(test)]
 use crate::core::DialogMode;
 use crate::core::{LayoutStyle, SortBy};
-use crate::dialog_core::{CoreEvent, CoreEventOutcome, DirEntry, EntryId, Modifiers};
+use crate::dialog_core::{
+    CoreEvent, CoreEventOutcome, DirEntry, EntryId, Modifiers, igfd_type_dots_to_extract,
+};
 use crate::dialog_state::{
     ClipboardOp, FileDialogState, FileDialogUiState, FileListDataColumn, FileListViewMode,
     HeaderStyle,
@@ -30,7 +32,7 @@ pub(in crate::ui) use columns::{
 
 use columns::list_column_layout as list_column_layout_impl;
 use columns::{
-    igfd_type_dots_to_extract, resolved_data_column_weight, resolved_preview_column_weight,
+    resolved_data_column_weight, resolved_preview_column_weight,
     sync_runtime_column_order_from_table, sync_runtime_column_weights_from_table,
     type_extension_by_dot_count,
 };
@@ -64,7 +66,7 @@ fn ellipsize_text<'a>(ui: &Ui, text: &'a str, max_w: f32) -> Cow<'a, str> {
     let mut lo = 0usize;
     let mut hi = indices.len().saturating_sub(1);
     while lo < hi {
-        let mid = (lo + hi + 1) / 2;
+        let mid = (lo + hi).div_ceil(2);
         let s = &text[..indices[mid]];
         let sw = ui.calc_text_size(s)[0];
         if sw <= target {
@@ -220,22 +222,22 @@ fn draw_file_list_window_context_menu(
         return;
     }
 
-    if state.ui.config.new_folder_enabled {
-        if ui.menu_item_enabled_selected("New Folder", None::<&str>, false, true) {
-            match state.ui.config.layout {
-                LayoutStyle::Standard => {
-                    state.ui.operations.new_folder.inline_active = true;
-                }
-                LayoutStyle::Minimal => {
-                    state.ui.operations.new_folder.open_next = true;
-                }
+    if state.ui.config.new_folder_enabled
+        && ui.menu_item_enabled_selected("New Folder", None::<&str>, false, true)
+    {
+        match state.ui.config.layout {
+            LayoutStyle::Standard => {
+                state.ui.operations.new_folder.inline_active = true;
             }
-            state.ui.operations.new_folder.name.clear();
-            state.ui.operations.new_folder.error = None;
-            state.ui.operations.new_folder.focus_next = true;
-            ui.close_current_popup();
-            return;
+            LayoutStyle::Minimal => {
+                state.ui.operations.new_folder.open_next = true;
+            }
         }
+        state.ui.operations.new_folder.name.clear();
+        state.ui.operations.new_folder.error = None;
+        state.ui.operations.new_folder.focus_next = true;
+        ui.close_current_popup();
+        return;
     }
 
     ui.separator();
@@ -410,44 +412,42 @@ fn draw_file_table_view(
 
     table.build(|ui| {
         // Apply ImGui sort specs (single primary sort)
-        if let Some(mut specs) = ui.table_get_sort_specs() {
-            if specs.is_dirty() {
-                let extension_sort_by =
-                    if matches!(state.ui.config.header_style, HeaderStyle::IgfdClassic) {
-                        SortBy::Type
-                    } else {
-                        SortBy::Extension
-                    };
-                if let Some(s) = specs.iter().next() {
-                    let (by, asc) = match (s.column_index, s.sort_direction) {
-                        (i, SortDirection::Ascending) if i == layout.name => (SortBy::Name, true),
-                        (i, SortDirection::Descending) if i == layout.name => (SortBy::Name, false),
-                        (i, SortDirection::Ascending) if layout.extension == Some(i) => {
-                            (extension_sort_by, true)
-                        }
-                        (i, SortDirection::Descending) if layout.extension == Some(i) => {
-                            (extension_sort_by, false)
-                        }
-                        (i, SortDirection::Ascending) if layout.size == Some(i) => {
-                            (SortBy::Size, true)
-                        }
-                        (i, SortDirection::Descending) if layout.size == Some(i) => {
-                            (SortBy::Size, false)
-                        }
-                        (i, SortDirection::Ascending) if layout.modified == Some(i) => {
-                            (SortBy::Modified, true)
-                        }
-                        (i, SortDirection::Descending) if layout.modified == Some(i) => {
-                            (SortBy::Modified, false)
-                        }
-                        _ => (state.core.sort_by, state.core.sort_ascending),
-                    };
-                    state.core.sort_by = by;
-                    state.core.sort_ascending = asc;
-                    state.tick_scan();
-                }
-                specs.clear_dirty(ui);
+        if let Some(mut specs) = ui.table_get_sort_specs()
+            && specs.is_dirty()
+        {
+            let extension_sort_by =
+                if matches!(state.ui.config.header_style, HeaderStyle::IgfdClassic) {
+                    SortBy::Type
+                } else {
+                    SortBy::Extension
+                };
+            if let Some(s) = specs.iter().next() {
+                let (by, asc) = match (s.column_index, s.sort_direction) {
+                    (i, SortDirection::Ascending) if i == layout.name => (SortBy::Name, true),
+                    (i, SortDirection::Descending) if i == layout.name => (SortBy::Name, false),
+                    (i, SortDirection::Ascending) if layout.extension == Some(i) => {
+                        (extension_sort_by, true)
+                    }
+                    (i, SortDirection::Descending) if layout.extension == Some(i) => {
+                        (extension_sort_by, false)
+                    }
+                    (i, SortDirection::Ascending) if layout.size == Some(i) => (SortBy::Size, true),
+                    (i, SortDirection::Descending) if layout.size == Some(i) => {
+                        (SortBy::Size, false)
+                    }
+                    (i, SortDirection::Ascending) if layout.modified == Some(i) => {
+                        (SortBy::Modified, true)
+                    }
+                    (i, SortDirection::Descending) if layout.modified == Some(i) => {
+                        (SortBy::Modified, false)
+                    }
+                    _ => (state.core.sort_by, state.core.sort_ascending),
+                };
+                state.core.sort_by = by;
+                state.core.sort_ascending = asc;
+                state.tick_scan();
             }
+            specs.clear_dirty(ui);
         }
 
         if ui.is_window_focused() && !ui.io().want_text_input() {
@@ -581,10 +581,10 @@ fn draw_file_table_view(
                                 }
                             }
 
-                            if ui.is_item_hovered() {
-                                if let Some(t) = visual.tooltip.as_deref() {
-                                    ui.tooltip_text(t);
-                                }
+                            if ui.is_item_hovered()
+                                && let Some(t) = visual.tooltip.as_deref()
+                            {
+                                ui.tooltip_text(t);
                             }
 
                             if let Some(_popup) = ui.begin_popup_context_item() {
@@ -863,7 +863,7 @@ fn draw_file_grid_view(
                             let text_pos = [label_min[0], text_y];
                             let col = visual
                                 .text_color
-                                .map(|c| dear_imgui_rs::Color::from_array(c))
+                                .map(dear_imgui_rs::Color::from_array)
                                 .unwrap_or_else(|| dear_imgui_rs::Color::rgb(1.0, 1.0, 1.0));
                             let _font = visual.font_id.map(|id| ui.push_font(id));
                             {
@@ -879,10 +879,10 @@ fn draw_file_grid_view(
                                 handle_entry_click(ui, state, id);
                             }
 
-                            if ui.is_item_hovered() {
-                                if let Some(t) = visual.tooltip.as_deref() {
-                                    ui.tooltip_text(t);
-                                }
+                            if ui.is_item_hovered()
+                                && let Some(t) = visual.tooltip.as_deref()
+                            {
+                                ui.tooltip_text(t);
                             }
 
                             if let Some(_popup) = ui.begin_popup_context_item() {

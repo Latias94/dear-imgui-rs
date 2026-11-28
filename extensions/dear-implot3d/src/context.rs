@@ -50,9 +50,10 @@ impl Plot3DContext {
             ctx
         });
         if ctx.is_null() {
-            return Err(dear_imgui_rs::ImGuiError::context_creation(
-                "ImPlot3D_CreateContext returned null",
-            ));
+            return Err(dear_imgui_rs::ContextError::Creation {
+                reason: "ImPlot3D_CreateContext returned null".into(),
+            }
+            .into());
         }
 
         Ok(Self {
@@ -238,14 +239,16 @@ mod tests {
         unsafe { sys::ImPlot3D_SetCurrentContext(plot.raw) };
         drop(imgui);
 
-        assert_eq!(
+        assert!(matches!(
             plot.imgui_binding.try_with_bound_context(|| ()),
-            Err(dear_imgui_rs::ContextBindingError::NativeDestroyed)
-        );
+            Err(dear_imgui_rs::ContextError::Binding(
+                dear_imgui_rs::error::context::BindingKind::NativeDestroyed
+            ))
+        ));
         std::thread::spawn(|| {
             assert!(matches!(
                 dear_imgui_rs::ContextThreadLease::acquire(),
-                Err(dear_imgui_rs::ImGuiError::ContextThreadConflict)
+                Err(dear_imgui_rs::ContextError::ThreadConflict)
             ))
         })
         .join()

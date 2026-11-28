@@ -515,33 +515,6 @@ pub(crate) fn plot_spec_with_style(
     spec
 }
 
-#[cfg(test)]
-mod layout_tests {
-    use super::{PlotDataLayout, PlotDataOffset, PlotDataStride, plot_spec_from};
-
-    #[test]
-    fn data_layout_allows_signed_sample_offsets() {
-        let layout = PlotDataLayout::DEFAULT.with_offset(PlotDataOffset::samples(-8));
-        let spec = plot_spec_from(None, 0, layout);
-        assert_eq!(spec.Offset, -8);
-        assert_eq!(spec.Stride, crate::IMPLOT_AUTO);
-    }
-
-    #[test]
-    fn data_stride_bytes_are_positive() {
-        let stride = PlotDataStride::bytes(16);
-        let layout = PlotDataLayout::DEFAULT.with_stride(stride);
-        let spec = plot_spec_from(None, 0, layout);
-        assert_eq!(spec.Stride, 16);
-    }
-
-    #[test]
-    #[should_panic(expected = "requires a non-zero stride")]
-    fn zero_data_stride_panics_before_ffi() {
-        let _ = PlotDataStride::bytes(0);
-    }
-}
-
 /// Universal plot builder that can create any plot type
 pub struct PlotBuilder<'a> {
     plot_type: PlotType<'a>,
@@ -741,5 +714,32 @@ impl<'a> PlotBuilder<'a> {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::{PlotDataLayout, PlotDataOffset, PlotDataStride, plot_spec_from};
+
+    #[test]
+    fn data_layout_allows_signed_sample_offsets() {
+        let layout = PlotDataLayout::DEFAULT.with_offset(PlotDataOffset::samples(-8));
+        let spec = plot_spec_from(None, 0, layout);
+        assert_eq!(spec.Offset, -8);
+        assert_eq!(spec.Stride, crate::IMPLOT_AUTO);
+    }
+
+    #[test]
+    fn data_stride_bytes_are_positive() {
+        let stride = PlotDataStride::bytes(16);
+        let layout = PlotDataLayout::DEFAULT.with_stride(stride);
+        let spec = plot_spec_from(None, 0, layout);
+        assert_eq!(spec.Stride, 16);
+    }
+
+    #[test]
+    #[should_panic(expected = "requires a non-zero stride")]
+    fn zero_data_stride_panics_before_ffi() {
+        let _ = PlotDataStride::bytes(0);
     }
 }

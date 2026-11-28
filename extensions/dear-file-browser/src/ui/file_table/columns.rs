@@ -1,4 +1,3 @@
-use crate::core::FileFilter;
 use crate::dialog_state::{
     FileDialogState, FileListColumnsConfig, FileListDataColumn, HeaderStyle,
 };
@@ -22,38 +21,7 @@ pub(in crate::ui) fn extension_ui_label(state: &FileDialogState) -> &'static str
     }
 }
 
-pub(super) fn igfd_type_dots_to_extract(active_filter: Option<&FileFilter>) -> usize {
-    let Some(filter) = active_filter else {
-        return 1;
-    };
-    let mut max_dots = 1usize;
-    for token in &filter.extensions {
-        let t = token.trim();
-        if t.is_empty() {
-            continue;
-        }
-        if is_regex_token(t) {
-            continue;
-        }
-        let dot_count = t.as_bytes().iter().filter(|&&b| b == b'.').count();
-        let token_dots = if t.contains('*') || t.contains('?') {
-            dot_count
-        } else if t.starts_with('.') {
-            dot_count
-        } else {
-            dot_count.saturating_add(1)
-        };
-        max_dots = max_dots.max(token_dots);
-    }
-    max_dots.max(1)
-}
-
-fn is_regex_token(token: &str) -> bool {
-    let t = token.trim();
-    t.starts_with("((") && t.ends_with("))") && t.len() >= 4
-}
-
-pub(super) fn type_extension_by_dot_count<'a>(name: &'a str, dots_to_extract: usize) -> &'a str {
+pub(super) fn type_extension_by_dot_count(name: &str, dots_to_extract: usize) -> &str {
     if dots_to_extract == 0 {
         return name.find('.').map(|i| &name[i..]).unwrap_or("");
     }
@@ -181,20 +149,20 @@ pub(in crate::ui) fn list_column_layout(
         }
     }
 
-    let mut index = if show_preview { 1 } else { 0 };
+    let first_data_column = usize::from(show_preview);
     let mut name = None;
     let mut extension = None;
     let mut size = None;
     let mut modified = None;
 
-    for column in &data_columns {
+    for (offset, column) in data_columns.iter().enumerate() {
+        let index = TableColumnIndex::new(first_data_column + offset);
         match column {
-            FileListDataColumn::Name => name = Some(TableColumnIndex::new(index)),
-            FileListDataColumn::Extension => extension = Some(TableColumnIndex::new(index)),
-            FileListDataColumn::Size => size = Some(TableColumnIndex::new(index)),
-            FileListDataColumn::Modified => modified = Some(TableColumnIndex::new(index)),
+            FileListDataColumn::Name => name = Some(index),
+            FileListDataColumn::Extension => extension = Some(index),
+            FileListDataColumn::Size => size = Some(index),
+            FileListDataColumn::Modified => modified = Some(index),
         }
-        index += 1;
     }
 
     ListColumnLayout {
@@ -417,27 +385,26 @@ pub(super) fn sync_runtime_column_weights_from_table(
         return;
     }
 
-    if show_preview {
-        if let Some(weight) = table_column_stretch_weight(table, TableColumnIndex::ZERO) {
-            config.weight_overrides.preview = Some(weight);
-        }
+    if show_preview && let Some(weight) = table_column_stretch_weight(table, TableColumnIndex::ZERO)
+    {
+        config.weight_overrides.preview = Some(weight);
     }
     if let Some(weight) = table_column_stretch_weight(table, layout.name) {
         config.weight_overrides.name = Some(weight);
     }
-    if let Some(idx) = layout.extension {
-        if let Some(weight) = table_column_stretch_weight(table, idx) {
-            config.weight_overrides.extension = Some(weight);
-        }
+    if let Some(idx) = layout.extension
+        && let Some(weight) = table_column_stretch_weight(table, idx)
+    {
+        config.weight_overrides.extension = Some(weight);
     }
-    if let Some(idx) = layout.size {
-        if let Some(weight) = table_column_stretch_weight(table, idx) {
-            config.weight_overrides.size = Some(weight);
-        }
+    if let Some(idx) = layout.size
+        && let Some(weight) = table_column_stretch_weight(table, idx)
+    {
+        config.weight_overrides.size = Some(weight);
     }
-    if let Some(idx) = layout.modified {
-        if let Some(weight) = table_column_stretch_weight(table, idx) {
-            config.weight_overrides.modified = Some(weight);
-        }
+    if let Some(idx) = layout.modified
+        && let Some(weight) = table_column_stretch_weight(table, idx)
+    {
+        config.weight_overrides.modified = Some(weight);
     }
 }

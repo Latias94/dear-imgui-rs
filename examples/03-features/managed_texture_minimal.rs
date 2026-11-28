@@ -5,7 +5,7 @@ use dear_app::{
     RunError, run,
 };
 use dear_imgui_rs::{
-    Condition, ManagedTextureId, OwnedTextureData, TextureDataError, TextureFormat, TextureRegion,
+    Condition, ManagedTextureId, OwnedTextureData, TextureError, TextureFormat, TextureRegion,
     TextureSubresource,
 };
 
@@ -28,7 +28,7 @@ struct ManagedTextureApp {
 }
 
 impl ManagedTextureApp {
-    fn texture_data(revision: u32) -> Result<OwnedTextureData, TextureDataError> {
+    fn texture_data(revision: u32) -> Result<OwnedTextureData, TextureError> {
         OwnedTextureData::from_pixels(
             TextureFormat::RGBA32,
             TEXTURE_WIDTH,

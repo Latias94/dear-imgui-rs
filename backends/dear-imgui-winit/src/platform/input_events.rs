@@ -154,10 +154,7 @@ impl WinitPlatformControl {
             .borrow()
             .as_ref()
             .filter(|runtime| !runtime.is_released())
-            .cloned();
-        let Some(runtime) = runtime else {
-            return None;
-        };
+            .cloned()?;
         Some(runtime.note_window_focus(window_id, focused, context))
     }
 
@@ -290,10 +287,8 @@ impl WinitPlatform {
         };
         let needs_frame = !matches!(event, WindowEvent::Destroyed)
             && (!matches!(event, WindowEvent::RedrawRequested) || !snapshot.target.is_main);
-        if needs_frame {
-            if let Ok(main) = self.control.attached_window() {
-                main.request_redraw();
-            }
+        if needs_frame && let Ok(main) = self.control.attached_window() {
+            main.request_redraw();
         }
         let platform_action = match event {
             WindowEvent::CloseRequested if snapshot.target.is_main => {

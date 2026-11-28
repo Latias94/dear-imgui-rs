@@ -685,6 +685,46 @@ fn prepare_draw_commands<'draw>(
     Ok(commands)
 }
 
+fn setup_render_state(device: &Device, state: &RenderState<'_>) {
+    unsafe {
+        device.cmd_bind_pipeline(
+            state.command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            state.pipeline,
+        );
+        device.cmd_set_viewport(state.command_buffer, 0, &[state.viewport]);
+        device.cmd_push_constants(
+            state.command_buffer,
+            state.pipeline_layout,
+            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+            0,
+            any_as_u8_slice(&state.push_constants),
+        );
+        if state.has_geometry {
+            device.cmd_bind_vertex_buffers(
+                state.command_buffer,
+                0,
+                &[state.mesh.vertices.buffer],
+                &[0],
+            );
+            device.cmd_bind_index_buffer(
+                state.command_buffer,
+                state.mesh.indices.buffer,
+                0,
+                vk::IndexType::UINT16,
+            );
+        }
+        device.cmd_bind_descriptor_sets(
+            state.command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            state.pipeline_layout,
+            1,
+            &[state.linear_sampler_set],
+            &[],
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -963,45 +1003,5 @@ mod tests {
             texture_descriptor_set(&textures, 0, TextureId::from(41_u64)),
             Err(RendererError::BadTextureId(41))
         ));
-    }
-}
-
-fn setup_render_state(device: &Device, state: &RenderState<'_>) {
-    unsafe {
-        device.cmd_bind_pipeline(
-            state.command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            state.pipeline,
-        );
-        device.cmd_set_viewport(state.command_buffer, 0, &[state.viewport]);
-        device.cmd_push_constants(
-            state.command_buffer,
-            state.pipeline_layout,
-            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-            0,
-            any_as_u8_slice(&state.push_constants),
-        );
-        if state.has_geometry {
-            device.cmd_bind_vertex_buffers(
-                state.command_buffer,
-                0,
-                &[state.mesh.vertices.buffer],
-                &[0],
-            );
-            device.cmd_bind_index_buffer(
-                state.command_buffer,
-                state.mesh.indices.buffer,
-                0,
-                vk::IndexType::UINT16,
-            );
-        }
-        device.cmd_bind_descriptor_sets(
-            state.command_buffer,
-            vk::PipelineBindPoint::GRAPHICS,
-            state.pipeline_layout,
-            1,
-            &[state.linear_sampler_set],
-            &[],
-        );
     }
 }

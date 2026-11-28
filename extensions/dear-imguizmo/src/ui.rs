@@ -136,6 +136,10 @@ impl<'ui> GizmoUi<'ui> {
         });
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Preserves the public draw call with separate transforms, grid parameters, and colors"
+    )]
     pub fn draw_grid_custom_color<T: Mat4Like>(
         &self,
         view: &T,
@@ -288,6 +292,10 @@ impl<'ui> GizmoUi<'ui> {
     }
 
     /// Manipulate using the selected draw list. Each frame starts on ImGuizmo's helper window.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Mirrors ImGuizmo::Manipulate and preserves the separate optional edit inputs"
+    )]
     pub fn manipulate<T: Mat4Like>(
         &self,
         view: &T,
@@ -359,6 +367,10 @@ impl<'ui> GizmoUi<'ui> {
     }
 
     /// Extended view manipulator that also takes projection and edits a target matrix.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Mirrors the native camera manipulator overload and preserves its public call shape"
+    )]
     pub fn view_manipulate_with_camera<T: Mat4Like>(
         &self,
         view: &mut T,

@@ -1,7 +1,7 @@
 use crate::{RendererError, RendererResult};
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextBinding, ContextTeardown,
+    ContextBinding, ContextError, ContextTeardown,
     render::{PendingFrame, ReconciledFrame, SynchronousRendererConsumer},
     sys,
 };
@@ -107,7 +107,7 @@ impl RendererPublication {
 }
 
 impl ContextAttachment for RendererPublication {
-    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextAttachmentTeardownError> {
+    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         context.with_bound_context(|| unsafe { self.clear_owned_raw_state_bound() });
         Ok(())
     }
@@ -322,7 +322,7 @@ pub struct WgpuRenderer {
     /// Sole managed-texture consumer generation owned by this renderer.
     pub(super) renderer_consumer: Option<SynchronousRendererConsumer>,
     #[cfg(any(feature = "mv-log", feature = "tracing"))]
-    pub(super) last_framebuffer_mismatch: Cell<Option<([u32; 2], [u32; 2], bool)>>,
+    pub(super) last_framebuffer_mismatch: Cell<Option<super::render::FramebufferMismatch>>,
 }
 
 impl WgpuRenderer {

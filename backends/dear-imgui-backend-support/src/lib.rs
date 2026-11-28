@@ -8,9 +8,7 @@ mod color_scissor;
 mod error;
 mod texture;
 
-pub use callback::{
-    DrawCallbackDispatcher, ScopedRenderState, ScopedRenderStateError, StandardDrawCallback,
-};
+pub use callback::{DrawCallbackDispatcher, ScopedRenderState, StandardDrawCallback};
 pub use color_scissor::{
     SRGB_DECODE_THRESHOLD, SRGB_EXPONENT, SRGB_LINEAR_DIVISOR, SRGB_OFFSET, SRGB_SCALE,
     compute_scissor_rect, srgb_to_linear_channel, srgb_vertex_color_to_linear,

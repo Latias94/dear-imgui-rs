@@ -1,6 +1,6 @@
 use crate::{EditorConfig, EditorConfigSnapshot, NodeEditorStyle, StyleColor, sys};
 use dear_imgui_rs::{
-    Context as ImGuiContext, ContextBinding, ContextId, ContextThreadLease,
+    Context as ImGuiContext, ContextBinding, ContextError, ContextId, ContextThreadLease,
     ffi::{RawBox, RawCString},
 };
 use std::{
@@ -15,7 +15,7 @@ pub enum NodeEditorError {
     #[error("imgui-node-editor CreateEditor returned null")]
     CreateEditorFailed,
     #[error(transparent)]
-    ThreadLease(#[from] dear_imgui_rs::ImGuiError),
+    ThreadLease(#[from] ContextError),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -365,7 +365,7 @@ mod tests {
             fn quiesce(
                 &self,
                 _context: &dear_imgui_rs::ContextTeardown<'_>,
-            ) -> Result<(), dear_imgui_rs::ContextAttachmentTeardownError> {
+            ) -> Result<(), dear_imgui_rs::ContextError> {
                 drop(self.editor.borrow_mut().take());
                 self.quiesced.set(true);
                 Ok(())

@@ -116,7 +116,7 @@ struct DockWindows {
 }
 
 impl DockWindows {
-    fn new() -> Result<Self, WindowKeyError> {
+    fn new() -> Result<Self, ContextError> {
         Ok(Self {
             james_1: WindowKey::new("james-1", "James_1")?,
             james_2: WindowKey::new("james-2", "James_2")?,
@@ -396,7 +396,7 @@ impl AppWindow {
             }
         }
 
-        self.imgui.platform.prepare_render(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(ui, &self.window)?;
         let pending_frame = self
             .imgui
             .context

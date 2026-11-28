@@ -1,8 +1,8 @@
 use std::cell::{Cell, RefCell};
 
 use dear_imgui_rs::{
-    ContextAttachment, ContextAttachmentTeardownError, ContextBinding, ContextDestroyed, ContextId,
-    ContextTeardown, ContextThreadLease,
+    ContextAttachment, ContextBinding, ContextDestroyed, ContextError, ContextId, ContextTeardown,
+    ContextThreadLease,
 };
 use dear_imgui_test_engine_sys as sys;
 
@@ -143,14 +143,14 @@ impl AttachmentControl {
         &self,
         operation: &'static str,
         status: sys::ImGuiTestEngineStatus,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         if let Err(error) = ffi_status(operation, status) {
             let message = error.to_string();
             let mut teardown_error = self.teardown_error.borrow_mut();
             if teardown_error.is_none() {
                 *teardown_error = Some(error);
             }
-            return Err(ContextAttachmentTeardownError::new(message));
+            return Err(ContextError::attachment_teardown(message));
         }
         Ok(())
     }
@@ -179,7 +179,7 @@ pub(super) fn drop_native_engine(raw: *mut sys::ImGuiTestEngine, lease: ContextT
 }
 
 impl ContextAttachment for AttachmentControl {
-    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextAttachmentTeardownError> {
+    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextError> {
         if self.attachment.get() != AttachmentState::Attached {
             return Ok(());
         }

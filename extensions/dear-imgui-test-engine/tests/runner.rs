@@ -61,15 +61,13 @@ fn no_error(_: &dear_imgui_rs::Ui, _: u64) -> Result<RunnerControl, Infallible> 
     Ok(RunnerControl::Continue)
 }
 
+type PresentationTrace = RefCell<Vec<(u64, &'static str)>>;
+
 unsafe extern "C" fn record_presentation_trace(
     event: raw::ImGuiTestEnginePresentationEvent,
     user_data: *mut c_void,
 ) {
-    let Some(events) = (unsafe {
-        user_data
-            .cast::<RefCell<Vec<(u64, &'static str)>>>()
-            .as_ref()
-    }) else {
+    let Some(events) = (unsafe { user_data.cast::<PresentationTrace>().as_ref() }) else {
         return;
     };
     let phase = match event {
@@ -107,10 +105,7 @@ unsafe extern "C" fn arm_interactive_capture_after_post_swap(
     }
 }
 
-fn set_presentation_trace(
-    engine: &TestEngine,
-    events: Option<&Rc<RefCell<Vec<(u64, &'static str)>>>>,
-) {
+fn set_presentation_trace(engine: &TestEngine, events: Option<&Rc<PresentationTrace>>) {
     let (callback, user_data) = match events {
         Some(events) => (
             Some(record_presentation_trace as unsafe extern "C" fn(_, _)),
@@ -350,8 +345,11 @@ impl Drop for PanickingPayload {
 }
 
 #[cfg(feature = "capture")]
+type CapturedRegion = (u32, [i32; 2], [u32; 2], usize);
+
+#[cfg(feature = "capture")]
 struct CapturingDriver {
-    captures: Rc<RefCell<Vec<(u32, [i32; 2], [u32; 2], usize)>>>,
+    captures: Rc<RefCell<Vec<CapturedRegion>>>,
     last_presented: Rc<Cell<u64>>,
     frame_fault: DriverFault,
     fault: CaptureFault,

@@ -1,5 +1,5 @@
 use super::{
-    TextureData, TextureDataError, TextureFormat, TextureId, TextureRect, TextureStatus,
+    TextureData, TextureError, TextureFormat, TextureId, TextureRect, TextureStatus,
     TextureSubresource,
 };
 
@@ -143,9 +143,9 @@ impl<'texture> ManagedTextureMut<'texture> {
     ///
     /// # Errors
     ///
-    /// Returns [`TextureDataError`] when the texture is not mutable, its layout is invalid, the
+    /// Returns [`TextureError`] when the texture is not mutable, its layout is invalid, the
     /// payload length is not exact, or a live full update is not natively representable.
-    pub fn replace_pixels(&mut self, pixels: &[u8]) -> Result<(), TextureDataError> {
+    pub fn replace_pixels(&mut self, pixels: &[u8]) -> Result<(), TextureError> {
         self.texture.replace_pixels(pixels)
     }
 
@@ -158,12 +158,12 @@ impl<'texture> ManagedTextureMut<'texture> {
     ///
     /// # Errors
     ///
-    /// Returns [`TextureDataError`] when the texture is not mutable, the region is invalid, the
+    /// Returns [`TextureError`] when the texture is not mutable, the region is invalid, the
     /// row pitch or payload length is wrong, or the native update rectangle is not representable.
     pub fn update_subresource(
         &mut self,
         update: TextureSubresource<'_>,
-    ) -> Result<(), TextureDataError> {
+    ) -> Result<(), TextureError> {
         self.texture.update_subresource(update)
     }
 

@@ -13,7 +13,7 @@
 use std::ptr::NonNull;
 
 use crate::render::snapshot::{SnapshotEpoch, TextureRequest};
-use crate::render::{DrawData, SnapshotError, SynchronousRendererConsumer};
+use crate::render::{DrawData, FrameError, SynchronousRendererConsumer};
 use crate::sys;
 
 use super::Context;
@@ -203,9 +203,7 @@ impl Context {
     }
 
     /// Begin a frame while returning detached-completion failures to the caller.
-    pub fn try_begin_frame(
-        &mut self,
-    ) -> Result<FrameToken<'_>, crate::render::RendererConsumerError> {
+    pub fn try_begin_frame(&mut self) -> Result<FrameToken<'_>, crate::FrameError> {
         let _ = self.try_frame()?;
         Ok(FrameToken {
             ctx: Some(self),
@@ -232,7 +230,7 @@ impl Context {
     /// documented panic behavior. This method makes the asynchronous renderer completion boundary
     /// fallible so event-loop and engine integrations can recover without a later panic.
     /// Successful calls follow the binding behavior of [`Self::frame`].
-    pub fn try_frame(&mut self) -> Result<&crate::ui::Ui, crate::render::RendererConsumerError> {
+    pub fn try_frame(&mut self) -> Result<&crate::ui::Ui, crate::FrameError> {
         let _guard = CTX_MUTEX.lock();
         let keep_current = !bound_context_scope_active();
         let bound = RawBoundContextGuard::bind(self.raw);
@@ -261,7 +259,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
             self.prepare_multi_viewport_new_frame_contract_unlocked("Context::try_frame()");
             crate::fonts::assert_no_font_atlas_texture_borrows((*io).Fonts, "Context::try_frame()");
             let renderer_has_textures =
-                ((*io).BackendFlags & sys::ImGuiBackendFlags_RendererHasTextures as i32) != 0;
+                ((*io).BackendFlags & sys::ImGuiBackendFlags_RendererHasTextures) != 0;
             crate::fonts::assert_font_atlas_renderer_mode(
                 (*io).Fonts,
                 renderer_has_textures,
@@ -288,9 +286,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         }
 
         let io = self.io_ptr(caller);
-        let requested = unsafe { (*io).ConfigFlags } & sys::ImGuiConfigFlags_DockingEnable as i32;
-        let active = unsafe { (*self.raw).ConfigFlagsCurrFrame }
-            & sys::ImGuiConfigFlags_DockingEnable as i32;
+        let requested = unsafe { (*io).ConfigFlags } & sys::ImGuiConfigFlags_DockingEnable;
+        let active =
+            unsafe { (*self.raw).ConfigFlagsCurrFrame } & sys::ImGuiConfigFlags_DockingEnable;
         assert_eq!(
             requested, active,
             "{caller} cannot change ConfigFlags::DOCKING_ENABLE after the first frame; Dear ImGui clears live dock nodes when docking is disabled and cannot restore them safely when it is re-enabled"
@@ -336,7 +334,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn try_render(
         &mut self,
         consumer: &SynchronousRendererConsumer,
-    ) -> Result<crate::render::PendingFrame<'_>, SnapshotError> {
+    ) -> Result<crate::render::PendingFrame<'_>, FrameError> {
         let (draw_data, epoch, requests) = self.prepare_synchronous_render(consumer, &mut None)?;
         Ok(crate::render::PendingFrame::new(
             self, draw_data, epoch, requests,
@@ -347,7 +345,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         &mut self,
         consumer: &SynchronousRendererConsumer,
         rendered: &mut Option<NonNull<DrawData>>,
-    ) -> Result<(NonNull<DrawData>, SnapshotEpoch, Vec<TextureRequest>), SnapshotError> {
+    ) -> Result<(NonNull<DrawData>, SnapshotEpoch, Vec<TextureRequest>), FrameError> {
         let _guard = CTX_MUTEX.lock();
         let _bound = RawBoundContextGuard::bind(self.raw);
         self.require_managed_renderer("Context::try_render()")?;
@@ -383,10 +381,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         self.render_raw_unlocked()
     }
 
-    fn require_managed_renderer(
-        &self,
-        caller: &'static str,
-    ) -> Result<(), crate::render::RendererConsumerError> {
+    fn require_managed_renderer(&self, caller: &'static str) -> Result<(), crate::FrameError> {
         if self
             .io()
             .backend_flags()
@@ -394,7 +389,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         {
             Ok(())
         } else {
-            Err(crate::render::RendererConsumerError::RendererTexturesUnavailable { caller })
+            Err(crate::FrameError::RendererTexturesUnavailable { caller })
         }
     }
 
@@ -437,8 +432,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn render_snapshot(
         &mut self,
         consumer: &crate::render::snapshot::DetachedRendererConsumer,
-    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
-    {
+    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::FrameError> {
         let _guard = CTX_MUTEX.lock();
         let _bound = RawBoundContextGuard::bind(self.raw);
         self.snapshot_hub.validate_consumer(consumer)?;
@@ -459,8 +453,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn render_platform_viewport_snapshot(
         &mut self,
         consumer: &crate::render::snapshot::DetachedRendererConsumer,
-    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
-    {
+    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::FrameError> {
         let _guard = CTX_MUTEX.lock();
         let _bound = RawBoundContextGuard::bind(self.raw);
         self.snapshot_hub.validate_consumer(consumer)?;
@@ -478,8 +471,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     pub fn platform_viewport_snapshot(
         &mut self,
         consumer: &crate::render::snapshot::DetachedRendererConsumer,
-    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
-    {
+    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::FrameError> {
         let _guard = CTX_MUTEX.lock();
         let _bound = RawBoundContextGuard::bind(self.raw);
         if self.frame_lifecycle_state_unlocked() != FrameLifecycleState::Rendered {
@@ -591,7 +583,7 @@ impl<'ctx> FrameToken<'ctx> {
     pub fn try_render(
         mut self,
         consumer: &SynchronousRendererConsumer,
-    ) -> Result<crate::render::PendingFrame<'ctx>, (Self, SnapshotError)> {
+    ) -> Result<crate::render::PendingFrame<'ctx>, (Self, FrameError)> {
         let context = self
             .ctx
             .as_deref_mut()
@@ -630,8 +622,7 @@ impl<'ctx> FrameToken<'ctx> {
     pub fn render_snapshot(
         mut self,
         consumer: &crate::render::snapshot::DetachedRendererConsumer,
-    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
-    {
+    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::FrameError> {
         self.require_unrendered()?;
         self.context_mut().render_snapshot(consumer)
     }
@@ -643,16 +634,15 @@ impl<'ctx> FrameToken<'ctx> {
     pub fn render_platform_viewport_snapshot(
         mut self,
         consumer: &crate::render::snapshot::DetachedRendererConsumer,
-    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
-    {
+    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::FrameError> {
         self.require_unrendered()?;
         self.context_mut()
             .render_platform_viewport_snapshot(consumer)
     }
 
-    fn require_unrendered(&self) -> Result<(), SnapshotError> {
+    fn require_unrendered(&self) -> Result<(), FrameError> {
         if self.rendered.is_some() {
-            return Err(SnapshotError::FrameAlreadyRendered);
+            return Err(FrameError::FrameAlreadyRendered);
         }
         Ok(())
     }

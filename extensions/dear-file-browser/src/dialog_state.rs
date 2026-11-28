@@ -14,9 +14,10 @@ use crate::thumbnails::{ThumbnailCache, ThumbnailCacheConfig};
 use std::sync::Arc;
 
 /// View mode for the file list region.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum FileListViewMode {
     /// Table-style list view (columns: name/size/modified, optional thumbnail preview column).
+    #[default]
     List,
     /// Table-style list view with thumbnails enabled and preview column shown.
     ///
@@ -64,7 +65,7 @@ impl FileListDataColumn {
 ///
 /// Values are interpreted as ImGui table stretch weights and must be finite and positive.
 /// When an override is `None`, the built-in heuristic weight is used.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct FileListColumnWeightOverrides {
     /// Preview (thumbnail) column weight.
     pub preview: Option<f32>,
@@ -76,18 +77,6 @@ pub struct FileListColumnWeightOverrides {
     pub size: Option<f32>,
     /// Modified column weight.
     pub modified: Option<f32>,
-}
-
-impl Default for FileListColumnWeightOverrides {
-    fn default() -> Self {
-        Self {
-            preview: None,
-            name: None,
-            extension: None,
-            size: None,
-            modified: None,
-        }
-    }
 }
 
 /// Column visibility configuration for list view.
@@ -336,12 +325,6 @@ fn parse_compact_weights(
         size: parse_compact_optional_weight(parts[3])?,
         modified: parse_compact_optional_weight(parts[4])?,
     })
-}
-
-impl Default for FileListViewMode {
-    fn default() -> Self {
-        Self::List
-    }
 }
 
 /// Alignment of the validation button row (Ok/Cancel).

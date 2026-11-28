@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import shlex
 import subprocess
 import sys
 import tomllib
@@ -163,21 +162,12 @@ def check_no_default_bindgen() -> None:
 
 
 def run_clippy(cargo_arguments: Sequence[str]) -> None:
-    """Run Clippy with the repository's explicit historical lint baseline."""
+    """Run Clippy with every warning denied."""
     arguments = _command_arguments(cargo_arguments)
     if "--" in arguments:
         raise VerificationError("run_contract.py owns the Clippy -- delimiter")
-    raw_lints = os.environ.get("CLIPPY_HISTORICAL_LINTS", "")
-    historical_lints = shlex.split(raw_lints)
-    if not historical_lints or len(historical_lints) % 2 != 0:
-        raise VerificationError("CLIPPY_HISTORICAL_LINTS must contain flag/value pairs")
-    if any(
-        historical_lints[index] != "-A"
-        for index in range(0, len(historical_lints), 2)
-    ):
-        raise VerificationError("CLIPPY_HISTORICAL_LINTS may contain only -A allowances")
     run(
-        ("cargo", "clippy", *arguments, "--", "-D", "warnings", *historical_lints),
+        ("cargo", "clippy", *arguments, "--", "-D", "warnings"),
         cwd=WORKSPACE_ROOT,
     )
 
@@ -491,7 +481,7 @@ def _build_parser() -> argparse.ArgumentParser:
     expected_failure.add_argument("command", nargs=argparse.REMAINDER)
 
     clippy = commands.add_parser(
-        "clippy", help="Run Clippy with the historical lint baseline"
+        "clippy", help="Run strict Clippy"
     )
     clippy.add_argument("cargo_arguments", nargs=argparse.REMAINDER)
 

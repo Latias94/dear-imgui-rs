@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use dear_imgui_rs::{
     BackendFlags, Context as ImGuiContext, ContextAttachment, ContextAttachmentLease,
-    ContextAttachmentRole, ContextAttachmentTeardownError, ContextTeardown, sys,
+    ContextAttachmentRole, ContextError, ContextTeardown, sys,
 };
 use glow::{Context, HasContext};
 
@@ -73,7 +73,7 @@ impl ContextAttachment for PublishedRendererState {
     fn release_renderer_resources(
         &self,
         context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextError> {
         // ImGui::Shutdown requires BackendRendererUserData to be cleared before native teardown.
         context.with_bound_context(|| unsafe { self.withdraw_bound() });
         Ok(())

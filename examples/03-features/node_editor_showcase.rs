@@ -478,14 +478,14 @@ impl AppWindow {
         let ui = self.imgui.context.frame();
 
         draw_blueprints_window(
-            &ui,
+            ui,
             &self.imgui.node_editor,
             self.header_background,
             self.header_background_size,
             &mut self.graph,
         );
 
-        self.imgui.platform.prepare_render(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(ui, &self.window)?;
         let pending_frame = self
             .imgui
             .context
@@ -621,8 +621,8 @@ fn load_header_background_texture() -> Result<texture::OwnedTextureData, Box<dyn
     let (width, height) = image.dimensions();
     let texture = texture::OwnedTextureData::from_pixels(
         texture::TextureFormat::RGBA32,
-        u32::try_from(width).expect("header texture width fits u32"),
-        u32::try_from(height).expect("header texture height fits u32"),
+        width,
+        height,
         image.as_raw(),
     )?;
     Ok(texture)
@@ -731,10 +731,10 @@ fn draw_editor_pane(
                 editor.add_node_to_selection(node);
             }
             for link in &graph.links {
-                if let Some(start) = pin_spec(link.start_pin) {
-                    if start.ty == PinType::Flow {
-                        editor.add_link_to_selection(link.id);
-                    }
+                if let Some(start) = pin_spec(link.start_pin)
+                    && start.ty == PinType::Flow
+                {
+                    editor.add_link_to_selection(link.id);
                 }
             }
             graph.pending_select_flow = false;

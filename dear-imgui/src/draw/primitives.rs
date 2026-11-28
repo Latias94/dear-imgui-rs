@@ -1,12 +1,10 @@
 use crate::internal::len_i32;
 use crate::sys;
 
-use super::color::ImColor32;
-use super::counts::{DrawFlags, DrawSegmentCount};
-use super::list::DrawListMut;
-use super::util::{
-    CORNER_FLAGS, STROKE_FLAGS, STROKE_POSITION, assert_draw_flags, assert_non_negative_f32,
-    assert_polyline_flags, assert_positive_f32, finite_vec2,
+use super::{
+    CORNER_FLAGS, DrawFlags, DrawListMut, DrawSegmentCount, ImColor32, STROKE_FLAGS,
+    STROKE_POSITION, assert_draw_flags, assert_non_negative_f32, assert_polyline_flags,
+    assert_positive_f32, finite_vec2,
 };
 
 /// Represents a line about to be drawn.
@@ -397,7 +395,7 @@ impl<'ui> Polyline<'ui> {
             points: points
                 .into_iter()
                 .enumerate()
-                .map(|(index, point)| super::util::finite_point("Polyline::new()", index, point))
+                .map(|(index, point)| super::finite_point("Polyline::new()", index, point))
                 .collect(),
             color: c.into(),
             thickness: 1.0,
