@@ -8,7 +8,12 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ### Breaking
 
-- Add a `GammaMode::Srgb` arm to exhaustive matches on `GammaMode`. Select this mode to decode the product of vertex and texture RGB to linear light before blending. [PR #100](https://github.com/Latias94/dear-imgui-rs/pull/100)
+- WGPU 30 is the only supported version. Remove `wgpu-27`, `wgpu-28`, `wgpu-29`, and `wgpu-30` features. Use `webgl` or `webgpu` in browser builds. Winit and SDL3 multi-viewport routes can be enabled together.
+- In sRGB mode, the shader decodes the interpolated vertex tint before it is modulated with the texture sample. Register application textures containing sRGB-encoded colors through an sRGB texture view.
+
+### Changed
+
+- Same-size managed textures reuse the existing GPU allocation for dirty-rectangle uploads when earlier recorded draws no longer require its contents. `Drop` releases the renderer's resources and signals the Context to reset its texture bindings before replacement.
 
 ## [0.21.0] - 2026-10-17
 
