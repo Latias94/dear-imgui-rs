@@ -1,3 +1,8 @@
+use std::num::NonZeroU32;
+
+use dear_imgui_backend_support::DirtyRectNormalizer;
+use dear_imgui_rs::texture::get_format_bytes_per_pixel;
+
 use super::*;
 
 impl WgpuTextureManager {
@@ -10,8 +15,16 @@ impl WgpuTextureManager {
         row_pitch: usize,
         pixels: &[u8],
     ) -> RendererResult<(OwnedWgpuTexture, Vec<u8>)> {
-        let rgba = convert_rows_to_rgba(format, width, height, row_pitch, pixels)?;
-        let resource = create_managed_rgba_resource(device, queue, width, height, &rgba)?;
+        let (rgba, pitch) = convert_rows_to_rgba(format, width, height, row_pitch, pixels)?;
+        let resource = create_managed_rgba_resource(device, width, height);
+        write_rgba_region(
+            queue,
+            resource.texture(),
+            Origin3d::ZERO,
+            [width, height],
+            pitch,
+            &rgba,
+        );
         Ok((resource, rgba))
     }
 
@@ -23,11 +36,11 @@ impl WgpuTextureManager {
         format: ImGuiTextureFormat,
         dimensions: [u32; 2],
         rects: &[TextureUploadRect],
-    ) -> RendererResult<()> {
+    ) -> RendererResult<(TextureId, bool)> {
         let [width, height] = dimensions;
         let entry = self
             .managed_textures
-            .get_mut(&id)
+            .get_mut(id)
             .ok_or(RendererError::ManagedTextureMissing(id))?;
         if entry.width != width || entry.height != height {
             return Err(RendererError::ManagedTextureLayoutMismatch {
@@ -37,34 +50,76 @@ impl WgpuTextureManager {
             });
         }
 
-        let mut rgba_pixels = entry.rgba_pixels.clone();
-        let texture_pitch = width as usize * 4;
+        // Validate the whole request before changing the CPU mirror or queuing any writes.
+        let normalizer = DirtyRectNormalizer::new(dimensions);
         for update in rects {
-            let rect = validate_update_rect(width, height, update.rect)?;
-            let rgba =
-                convert_rows_to_rgba(format, rect.w, rect.h, update.row_pitch, &update.data)?;
-            let rect_pitch = rect.w as usize * 4;
-            for row in 0..rect.h as usize {
-                let destination = (rect.y as usize + row) * texture_pitch + rect.x as usize * 4;
-                rgba_pixels[destination..destination + rect_pitch]
-                    .copy_from_slice(&rgba[row * rect_pitch..(row + 1) * rect_pitch]);
+            normalizer
+                .validate(update.rect)
+                .map_err(|error| RendererError::BadTexture(error.to_string()))?;
+            validate_source_rows(
+                format,
+                usize::from(update.rect.w),
+                usize::from(update.rect.h),
+                update.row_pitch,
+                &update.data,
+            )?;
+        }
+        if rects.is_empty() {
+            return Ok((entry.texture_id, false));
+        }
+
+        let pitch = rgba_row_pitch(width)?;
+        let texture_pitch = pitch.get() as usize;
+        // Draws holding the old version can still be submitted in any order. They retain
+        // that version through WGPU's command tracking, even after the cache stops using it.
+        let replacement = (!entry.resource.can_write_in_place())
+            .then(|| create_managed_rgba_resource(device, width, height));
+        for update in rects {
+            let TextureRect { x, y, w, h } = update.rect;
+            let start = usize::from(y) * texture_pitch + usize::from(x) * 4;
+            let end = start + (usize::from(h) - 1) * texture_pitch + usize::from(w) * 4;
+            let rgba = &mut entry.rgba_pixels[start..end];
+            copy_rgba_rows(
+                format,
+                usize::from(w),
+                usize::from(h),
+                (update.row_pitch, &update.data),
+                (texture_pitch, rgba),
+            );
+            if replacement.is_none() {
+                write_rgba_region(
+                    queue,
+                    entry.resource.texture(),
+                    Origin3d {
+                        x: u32::from(x),
+                        y: u32::from(y),
+                        z: 0,
+                    },
+                    [u32::from(w), u32::from(h)],
+                    pitch,
+                    rgba,
+                );
             }
         }
 
-        let resource = create_managed_rgba_resource(device, queue, width, height, &rgba_pixels)?;
-        entry.resource = resource;
-        entry.rgba_pixels = rgba_pixels;
-        Ok(())
+        if let Some(resource) = replacement {
+            write_rgba_region(
+                queue,
+                resource.texture(),
+                Origin3d::ZERO,
+                [width, height],
+                pitch,
+                &entry.rgba_pixels,
+            );
+            entry.resource = resource;
+            return Ok((entry.texture_id, true));
+        }
+
+        Ok((entry.texture_id, false))
     }
 }
 
-fn create_managed_rgba_resource(
-    device: &Device,
-    queue: &Queue,
-    width: u32,
-    height: u32,
-    rgba: &[u8],
-) -> RendererResult<OwnedWgpuTexture> {
+fn create_managed_rgba_resource(device: &Device, width: u32, height: u32) -> OwnedWgpuTexture {
     let texture = device.create_texture(&TextureDescriptor {
         label: Some("Dear ImGui managed texture"),
         size: Extent3d {
@@ -80,41 +135,7 @@ fn create_managed_rgba_resource(
         view_formats: &[],
     });
     let texture_view = texture.create_view(&TextureViewDescriptor::default());
-    let resource = OwnedWgpuTexture::new(texture, texture_view);
-    // Recorded commands retain the previous view; never upload into its texture again.
-    write_rgba_region(queue, resource.texture(), width, height, rgba)?;
-    Ok(resource)
-}
-
-#[derive(Copy, Clone)]
-struct ValidatedRect {
-    x: u32,
-    y: u32,
-    w: u32,
-    h: u32,
-}
-
-fn validate_update_rect(
-    texture_width: u32,
-    texture_height: u32,
-    rect: TextureRect,
-) -> RendererResult<ValidatedRect> {
-    let x = u32::from(rect.x);
-    let y = u32::from(rect.y);
-    let w = u32::from(rect.w);
-    let h = u32::from(rect.h);
-    let x_end = x.checked_add(w);
-    let y_end = y.checked_add(h);
-    if w == 0
-        || h == 0
-        || x_end.is_none_or(|end| end > texture_width)
-        || y_end.is_none_or(|end| end > texture_height)
-    {
-        return Err(RendererError::BadTexture(format!(
-            "managed texture update rectangle ({x}, {y}, {w}, {h}) exceeds {texture_width}x{texture_height}"
-        )));
-    }
-    Ok(ValidatedRect { x, y, w, h })
+    OwnedWgpuTexture::new(texture, texture_view)
 }
 
 fn convert_rows_to_rgba(
@@ -123,22 +144,42 @@ fn convert_rows_to_rgba(
     height: u32,
     row_pitch: usize,
     pixels: &[u8],
-) -> RendererResult<Vec<u8>> {
+) -> RendererResult<(Vec<u8>, NonZeroU32)> {
+    let pitch = rgba_row_pitch(width)?;
+    let width = usize::try_from(width)
+        .map_err(|_| RendererError::BadTexture("texture width exceeds usize".to_owned()))?;
+    let height = usize::try_from(height)
+        .map_err(|_| RendererError::BadTexture("texture height exceeds usize".to_owned()))?;
+    validate_source_rows(format, width, height, row_pitch, pixels)?;
+    let rgba_pitch = pitch.get() as usize;
+    let rgba_len = rgba_pitch.checked_mul(height).ok_or_else(|| {
+        RendererError::BadTexture("converted texture byte size overflow".to_owned())
+    })?;
+    let mut rgba = vec![0; rgba_len];
+    copy_rgba_rows(
+        format,
+        width,
+        height,
+        (row_pitch, pixels),
+        (rgba_pitch, &mut rgba),
+    );
+    Ok((rgba, pitch))
+}
+
+fn validate_source_rows(
+    format: ImGuiTextureFormat,
+    width: usize,
+    height: usize,
+    row_pitch: usize,
+    pixels: &[u8],
+) -> RendererResult<()> {
     if width == 0 || height == 0 {
         return Err(RendererError::BadTexture(
             "managed texture dimensions must be positive".to_owned(),
         ));
     }
-    let source_bpp = match format {
-        ImGuiTextureFormat::RGBA32 => 4usize,
-        ImGuiTextureFormat::Alpha8 => 1usize,
-    };
-    let width = usize::try_from(width)
-        .map_err(|_| RendererError::BadTexture("texture width exceeds usize".to_owned()))?;
-    let height = usize::try_from(height)
-        .map_err(|_| RendererError::BadTexture("texture height exceeds usize".to_owned()))?;
     let tight_source_pitch = width
-        .checked_mul(source_bpp)
+        .checked_mul(get_format_bytes_per_pixel(format))
         .ok_or_else(|| RendererError::BadTexture("texture row size overflow".to_owned()))?;
     if row_pitch < tight_source_pitch {
         return Err(RendererError::BadTexture(format!(
@@ -146,7 +187,7 @@ fn convert_rows_to_rgba(
         )));
     }
     let required = row_pitch
-        .checked_mul(height.saturating_sub(1))
+        .checked_mul(height - 1)
         .and_then(|prefix| prefix.checked_add(tight_source_pitch))
         .ok_or_else(|| RendererError::BadTexture("texture byte size overflow".to_owned()))?;
     if pixels.len() < required {
@@ -155,19 +196,23 @@ fn convert_rows_to_rgba(
             pixels.len()
         )));
     }
+    Ok(())
+}
 
-    let rgba_pitch = width
-        .checked_mul(4)
-        .ok_or_else(|| RendererError::BadTexture("RGBA row size overflow".to_owned()))?;
-    let mut rgba = vec![
-        0;
-        rgba_pitch.checked_mul(height).ok_or_else(|| {
-            RendererError::BadTexture("converted texture byte size overflow".to_owned())
-        })?
-    ];
+fn copy_rgba_rows(
+    format: ImGuiTextureFormat,
+    width: usize,
+    height: usize,
+    (source_pitch, pixels): (usize, &[u8]),
+    (rgba_pitch, rgba): (usize, &mut [u8]),
+) {
+    let source_width = width * get_format_bytes_per_pixel(format);
+    let rgba_width = width * 4;
     for row in 0..height {
-        let source = &pixels[row * row_pitch..row * row_pitch + tight_source_pitch];
-        let destination = &mut rgba[row * rgba_pitch..(row + 1) * rgba_pitch];
+        let source_start = row * source_pitch;
+        let rgba_start = row * rgba_pitch;
+        let source = &pixels[source_start..source_start + source_width];
+        let destination = &mut rgba[rgba_start..rgba_start + rgba_width];
         match format {
             ImGuiTextureFormat::RGBA32 => destination.copy_from_slice(source),
             ImGuiTextureFormat::Alpha8 => {
@@ -182,71 +227,36 @@ fn convert_rows_to_rgba(
             }
         }
     }
-    Ok(rgba)
+}
+
+fn rgba_row_pitch(width: u32) -> RendererResult<NonZeroU32> {
+    width
+        .checked_mul(4)
+        .and_then(NonZeroU32::new)
+        .ok_or_else(|| RendererError::BadTexture("invalid RGBA upload row size".to_owned()))
 }
 
 fn write_rgba_region(
     queue: &Queue,
     texture: &Texture,
-    width: u32,
-    height: u32,
+    origin: Origin3d,
+    [width, height]: [u32; 2],
+    row_pitch: NonZeroU32,
     rgba: &[u8],
-) -> RendererResult<()> {
-    let tight_pitch = width
-        .checked_mul(4)
-        .ok_or_else(|| RendererError::BadTexture("RGBA upload row size overflow".to_owned()))?;
-    let expected = usize::try_from(tight_pitch)
-        .ok()
-        .and_then(|pitch| {
-            usize::try_from(height)
-                .ok()
-                .and_then(|h| pitch.checked_mul(h))
-        })
-        .ok_or_else(|| RendererError::BadTexture("RGBA upload byte size overflow".to_owned()))?;
-    if rgba.len() != expected {
-        return Err(RendererError::BadTexture(format!(
-            "RGBA upload size mismatch: expected {expected} bytes, got {}",
-            rgba.len()
-        )));
-    }
-
-    let alignment = COPY_BYTES_PER_ROW_ALIGNMENT;
-    let padded_pitch = tight_pitch.div_ceil(alignment) * alignment;
-    let padded;
-    let upload = if padded_pitch == tight_pitch {
-        rgba
-    } else {
-        let padded_len = usize::try_from(padded_pitch)
-            .ok()
-            .and_then(|pitch| {
-                usize::try_from(height)
-                    .ok()
-                    .and_then(|h| pitch.checked_mul(h))
-            })
-            .ok_or_else(|| RendererError::BadTexture("padded upload size overflow".to_owned()))?;
-        let mut rows = vec![0; padded_len];
-        let tight_pitch = tight_pitch as usize;
-        let padded_pitch = padded_pitch as usize;
-        for row in 0..height as usize {
-            rows[row * padded_pitch..row * padded_pitch + tight_pitch]
-                .copy_from_slice(&rgba[row * tight_pitch..(row + 1) * tight_pitch]);
-        }
-        padded = rows;
-        &padded
-    };
-
+) {
+    // Queue writes accept the mirror's row pitch without encoder-copy alignment padding.
     queue.write_texture(
         TexelCopyTextureInfo {
             texture,
             mip_level: 0,
-            origin: Origin3d::ZERO,
+            origin,
             aspect: TextureAspect::All,
         },
-        upload,
+        rgba,
         TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(padded_pitch),
-            rows_per_image: Some(height),
+            bytes_per_row: Some(row_pitch.get()),
+            rows_per_image: None,
         },
         Extent3d {
             width,
@@ -254,7 +264,6 @@ fn write_rgba_region(
             depth_or_array_layers: 1,
         },
     );
-    Ok(())
 }
 
 #[cfg(test)]
@@ -263,8 +272,9 @@ mod conversion_tests {
 
     #[test]
     fn alpha_rows_with_padding_expand_to_rgba() {
-        let rgba = convert_rows_to_rgba(ImGuiTextureFormat::Alpha8, 2, 2, 3, &[10, 20, 0, 30, 40])
-            .expect("valid padded Alpha8 data");
+        let (rgba, _) =
+            convert_rows_to_rgba(ImGuiTextureFormat::Alpha8, 2, 2, 3, &[10, 20, 0, 30, 40])
+                .expect("valid padded Alpha8 data");
         assert_eq!(
             rgba,
             [
@@ -276,22 +286,5 @@ mod conversion_tests {
     #[test]
     fn truncated_rows_are_rejected() {
         assert!(convert_rows_to_rgba(ImGuiTextureFormat::RGBA32, 2, 2, 8, &[0; 15]).is_err());
-    }
-
-    #[test]
-    fn out_of_bounds_update_rect_is_rejected() {
-        assert!(
-            validate_update_rect(
-                4,
-                4,
-                TextureRect {
-                    x: 3,
-                    y: 0,
-                    w: 2,
-                    h: 1,
-                },
-            )
-            .is_err()
-        );
     }
 }

@@ -1,6 +1,3 @@
-#[cfg(any(feature = "mv-log", feature = "tracing"))]
-use std::sync::{Mutex, OnceLock};
-
 use super::{
     RendererRenderStateGuard, WgpuRenderer, draw::FramebufferExtent,
     map_renderer_render_state_error,
@@ -271,7 +268,6 @@ impl WgpuRenderer {
         fb_height: u32,
         main_viewport: bool,
     ) {
-        static LAST_MISMATCH: OnceLock<Mutex<Option<(u32, u32, u32, u32, bool)>>> = OnceLock::new();
         let expected_width = (draw_data.display_size()[0] * draw_data.framebuffer_scale()[0])
             .round()
             .max(0.0) as u32;
@@ -282,20 +278,13 @@ impl WgpuRenderer {
             return;
         }
         let key = (
-            expected_width,
-            expected_height,
-            fb_width,
-            fb_height,
+            [expected_width, expected_height],
+            [fb_width, fb_height],
             main_viewport,
         );
-        let mut previous = LAST_MISMATCH
-            .get_or_init(|| Mutex::new(None))
-            .lock()
-            .unwrap();
-        if previous.replace(key) == Some(key) {
+        if self.last_framebuffer_mismatch.replace(Some(key)) == Some(key) {
             return;
         }
-        drop(previous);
         #[cfg(feature = "tracing")]
         tracing::warn!(
             expected_width,

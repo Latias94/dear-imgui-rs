@@ -69,36 +69,6 @@ SYS_CRATES = (
 
 RENDERER_FEATURE_CONFLICTS = (
     (
-        "wgpu-dual-major",
-        "Features `wgpu-27`, `wgpu-28`, `wgpu-29`, and `wgpu-30` are "
-        "mutually exclusive; enable only one.",
-        (
-            "cargo",
-            "check",
-            "-p",
-            "dear-imgui-wgpu",
-            "--lib",
-            "--no-default-features",
-            "--features",
-            "wgpu-29,wgpu-30",
-        ),
-    ),
-    (
-        "wgpu-dual-platform",
-        "Features `multi-viewport-winit` and `multi-viewport-sdl3` are mutually "
-        "exclusive; enable only one.",
-        (
-            "cargo",
-            "check",
-            "-p",
-            "dear-imgui-wgpu",
-            "--lib",
-            "--no-default-features",
-            "--features",
-            "wgpu-30,multi-viewport-winit,multi-viewport-sdl3",
-        ),
-    ),
-    (
         "ash-dual-platform",
         "dear-imgui-ash cannot enable both `multi-viewport-winit` and "
         "`multi-viewport-sdl3`; select one platform surface adapter",

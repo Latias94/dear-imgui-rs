@@ -1,31 +1,27 @@
-use dear_imgui_rs::{NativeWindowInstanceId, NativeWindowTarget, platform_io::Viewport};
+use dear_imgui_rs::{Id, NativeWindowInstanceId, NativeWindowTarget};
+use dear_imgui_winit::multi_viewport::WinitViewportRendererAdapter;
 
 use super::multi_viewport_runtime::WgpuViewportError;
-
-pub(super) use dear_imgui_winit::WinitWindowRenderLease as NativeWindowLease;
-pub(super) use dear_imgui_winit::multi_viewport::WinitViewportRendererAdapter as PlatformOwner;
-
-pub(super) type ViewportSurface = wgpu::Surface<'static>;
 
 /// Creates a surface retaining the exact validated native window allocation.
 pub(super) fn create_surface(
     instance: &wgpu::Instance,
-    platform: &PlatformOwner,
-    viewport: &Viewport,
+    platform: &WinitViewportRendererAdapter,
+    viewport: Id,
     expected: Option<NativeWindowInstanceId>,
-) -> Result<(ViewportSurface, [u32; 2], NativeWindowTarget), WgpuViewportError> {
+) -> Result<(wgpu::Surface<'static>, [u32; 2], NativeWindowTarget), WgpuViewportError> {
     let snapshot = match expected {
         Some(instance) => platform.window_snapshot_for_instance(instance)?,
-        None => platform.window_snapshot_for_viewport(viewport.id())?,
+        None => platform.window_snapshot_for_viewport(viewport)?,
     }
     .ok_or(WgpuViewportError::SurfaceOperationFailed {
         operation: "resolve the registered Winit viewport window",
     })?;
-    let lease = native_window_lease(platform, snapshot.target.instance_id)?.ok_or(
-        WgpuViewportError::SurfaceOperationFailed {
+    let lease = platform
+        .acquire_native_window_lease(snapshot.target.instance_id)?
+        .ok_or(WgpuViewportError::SurfaceOperationFailed {
             operation: "lease the registered Winit viewport window",
-        },
-    )?;
+        })?;
     let window = lease.window_arc();
     let size = snapshot.physical_client_size;
     let surface =
@@ -38,7 +34,7 @@ pub(super) fn create_surface(
 }
 
 pub(super) fn framebuffer_size(
-    platform: &PlatformOwner,
+    platform: &WinitViewportRendererAdapter,
     instance: NativeWindowInstanceId,
 ) -> Result<[u32; 2], WgpuViewportError> {
     let snapshot = platform.window_snapshot_for_instance(instance)?.ok_or(
@@ -48,32 +44,4 @@ pub(super) fn framebuffer_size(
     )?;
     let size = snapshot.physical_client_size;
     Ok([size.width, size.height])
-}
-
-/// Captures metadata through the exact platform owner, without returning a native lease.
-pub(super) fn target_for_viewport(
-    platform: &PlatformOwner,
-    viewport: dear_imgui_rs::Id,
-) -> Result<Option<NativeWindowTarget>, WgpuViewportError> {
-    Ok(platform
-        .window_snapshot_for_viewport(viewport)?
-        .map(|snapshot| snapshot.target))
-}
-
-pub(super) fn target_for_instance(
-    platform: &PlatformOwner,
-    instance: NativeWindowInstanceId,
-) -> Result<Option<NativeWindowTarget>, WgpuViewportError> {
-    Ok(platform
-        .window_snapshot_for_instance(instance)?
-        .map(|snapshot| snapshot.target))
-}
-
-pub(super) fn native_window_lease(
-    platform: &PlatformOwner,
-    instance: NativeWindowInstanceId,
-) -> Result<Option<NativeWindowLease>, WgpuViewportError> {
-    platform
-        .acquire_native_window_lease(instance)
-        .map_err(Into::into)
 }

@@ -185,16 +185,8 @@ dear-imgui-wgpu = "0.23"  # or dear-imgui-glow / dear-imgui-ash
 dear-imgui-winit = "0.23" # or dear-imgui-sdl3
 ```
 
-`dear-imgui-wgpu` 0.23 defaults to WGPU 30. WGPU 29, 28, and 27 remain available as separate, mutually exclusive compatibility features:
-
-```toml
-[dependencies]
-dear-imgui-rs = "0.23"
-dear-imgui-wgpu = { version = "0.23", default-features = false, features = ["wgpu-29"] }
-dear-imgui-winit = "0.23"
-```
-
-Replace `wgpu-29` with `wgpu-28` or `wgpu-27` when integrating an older WGPU application.
+The 0.24 development workspace uses WGPU 30 for every renderer configuration. See the
+[0.23 compatibility matrix](docs/COMPATIBILITY.md#023-release-train) for older release options.
 
 ### Application Runtime (Recommended for Quick Start)
 

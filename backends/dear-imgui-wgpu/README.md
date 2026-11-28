@@ -68,8 +68,9 @@ and supplies the actual pass extent. A native association is the exact registrat
 the integration, not a later lookup of the viewport ID. `recorded = true` proves only successful
 command recording. Core snapshot completion proves CPU-side processing; neither proves queue
 submission, presentation, GPU completion, compositor acceptance, or visible pixels. Poll
-`context.poll_snapshot_completions()` on the UI thread, join the worker, then call
-`owner.shutdown(&mut context, &mut executor)` before replacing a live renderer.
+`context.poll_snapshot_completions()` on the UI thread. Dropping the UI owner and the executor
+allows the Context to reset after the last outstanding epoch drains. Join the worker and call
+`owner.shutdown(&mut context, &mut executor)` for an immediate reset with error reporting.
 
 ## External texture views
 
@@ -383,49 +384,34 @@ make the Context available for a replacement route; use explicit shutdown when t
 needs to release renderer ownership before Context teardown. Foreign callback and backend-state
 replacements are preserved rather than overwritten.
 
-## Selecting wgpu version
+## WGPU version
 
-The `0.23` release train defaults to WGPU 30 and requires Rust 1.95 or newer. Upgrade all `dear-*` dependencies together. See the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
-
-```toml
-[dependencies]
-dear-imgui-wgpu = "0.23"
-```
-
-If your ecosystem is pinned to `wgpu` v29, v28, or v27, select it explicitly:
-
-```toml
-[dependencies]
-dear-imgui-wgpu = { version = "0.23", default-features = false, features = ["wgpu-29"] }
-```
-
-```toml
-[dependencies]
-dear-imgui-wgpu = { version = "0.23", default-features = false, features = ["wgpu-28"] }
-```
-
-```toml
-[dependencies]
-dear-imgui-wgpu = { version = "0.23", default-features = false, features = ["wgpu-27"] }
-```
+The 0.24 development workspace uses WGPU 30 and requires Rust 1.97.1 or newer.
+Upgrade all `dear-*` dependencies together. [0.24 migration guide](../../docs/MIGRATING_0_24.md)
 
 ## What You Get
 
 - ImGui v1.92 texture system integration (create/update/destroy)
-- Upload buffers isolated by render epoch and viewport pass, with device-object invalidation
+- Managed uploads write only dirty rectangles in place once existing command buffers release
+  the texture. If an older command still references the texture, the renderer keeps its pixels
+  stable and writes the update to a new resource version.
+- Draw upload buffers are reused after their command buffers finish or are discarded.
 - Format-aware or user-controlled gamma (see below)
 
 ## sRGB / Gamma
 
-- Default `GammaMode::Auto`: picks `gamma=2.2` for sRGB targets and `1.0` for linear targets.
-- You can force `Linear` (1.0) or `Gamma22` (2.2).
-- `GammaMode::Srgb`, added in 0.23, applies the IEC 61966-2-1 inverse transfer when the product of the vertex and sampled texture RGB is sRGB-encoded. Alpha stays linear. An sRGB target then encodes the blended RGB for storage. For fragment RGB that is already linear, such as a white tint over a hardware-decoded sRGB texture, use `Linear`. Add a `Srgb` arm to exhaustive matches on `GammaMode`.
-- Pair this with your swapchain format to avoid double correction.
+- `GammaMode::Auto` decodes vertex RGB for sRGB targets and passes it through for linear targets.
+- `GammaMode::Srgb` decodes interpolated vertex RGB with the IEC 61966-2-1 curve for any target.
+  `Linear` passes vertex RGB through. `Gamma22` applies a power of 2.2 to vertex RGB.
+- The fragment shader multiplies the selected vertex color by the sampled texel. For color
+  textures stored as sRGB, use an sRGB view to decode the sample. Managed RGBA32 texture
+  bytes use a linear view. An sRGB target encodes the blended result for storage.
 
 ## Compatibility
 
 | Track | wgpu support |
 |-------|--------------|
+| `0.24` | 30 |
 | `0.23.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 | `0.22.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 | `0.21.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
@@ -442,22 +428,10 @@ For the other backend and toolchain versions used with each WGPU release, see th
 
 ## Features
 
-- Default: `wgpu-30`; no extra feature is required for a native WGPU 30 build
-- WGPU version selection (mutually exclusive)
-  - `wgpu-30` (default)
-  - `wgpu-29`
-  - `wgpu-28`
-  - `wgpu-27`
-- Diagnostics
-  - `tracing` enables renderer debug and warning events; it is off by default
-- WASM targets
-  - Every WebGL/WebGPU route automatically enables the matching `dear-imgui-rs/wasm` import path
-  - `webgl` / `webgpu` select the WASM route for the default `wgpu-30` build
-  - With `wgpu-29`, use `webgl-wgpu29` / `webgpu-wgpu29` instead
-  - With `wgpu-28`, use `webgl-wgpu28` / `webgpu-wgpu28` instead
-  - With `wgpu-27`, use `webgl-wgpu27` / `webgpu-wgpu27` instead
-  - `wasm-font-atlas-experimental` also enables the required core WASM import provider
-
-Select exactly one WGPU major. `webgl` and `webgpu` may be enabled individually or together for
-the selected major; enabling both lets WGPU choose an available browser backend at runtime. Leave
-both off for native builds.
+- `multi-viewport-winit` enables the `multi_viewport` integration for Winit.
+- `multi-viewport-sdl3` enables the `multi_viewport_sdl3` integration for SDL3. Both platform
+  features may be enabled in the same native build.
+- `tracing` enables renderer debug and warning events.
+- `webgl` and `webgpu` enable the corresponding browser routes and the core WASM import path.
+  Enable both to let WGPU choose an available browser backend at runtime.
+- `wasm-font-atlas-experimental` enables the experimental WASM font-atlas route.

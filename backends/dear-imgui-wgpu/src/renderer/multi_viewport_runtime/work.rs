@@ -7,7 +7,7 @@ use std::{
 };
 
 use super::{
-    platform_adapter::{NativeWindowLease, ViewportSurface},
+    platform::{NativeWindowLease, ViewportSurface},
     runtime::WgpuViewportError,
     trace::{ObservationKey, WgpuViewportFrameReport},
 };
@@ -188,7 +188,6 @@ impl WgpuRecordedViewportWork {
                 .stage(target.observation, WgpuFrameStage::Submitted);
         }
         Ok(WgpuPendingPresentations {
-            #[cfg(feature = "wgpu-30")]
             queue: self.queue,
             targets: self.targets,
             report: self.report,
@@ -222,7 +221,6 @@ pub(super) fn submit_after_producers(
 /// presentation/discard of these exact acquired frames. Drop discards them exactly once.
 #[must_use = "present or explicitly discard the submitted viewport frames"]
 pub struct WgpuPendingPresentations {
-    #[cfg(feature = "wgpu-30")]
     queue: wgpu::Queue,
     targets: Vec<RecordedTarget>,
     report: WgpuViewportFrameReport,
@@ -249,10 +247,7 @@ impl WgpuPendingPresentations {
                 continue;
             };
             let result = catch_unwind(AssertUnwindSafe(|| {
-                #[cfg(feature = "wgpu-30")]
                 self.queue.present(frame);
-                #[cfg(not(feature = "wgpu-30"))]
-                frame.present();
             }));
             if result.is_ok() {
                 self.report
@@ -392,7 +387,6 @@ mod tests {
             })];
             let mut pass = ui_encoder.begin_render_pass(&RenderPassDescriptor {
                 color_attachments: &attachments,
-                #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
                 multiview_mask: None,
                 ..Default::default()
             });
@@ -437,7 +431,6 @@ mod tests {
             })];
             let _pass = producer.begin_render_pass(&RenderPassDescriptor {
                 color_attachments: &attachments,
-                #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
                 multiview_mask: None,
                 ..Default::default()
             });
@@ -459,13 +452,10 @@ mod tests {
             .expect("map callback must run")
             .expect("map must succeed");
         {
-            #[cfg(feature = "wgpu-30")]
             let bytes = readback
                 .slice(..)
                 .get_mapped_range()
                 .expect("readback range must remain mapped");
-            #[cfg(not(feature = "wgpu-30"))]
-            let bytes = readback.slice(..).get_mapped_range();
             assert_eq!(
                 &bytes[8 * 256 + 8 * 4..8 * 256 + 8 * 4 + 4],
                 &[255, 0, 0, 255],
@@ -578,19 +568,9 @@ mod tests {
             value => panic!("unsupported DEAR_IMGUI_TEST_WGPU_BACKEND for this fixture: {value}"),
         };
         eprintln!("[native-wgpu] requested backends {backends:?}");
-        #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
-        {
-            wgpu::Instance::new(&wgpu::InstanceDescriptor {
-                backends,
-                ..Default::default()
-            })
-        }
-        #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
-        {
-            let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-            descriptor.backends = backends;
-            wgpu::Instance::new(descriptor)
-        }
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = backends;
+        wgpu::Instance::new(descriptor)
     }
 
     #[test]
@@ -632,6 +612,7 @@ mod tests {
         reason = "The bounded native fixture creates windows without an app event pump"
     )]
     fn native_pending_presentation_fixture(release: &str) {
+        use super::super::platform::ViewportPlatform;
         use wgpu::*;
         let mut builder = winit::event_loop::EventLoop::builder();
         #[cfg(target_os = "windows")]
@@ -668,13 +649,18 @@ mod tests {
                 .unwrap();
             platform.enable_viewports(&mut context).unwrap();
             let snapshot = platform.window_snapshot(window.id()).unwrap().unwrap();
-            let adapter_owner = platform.viewport_renderer_adapter(&context).unwrap();
+            let adapter_owner =
+                ViewportPlatform::Winit(platform.viewport_renderer_adapter(&context).unwrap());
             let lease = adapter_owner
-                .acquire_native_window_lease(snapshot.target.instance_id)
+                .native_window_lease(snapshot.target.instance_id)
                 .unwrap()
                 .unwrap();
             let instance = native_test_instance(false);
-            let surface = Rc::new(instance.create_surface(lease.window_arc()).unwrap());
+            let (surface, _, target) = adapter_owner
+                .create_surface(&instance, snapshot.target.viewport_id, None)
+                .unwrap();
+            assert_eq!(target, snapshot.target);
+            let surface = Rc::new(surface);
             let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
                 compatible_surface: Some(&surface),
                 ..Default::default()
@@ -690,11 +676,6 @@ mod tests {
                 .get_default_config(&adapter, 64, 64)
                 .expect("native surface must support a default configuration");
             surface.configure(&device, &config);
-            #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
-            let frame = surface
-                .get_current_texture()
-                .expect("native fixture must acquire its frame");
-            #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
             let frame = match surface.get_current_texture() {
                 CurrentSurfaceTexture::Success(frame)
                 | CurrentSurfaceTexture::Suboptimal(frame) => frame,
@@ -714,7 +695,6 @@ mod tests {
                 })];
                 let _pass = encoder.begin_render_pass(&RenderPassDescriptor {
                     color_attachments: &attachments,
-                    #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
                     multiview_mask: None,
                     ..Default::default()
                 });
@@ -848,9 +828,6 @@ mod tests {
             pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).unwrap();
         let config = surface.get_default_config(&adapter, 64, 64).unwrap();
         surface.configure(&device, &config);
-        #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
-        let frame = surface.get_current_texture().unwrap();
-        #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
         let frame = match surface.get_current_texture() {
             CurrentSurfaceTexture::Success(frame) | CurrentSurfaceTexture::Suboptimal(frame) => {
                 frame
@@ -871,7 +848,6 @@ mod tests {
             })];
             let _pass = encoder.begin_render_pass(&RenderPassDescriptor {
                 color_attachments: &attachments,
-                #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
                 multiview_mask: None,
                 ..Default::default()
             });

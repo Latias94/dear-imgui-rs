@@ -1,3 +1,5 @@
+use dear_imgui_backend_support::ManagedTextureTable;
+
 use super::resource::ManagedWgpuTexture;
 use super::*;
 
@@ -7,11 +9,9 @@ pub(crate) struct WgpuTextureManager {
     /// Application-owned texture views. The application retains texture ownership.
     pub(super) external_views: HashMap<TextureId, ExternalTextureView>,
     /// Context-owned textures addressed by the pointer-free snapshot protocol.
-    pub(super) managed_textures: HashMap<SnapshotTextureId, ManagedWgpuTexture>,
+    pub(super) managed_textures: ManagedTextureTable<ManagedWgpuTexture>,
     /// Renderer IDs written back to draw commands, mapped to their managed owners.
     pub(super) managed_by_texture_id: HashMap<TextureId, SnapshotTextureId>,
-    /// Managed identities sealed by Destroy, paired with their latest request epoch.
-    pub(super) destroyed_managed_textures: HashMap<SnapshotTextureId, u64>,
 }
 
 #[derive(Debug)]

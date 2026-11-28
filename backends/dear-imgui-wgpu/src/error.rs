@@ -153,7 +153,7 @@ pub enum RendererError {
     #[error(transparent)]
     FrameCapture(#[from] dear_imgui_rs::render::SnapshotError),
 
-    /// Context attachment registration rejected the renderer's deferred-drop cleanup hook.
+    /// Context attachment registration rejected the renderer's raw publication.
     #[error(transparent)]
     ContextAttachment(#[from] dear_imgui_rs::ContextAttachmentError),
 

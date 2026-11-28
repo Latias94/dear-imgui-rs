@@ -10,8 +10,8 @@ use dear_imgui_rs::{
     Context, ContextId, Id,
     platform_io::NativeWindowTarget,
     render::{
-        DetachedRendererConsumer, FrameSnapshot, SnapshotCommitError, SnapshotEpoch,
-        TextureFeedback,
+        DetachedRendererConsumer, FrameSnapshot, RendererResetSignal, SnapshotCommitError,
+        SnapshotEpoch, TextureFeedback,
     },
 };
 
@@ -37,8 +37,9 @@ use crate::{
 /// ```
 ///
 /// Dropping this UI owner clears its exact publication and starts the core consumer's draining
-/// phase. Already captured snapshots retain their own completion tickets. Join the worker and
-/// call [`Self::shutdown`] when that live Context must accept another renderer immediately.
+/// phase. Already captured snapshots retain their completion tickets. Dropping the executor
+/// releases its GPU handles and confirms the reset. Join the worker and call [`Self::shutdown`]
+/// to finalize the reset immediately and receive errors.
 pub struct WgpuSnapshotRenderer {
     state: Option<RendererContextState>,
     consumer: Option<DetachedRendererConsumer>,
@@ -79,6 +80,7 @@ impl WgpuSnapshotRenderer {
         reset.commit();
         let executor = WgpuSnapshotExecutor {
             gpu,
+            reset_signal: consumer.reset_signal(),
             context: consumer.context_id(),
             generation: consumer.generation(),
             targets: HashMap::new(),
@@ -225,11 +227,21 @@ pub struct WgpuSnapshotError {
 /// device resources all belong to that thread. It never binds or dereferences a live Context.
 pub struct WgpuSnapshotExecutor {
     gpu: GpuState,
+    reset_signal: RendererResetSignal,
     context: ContextId,
     generation: u64,
     targets: HashMap<Id, WgpuSnapshotTarget>,
     next_target_generation: u64,
     last_epoch: Option<u64>,
+}
+
+impl Drop for WgpuSnapshotExecutor {
+    fn drop(&mut self) {
+        self.targets.clear();
+        // Recorded and submitted WGPU work retains its own GPU resource references.
+        self.gpu = GpuState::empty();
+        self.reset_signal.mark_renderer_dropped();
+    }
 }
 
 impl WgpuSnapshotExecutor {

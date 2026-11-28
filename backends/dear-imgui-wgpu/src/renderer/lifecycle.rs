@@ -1,7 +1,6 @@
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-};
+use dear_imgui_rs::Context;
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+use dear_imgui_rs::{ContextAttachmentTeardownError, ContextTeardown};
 
 use super::{
     WgpuRenderer,
@@ -9,174 +8,8 @@ use super::{
         draw_callback_matches, draw_callback_reset_render_state, draw_callback_set_sampler_linear,
         draw_callback_set_sampler_nearest,
     },
-    core::{RendererContextState, RendererPublication},
 };
 use crate::{FrameResourceArena, RenderResources, RendererError, RendererResult, ShaderManager};
-use dear_imgui_rs::{
-    Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
-    ContextAttachmentRole, ContextAttachmentTeardownError, ContextBindingError, ContextDestroyed,
-    ContextTeardown, render::SynchronousRendererConsumer,
-};
-
-struct WgpuRendererDropAttachmentMarker;
-
-/// GPU and consumer state transferred out of a renderer wrapper that was dropped without an
-/// explicit `shutdown`. The Context attachment releases GPU resources in its terminal renderer
-/// phase; a Context that is already dropping retains the raw-publication token until native
-/// destruction has made it inert.
-struct DeferredRendererResources {
-    context_state: Option<RendererContextState>,
-    backend_data: Option<crate::WgpuBackendData>,
-    shader_manager: Option<ShaderManager>,
-    texture_manager: Option<crate::WgpuTextureManager>,
-    default_texture: Option<wgpu::TextureView>,
-    renderer_consumer: Option<SynchronousRendererConsumer>,
-}
-
-impl DeferredRendererResources {
-    fn release_renderer_resources(
-        &mut self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
-        let consumer = self.renderer_consumer.take().ok_or_else(|| {
-            ContextAttachmentTeardownError::new(
-                "deferred WGPU renderer resources lost their renderer consumer",
-            )
-        })?;
-
-        // The Context's renderer-resource phase is the only Drop fallback that can perform the
-        // same prepare -> release -> commit transaction as explicit shutdown. If preflight
-        // rejects an outstanding epoch, the closure does not run and the consumer is restored so
-        // no renderer state is silently released out of order.
-        let result = context.with_renderer_texture_reset(&consumer, || {
-            self.backend_data.take();
-            self.shader_manager.take();
-            self.texture_manager.take();
-            self.default_texture.take();
-            Ok(())
-        });
-        if result.is_err() {
-            self.renderer_consumer = Some(consumer);
-        }
-        result
-    }
-
-    fn release_after_context_destroyed(mut self) {
-        // Reading and dropping the retained token explicitly documents why it survives the
-        // renderer-resource phase when wrapper Drop races Context teardown.
-        drop(self.context_state.take());
-    }
-}
-
-struct RendererDropControl {
-    deferred: RefCell<Option<DeferredRendererResources>>,
-    publication: RefCell<Option<RendererPublication>>,
-    context_destroyed: Cell<bool>,
-    #[cfg(test)]
-    renderer_release_count: Cell<u32>,
-}
-
-struct RendererDropAttachment {
-    control: Rc<RendererDropControl>,
-}
-
-impl ContextAttachment for RendererDropAttachment {
-    fn quiesce(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), dear_imgui_rs::ContextAttachmentTeardownError> {
-        if let Some(publication) = self.control.publication.borrow().as_ref() {
-            context.with_bound_context(|| unsafe {
-                publication.clear_owned_raw_state_bound();
-            });
-        }
-        Ok(())
-    }
-
-    fn release_renderer_resources(
-        &self,
-        context: &ContextTeardown<'_>,
-    ) -> Result<(), ContextAttachmentTeardownError> {
-        if let Some(resources) = self.control.deferred.borrow_mut().as_mut() {
-            resources.release_renderer_resources(context)?;
-            #[cfg(test)]
-            self.control
-                .renderer_release_count
-                .set(self.control.renderer_release_count.get() + 1);
-        }
-        Ok(())
-    }
-
-    fn context_destroyed(&self, _context: ContextDestroyed) {
-        // A raw Context pointer can remain published only when this renderer was dropped during
-        // Context teardown. At this point the core has tombstoned that pointer, so releasing the
-        // final token and any late resources cannot re-enter native Dear ImGui.
-        self.control.context_destroyed.set(true);
-        self.control.publication.borrow_mut().take();
-        if let Some(resources) = self.control.deferred.borrow_mut().take() {
-            resources.release_after_context_destroyed();
-        }
-    }
-}
-
-/// Lease and storage that make unreported renderer Drop defer to Context teardown.
-pub(super) struct RendererDropDeferral {
-    control: Rc<RendererDropControl>,
-    attachment: ContextAttachmentLease,
-}
-
-impl RendererDropDeferral {
-    pub(super) fn register(context: &mut Context) -> Result<Self, ContextAttachmentError> {
-        let control = Rc::new(RendererDropControl {
-            deferred: RefCell::new(None),
-            publication: RefCell::new(None),
-            context_destroyed: Cell::new(false),
-            #[cfg(test)]
-            renderer_release_count: Cell::new(0),
-        });
-        let attachment = context.register_attachment::<WgpuRendererDropAttachmentMarker>(
-            ContextAttachmentRole::Extension,
-            Rc::new(RendererDropAttachment {
-                control: Rc::clone(&control),
-            }),
-        )?;
-        Ok(Self {
-            control,
-            attachment,
-        })
-    }
-
-    pub(super) fn set_publication(&self, publication: RendererPublication) {
-        debug_assert!(self.control.publication.borrow().is_none());
-        self.control.publication.borrow_mut().replace(publication);
-    }
-
-    fn defer_to_context(self, resources: DeferredRendererResources) {
-        debug_assert!(self.control.deferred.borrow().is_none());
-        self.control.deferred.borrow_mut().replace(resources);
-        self.attachment.defer_to_context();
-    }
-
-    #[cfg(test)]
-    fn control_for_test(&self) -> Rc<RendererDropControl> {
-        Rc::clone(&self.control)
-    }
-}
-
-#[cfg(test)]
-impl RendererDropControl {
-    fn has_deferred_resources(&self) -> bool {
-        self.deferred.borrow().is_some()
-    }
-
-    fn renderer_release_count(&self) -> u32 {
-        self.renderer_release_count.get()
-    }
-
-    fn context_was_destroyed(&self) -> bool {
-        self.context_destroyed.get()
-    }
-}
 
 impl WgpuRenderer {
     pub(super) fn prepare_frame_epoch(
@@ -416,60 +249,17 @@ impl WgpuRenderer {
         self.renderer_consumer = None;
         self.clear_context_state();
     }
-
-    fn defer_resources_to_context(&mut self, context_state: Option<RendererContextState>) {
-        // `bind_context` installs this attachment before it publishes `context_state`. Keep the
-        // relationship fail-stop: silently dropping or forgetting the texture map here would
-        // leave live Context bindings pointing at renderer resources that no longer exist.
-        let deferral = self.drop_deferral.take().unwrap_or_else(|| {
-            debug_assert!(
-                false,
-                "a bound WGPU renderer must retain its Context drop attachment"
-            );
-            std::process::abort();
-        });
-        let resources = DeferredRendererResources {
-            context_state,
-            backend_data: self.gpu.backend_data.take(),
-            shader_manager: Some(std::mem::take(&mut self.gpu.shader_manager)),
-            texture_manager: Some(std::mem::take(&mut self.gpu.texture_manager)),
-            default_texture: self.gpu.default_texture.take(),
-            renderer_consumer: self.renderer_consumer.take(),
-        };
-        deferral.defer_to_context(resources);
-    }
 }
 
 impl Drop for WgpuRenderer {
     fn drop(&mut self) {
-        let clear_result = self.context_state.as_ref().map(|state| {
-            let binding = state.context();
-            binding.try_with_bound_context(|| unsafe { state.clear_owned_raw_state_bound() })
-        });
-        match clear_result {
-            Some(Ok(_)) => {
-                // Exact raw publication is gone, so the token can be released immediately. The
-                // GPU map and consumer remain Context-owned through the deferred attachment.
-                drop(self.context_state.take());
-                self.defer_resources_to_context(None);
-            }
-            Some(Err(error)) => {
-                if matches!(error, ContextBindingError::NativeDestroyed) {
-                    // Native teardown has already invalidated every Context binding. It is now
-                    // safe for normal field Drop to release backend resources without entering
-                    // Dear ImGui.
-                    self.drop_deferral = None;
-                    drop(self.context_state.take());
-                } else {
-                    // The raw Context still exists, so retain the publication token until
-                    // `context_destroyed`. The attachment owns terminal GPU cleanup meanwhile.
-                    let context_state = self.context_state.take();
-                    self.defer_resources_to_context(context_state);
-                }
-            }
-            None => {
-                self.drop_deferral = None;
-            }
+        self.clear_context_state();
+        // WGPU command buffers and pending submissions keep their own resource references.
+        // Releasing these handles leaves any already recorded GPU work valid.
+        self.release_all_device_objects_only();
+        self.gpu.backend_data = None;
+        if let Some(consumer) = self.renderer_consumer.take() {
+            consumer.reset_signal().mark_renderer_dropped();
         }
     }
 }
@@ -605,53 +395,32 @@ mod tests {
     }
 
     #[test]
-    fn dropping_renderer_defers_resources_to_context_teardown() {
+    fn dropping_renderer_clears_publication_and_releases_consumer() {
         let mut context = Context::create();
         let renderer = configured_test_renderer(&mut context);
-        let control = renderer
-            .drop_deferral
-            .as_ref()
-            .expect("bound renderer must install a deferred-drop attachment")
-            .control_for_test();
+        let generation = renderer.renderer_consumer().unwrap().generation();
         drop(renderer);
 
-        assert!(control.has_deferred_resources());
-        assert_eq!(control.renderer_release_count(), 0);
         assert!(context.io().backend_renderer_user_data().is_null());
         assert!(context.io().backend_renderer_name().is_none());
         assert!(!context.io().backend_flags().intersects(renderer_flags()));
-        assert!(matches!(
-            WgpuRenderer::empty().bind_context(&mut context, BackendFlags::empty()),
-            Err(RendererError::ContextAttachment(
-                dear_imgui_rs::ContextAttachmentError::DuplicateAttachment
-            ))
-        ));
-
-        assert!(control.has_deferred_resources());
-        assert_eq!(control.renderer_release_count(), 0);
-
-        drop(context);
-
-        assert_eq!(control.renderer_release_count(), 1);
-        assert!(!control.has_deferred_resources());
-        assert!(control.context_was_destroyed());
+        let replacement = configured_test_renderer(&mut context);
+        assert!(replacement.renderer_consumer().unwrap().generation() > generation);
     }
 
     #[test]
-    fn context_first_renderer_drop_uses_the_native_destroyed_path() {
+    fn context_first_renderer_drop_clears_native_publication_in_teardown() {
         let mut context = Context::create();
         let renderer = configured_test_renderer(&mut context);
-        let control = renderer
-            .drop_deferral
-            .as_ref()
-            .expect("bound renderer must install a deferred-drop attachment")
-            .control_for_test();
+        let binding = context.binding();
 
         drop(context);
 
-        assert!(control.context_was_destroyed());
-        assert!(!control.has_deferred_resources());
-        assert_eq!(control.renderer_release_count(), 0);
+        assert!(!binding.is_alive());
+        assert!(matches!(
+            renderer.ensure_context_alive(),
+            Err(RendererError::ContextDropped)
+        ));
         drop(renderer);
     }
 

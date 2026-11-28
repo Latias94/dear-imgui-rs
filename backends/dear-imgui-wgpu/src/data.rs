@@ -426,7 +426,6 @@ mod tests {
         let surface = SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
             format: TextureFormat::Bgra8UnormSrgb,
-            #[cfg(feature = "wgpu-30")]
             color_space: SurfaceColorSpace::DisplayP3,
             width: 128,
             height: 96,

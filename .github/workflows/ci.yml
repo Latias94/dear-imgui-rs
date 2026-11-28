@@ -616,32 +616,16 @@ jobs:
         run: cargo test --doc -p dear-imgui-sdl3 --features "sdlgpu3-renderer,multi-viewport"
 
   wgpu-routes:
-    name: WGPU ${{ matrix.wgpu }} + ${{ matrix.platform }}
+    name: WGPU 30 + ${{ matrix.platform }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - wgpu: '27'
-            platform: Winit
-            features: wgpu-27,multi-viewport-winit
-            lint_features: wgpu-27
-          - wgpu: '28'
-            platform: Winit
-            features: wgpu-28,multi-viewport-winit
-            lint_features: wgpu-28
-          - wgpu: '29'
-            platform: Winit
-            features: wgpu-29,multi-viewport-winit
-            lint_features: wgpu-29
-          - wgpu: '30'
-            platform: Winit
-            features: wgpu-30,multi-viewport-winit
-            lint_features: wgpu-30,multi-viewport-winit
-          - wgpu: '30'
-            platform: SDL3
-            features: wgpu-30,multi-viewport-sdl3
-            lint_features: wgpu-30,multi-viewport-sdl3
+          - platform: Winit
+            features: multi-viewport-winit
+          - platform: SDL3
+            features: multi-viewport-sdl3
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -662,7 +646,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
-          key: wgpu-${{ matrix.wgpu }}-${{ matrix.platform }}
+          key: wgpu-30-${{ matrix.platform }}
 
       - name: Refresh Linux package metadata
         run: sudo apt-get update
@@ -681,9 +665,9 @@ jobs:
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
-      - name: Check opt-in WGPU tracing route
-        if: matrix.wgpu == '30' && matrix.platform == 'Winit'
-        run: cargo check -p dear-imgui-wgpu --lib --no-default-features --features wgpu-30,tracing
+      - name: Check all additive WGPU features
+        if: matrix.platform == 'Winit'
+        run: cargo check -p dear-imgui-wgpu --all-features
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
@@ -693,11 +677,12 @@ jobs:
           IMGUI_SYS_FORCE_BUILD: "1"
 
       - name: Test WGPU raw callback render contract
-        if: matrix.wgpu == '30' && matrix.platform == 'Winit'
+        if: matrix.platform == 'Winit'
         run: >-
           cargo nextest run -p dear-imgui-wgpu --test integration_test
           --no-default-features --features "${{ matrix.features }}"
           direct_and_split_render_paths_execute_raw_callbacks_with_scoped_state
+          dropping_renderer_releases_its_gpu_handles_and_allows_replacement
           zero_sized_framebuffer_still_reconciles_the_pending_frame
         env:
           DEAR_IMGUI_REQUIRE_WGPU_ADAPTER: "1"
@@ -707,7 +692,7 @@ jobs:
         run: >-
           python3 tools/ci/run_contract.py clippy --
           -p dear-imgui-wgpu --all-targets --no-default-features
-          --features "${{ matrix.lint_features }}"
+          --features "${{ matrix.features }}"
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 

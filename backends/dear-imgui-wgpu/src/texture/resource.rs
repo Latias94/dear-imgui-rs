@@ -1,10 +1,12 @@
 use super::*;
+use std::sync::Arc;
 
 /// Renderer-owned WGPU texture resource.
 #[derive(Debug)]
 pub(crate) struct OwnedWgpuTexture {
     pub(super) texture: Texture,
     pub(super) texture_view: TextureView,
+    recorded_reads: Arc<()>,
 }
 
 impl OwnedWgpuTexture {
@@ -12,6 +14,7 @@ impl OwnedWgpuTexture {
         Self {
             texture,
             texture_view,
+            recorded_reads: Arc::new(()),
         }
     }
 
@@ -21,6 +24,14 @@ impl OwnedWgpuTexture {
 
     pub(crate) fn texture(&self) -> &Texture {
         &self.texture
+    }
+
+    pub(super) fn recording_lease(&self) -> Arc<()> {
+        Arc::clone(&self.recorded_reads)
+    }
+
+    pub(super) fn can_write_in_place(&mut self) -> bool {
+        Arc::get_mut(&mut self.recorded_reads).is_some()
     }
 }
 

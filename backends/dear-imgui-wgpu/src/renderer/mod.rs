@@ -36,7 +36,10 @@ mod snapshot;
 
 use crate::{RendererError, RendererResult, Uniforms, WgpuBackendData, WgpuTextureManager};
 pub use core::WgpuRenderer;
-use dear_imgui_rs::render::{RendererRenderStateGuard, RendererRenderStateGuardError};
+use dear_imgui_backend_support::{
+    ScopedRenderState as RendererRenderStateGuard,
+    ScopedRenderStateError as RendererRenderStateGuardError,
+};
 pub use draw::FramebufferExtent;
 pub use snapshot::{
     WgpuPreparedSnapshot, WgpuSnapshotError, WgpuSnapshotExecutor, WgpuSnapshotRenderer,

@@ -42,6 +42,16 @@ Bevy backend, extensions, and build helpers.
 Window and image builders accept sizes that convert to `[f32; 2]`. Color arguments in image
 builders and `Ui::text_colored` accept `Color`, RGBA arrays, and compatible vector types.
 
+## WGPU renderer
+
+| In 0.23 | In 0.24 |
+| --- | --- |
+| `wgpu-27`, `wgpu-28`, `wgpu-29`, or `wgpu-30` | Remove the feature and upgrade the application to WGPU 30. |
+| `webgl-wgpu*` and `webgpu-wgpu*` | Use `webgl` and `webgpu`. Both enable the core WASM import path. |
+| Selecting Winit or SDL3 at Cargo feature resolution | Enable either or both platform features. Instantiate the integration for each Context from the matching Winit or SDL3 module. |
+| sRGB transfer applied to the combined fragment color | The shader decodes the interpolated vertex tint before modulation. Use an sRGB texture view for sRGB-encoded application textures. |
+| Keeping the renderer alive until explicit `shutdown` or Context teardown | Drop the renderer to release its WGPU handles. The Context resets managed textures before the next renderer uses them. Use `shutdown` for synchronous error reporting. |
+
 ## Prebuilt archives
 
 | In 0.23 | In 0.24 |

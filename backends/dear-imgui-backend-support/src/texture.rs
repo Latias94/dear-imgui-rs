@@ -73,6 +73,12 @@ impl<GpuTex> ManagedTextureTable<GpuTex> {
         self.destroyed.contains_key(&id)
     }
 
+    /// Number of retained destroy tombstones, including any awaiting acknowledgement.
+    #[must_use]
+    pub fn tombstone_count(&self) -> usize {
+        self.destroyed.len()
+    }
+
     /// Block uploads as soon as a destroy request is observed.
     ///
     /// An acknowledgement from an older epoch cannot clear a newer request. Re-observing the

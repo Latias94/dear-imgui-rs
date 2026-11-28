@@ -298,7 +298,7 @@ def release_test_commands(use_nextest: bool) -> list[tuple[str, list[str]]]:
                 "dear-imgui-wgpu",
                 "--no-default-features",
                 "--features",
-                "wgpu-30,tracing",
+                "tracing",
             ],
         ),
     )

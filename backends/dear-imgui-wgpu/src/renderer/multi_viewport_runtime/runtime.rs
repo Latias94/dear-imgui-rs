@@ -16,6 +16,7 @@ use super::callbacks::{
     preflight_callbacks, preflight_renderer_viewport_resources, release_callbacks,
     revoke_renderer_viewport_capability_if_owned,
 };
+use super::platform::ViewportPlatform;
 use super::registry::{
     GlobalHandles, drop_orphaned_viewport_data, preflight_runtime, register_runtime,
     renderer_globals, unregister_runtime,
@@ -1273,7 +1274,7 @@ impl OwningViewportRuntime {
     pub(crate) fn attach(
         context: &mut Context,
         renderer: WgpuRenderer,
-        platform: super::platform_adapter::PlatformOwner,
+        platform: ViewportPlatform,
     ) -> Result<Self, WgpuViewportAttachError> {
         // The Context-owned attachment is the first ownership gate. In particular, a wrapper
         // that was dropped without explicit shutdown leaves this runtime alive for Context
@@ -1588,11 +1589,10 @@ impl OwningViewportRuntime {
             .globals()
             .ok_or(WgpuViewportError::RuntimeDetached)
             .and_then(|globals| {
-                super::platform_adapter::target_for_viewport(
-                    &globals.platform,
-                    dear_imgui_rs::Id::from(viewport_id),
-                )?
-                .ok_or(WgpuViewportError::MainViewportHandleUnavailable)
+                globals
+                    .platform
+                    .target_for_viewport(dear_imgui_rs::Id::from(viewport_id))?
+                    .ok_or(WgpuViewportError::MainViewportHandleUnavailable)
             });
         let target = match target {
             Ok(target) => target,

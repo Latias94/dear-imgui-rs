@@ -7,7 +7,6 @@ use dear_imgui_rs::internal::RawCast;
 use dear_imgui_rs::platform_io::{PlatformIo, Viewport};
 use dear_imgui_rs::{BackendFlags, Context};
 
-use super::platform_adapter;
 use super::registry::{
     ViewportDataDestroy, ViewportDataLookup, ViewportIdentity, current_context,
     destroy_registered_viewport_data, destroy_viewport_data, preflight_viewport_data_ownership,
@@ -485,15 +484,16 @@ pub(super) unsafe fn renderer_set_window_size(
         return;
     };
     let data = unsafe { &mut *pointer };
-    let pixels =
-        match platform_adapter::framebuffer_size(&globals.platform, data.native_target.instance_id)
-        {
-            Ok(pixels) => pixels,
-            Err(error) => {
-                control.record_fault(error);
-                return;
-            }
-        };
+    let pixels = match globals
+        .platform
+        .framebuffer_size(data.native_target.instance_id)
+    {
+        Ok(pixels) => pixels,
+        Err(error) => {
+            control.record_fault(error);
+            return;
+        }
+    };
     if data.size != pixels {
         if let Err(error) = reconfigure_surface(data, &globals, pixels) {
             control.record_fault(error);
@@ -531,10 +531,9 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
                 .ok_or(WgpuViewportError::RendererNotInitialized)?;
             let device = backend.device.clone();
             let data = unsafe { &mut *data_pointer };
-            let Some(target) = platform_adapter::target_for_instance(
-                &globals.platform,
-                data.native_target.instance_id,
-            )?
+            let Some(target) = globals
+                .platform
+                .target_for_instance(data.native_target.instance_id)?
             else {
                 control.observe_skip(observation, WgpuFrameSkipReason::RetiredTarget);
                 data.release_surface_bundle();
@@ -543,10 +542,9 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
             };
             data.native_target = target;
             control.observe_target(observation, target);
-            let framebuffer_size = platform_adapter::framebuffer_size(
-                &globals.platform,
-                data.native_target.instance_id,
-            )?;
+            let framebuffer_size = globals
+                .platform
+                .framebuffer_size(data.native_target.instance_id)?;
             if framebuffer_size != data.size {
                 reconfigure_surface(data, globals, framebuffer_size)?;
             }
@@ -565,10 +563,9 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
             if data.pending_reconfigure {
                 reconfigure_surface(data, globals, framebuffer_size)?;
             }
-            let Some(native_window) = platform_adapter::native_window_lease(
-                &globals.platform,
-                data.native_target.instance_id,
-            )?
+            let Some(native_window) = globals
+                .platform
+                .native_window_lease(data.native_target.instance_id)?
             else {
                 control.observe_skip(observation, WgpuFrameSkipReason::RetiredTarget);
                 return Ok(());
@@ -589,7 +586,6 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
             // Retain a shared surface only after acquisition succeeds. Recovery can then
             // reconfigure or replace the baseline surface without a stale reference.
             let acquisition = surface.get_current_texture();
-            #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
             let (frame, reconfigure_after_present) = match acquisition {
                 wgpu::CurrentSurfaceTexture::Success(frame) => (
                     frame,
@@ -661,79 +657,6 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
                 }
             };
 
-            #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
-            let (frame, reconfigure_after_present) = match acquisition {
-                Ok(frame) => {
-                    let event = if frame.suboptimal {
-                        SurfaceEvent::Suboptimal
-                    } else {
-                        SurfaceEvent::Success
-                    };
-                    (
-                        frame,
-                        surface_action(event) == SurfaceAction::RenderThenReconfigure,
-                    )
-                }
-                Err(wgpu::SurfaceError::Outdated) => {
-                    control.observe_skip(observation, WgpuFrameSkipReason::Outdated);
-                    unsafe {
-                        handle_non_renderable_surface_event(
-                            SurfaceEvent::Outdated,
-                            viewport,
-                            data,
-                            globals,
-                        )
-                    }?;
-                    return Ok(());
-                }
-                Err(wgpu::SurfaceError::Lost) => {
-                    control.observe_skip(observation, WgpuFrameSkipReason::Lost);
-                    unsafe {
-                        handle_non_renderable_surface_event(
-                            SurfaceEvent::Lost,
-                            viewport,
-                            data,
-                            globals,
-                        )
-                    }?;
-                    return Ok(());
-                }
-                Err(wgpu::SurfaceError::Timeout) => {
-                    control.observe_skip(observation, WgpuFrameSkipReason::Timeout);
-                    unsafe {
-                        handle_non_renderable_surface_event(
-                            SurfaceEvent::Timeout,
-                            viewport,
-                            data,
-                            globals,
-                        )
-                    }?;
-                    return Ok(());
-                }
-                Err(wgpu::SurfaceError::OutOfMemory) => {
-                    unsafe {
-                        handle_non_renderable_surface_event(
-                            SurfaceEvent::OutOfMemory,
-                            viewport,
-                            data,
-                            globals,
-                        )
-                    }?;
-                    return Ok(());
-                }
-                Err(wgpu::SurfaceError::Other) => {
-                    unsafe {
-                        handle_non_renderable_surface_event(
-                            SurfaceEvent::Other,
-                            viewport,
-                            data,
-                            globals,
-                        )
-                    }?;
-                    return Ok(());
-                }
-            };
-
             let Some(targets) = data.targets.as_ref() else {
                 return Err(WgpuViewportError::SurfaceOperationFailed {
                     operation: "use released viewport render attachments",
@@ -795,7 +718,6 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
                     })],
                     depth_stencil_attachment,
                     occlusion_query_set: None,
-                    #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
                     multiview_mask: None,
                     timestamp_writes: None,
                 });

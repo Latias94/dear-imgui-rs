@@ -192,7 +192,7 @@ class PrepublishTests(unittest.TestCase):
 
         tracing_command = dict(commands)["dear-imgui-wgpu tracing"]
         self.assertIn("--no-default-features", tracing_command)
-        self.assertEqual(tracing_command[-2:], ["--features", "wgpu-30,tracing"])
+        self.assertEqual(tracing_command[-2:], ["--features", "tracing"])
 
     def test_cargo_test_fallback_is_serial_for_every_profile(self):
         commands = PREPUBLISH.release_test_commands(use_nextest=False)
